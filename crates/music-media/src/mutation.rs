@@ -737,6 +737,9 @@ const fn media_tag_field(field: TrackMetadataField) -> Option<TagField> {
         TrackMetadataField::TrackNumber => Some(TagField::TrackNumber),
         TrackMetadataField::DiscNumber => Some(TagField::DiscNumber),
         TrackMetadataField::Year => Some(TagField::Year),
+        TrackMetadataField::ReleaseDate => Some(TagField::ReleaseDate),
+        TrackMetadataField::OriginalReleaseDate => Some(TagField::OriginalReleaseDate),
+        TrackMetadataField::Composer => Some(TagField::Composer),
         TrackMetadataField::Genre => Some(TagField::Genre),
         TrackMetadataField::Bpm => Some(TagField::Bpm),
         TrackMetadataField::DisplayTitle | TrackMetadataField::Origin => None,
@@ -898,6 +901,9 @@ fn file_tag_value(
         TrackMetadataField::TrackNumber => Ok(metadata.track_no.map(LibraryFileTagValue::Number)),
         TrackMetadataField::DiscNumber => Ok(metadata.disc_no.map(LibraryFileTagValue::Number)),
         TrackMetadataField::Year => Ok(metadata.year.map(LibraryFileTagValue::Number)),
+        TrackMetadataField::ReleaseDate => Ok(text(&metadata.release_date)),
+        TrackMetadataField::OriginalReleaseDate => Ok(text(&metadata.original_release_date)),
+        TrackMetadataField::Composer => Ok(text(&metadata.composer)),
         TrackMetadataField::Genre => Ok(text(&metadata.genre)),
         TrackMetadataField::Bpm => Ok(metadata.bpm.map(LibraryFileTagValue::Number)),
         TrackMetadataField::DisplayTitle | TrackMetadataField::Origin => {
@@ -1057,6 +1063,16 @@ fn map_failure(error: FilesystemMutationError) -> LibraryMutationFailure {
         FilesystemMutationError::Metadata(MetadataError::UnsupportedFormat { .. }) => (
             LibraryMutationFailureKind::Invalid,
             "track_metadata_format_unsupported",
+            false,
+        ),
+        FilesystemMutationError::Metadata(MetadataError::DatePrecisionLoss) => (
+            LibraryMutationFailureKind::Invalid,
+            "track_metadata_date_precision",
+            false,
+        ),
+        FilesystemMutationError::Metadata(MetadataError::ConflictingDate) => (
+            LibraryMutationFailureKind::Invalid,
+            "track_metadata_date_conflict",
             false,
         ),
         FilesystemMutationError::Metadata(_) => (

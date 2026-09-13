@@ -130,5 +130,49 @@
   "POST /api/library/cleanup/rejections/{id}/restore#operation": {
     "sha256": "49e5e8faeea792fc2cbdf7892145e18d71a38eefde6c985e766384afb67bc428",
     "reason": "Adds authenticated restoration of a saved proposal into unchecked browser review after a fresh transactional indexed-context check. Stale proposals remain retained and return conflict. Restoration removes only the rejection; explicit apply still uses the existing coordinator, journal and rollback."
+  },
+  "GET /api/library/search#responses": {
+    "sha256": "e991c350b908f331bb318b44ecbb8d8bbbfbdb96946c517afca8f6627220470a",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "GET /api/library/tracks#responses": {
+    "sha256": "fd0f524af2137931ab0a693a2e6982cecc387a79d91f4d25644d6cc59d63d3f6",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "GET /api/library/tracks/{track_id}#responses": {
+    "sha256": "7d9b26437356944d6a4c6f31e90fbc8f74aa0d649c25b3bf8f0797830846930e",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "GET /api/library/tree#responses": {
+    "sha256": "e346fa4f1d83ffc2aa72bd27c1be50d36af73c781987d55dcb50f51336690813",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "PATCH /api/library/tracks/bulk-metadata#responses": {
+    "sha256": "13c8cd591339d7a1c2712c9f316cc2d70f53f69af3b3c35e631444c8b4cf3ade",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "PATCH /api/library/tracks/{track_id}/metadata#responses": {
+    "sha256": "7d9b26437356944d6a4c6f31e90fbc8f74aa0d649c25b3bf8f0797830846930e",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "POST /api/library/tracks/bulk-move#responses": {
+    "sha256": "c56bf618d5b45a7768a682877685a2f05921ada583cf067366281a698d049238",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "POST /api/library/tracks/{track_id}/move#responses": {
+    "sha256": "7d9b26437356944d6a4c6f31e90fbc8f74aa0d649c25b3bf8f0797830846930e",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "POST /api/library/upload#responses": {
+    "sha256": "2d0c3baca4ce8472c7dfb393e6dfba2fe6c008d10a7968fe8d3c0b90def3d049",
+    "reason": "Approved soundtrack metadata adds optional release_date, original_release_date and composer strings to TrackOut. Existing fields including numeric year remain; calendar precision and composer identity stay separate. Web display/editor/search and Baton defaulted models plus serialization tests are updated together. Playback messages and authentication are unchanged. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "PATCH /api/library/tracks/bulk-metadata#request_body": {
+    "sha256": "11eaf978f6c865575cbe374d4edf0a6522c4eab488233de7d519f902378d1bf6",
+    "reason": "Approved soundtrack metadata adds optional nullable release_date, original_release_date and composer strings. Omitted fields preserve per-track values; empty/null clears. Dates validate calendar precision and derive the legacy year on readback. A year-only edit that would erase known month/day is deliberately rejected and must instead edit release_date explicitly; unchanged year edits preserve precision. The web editor uses dates, and Baton does not author file tags. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "PATCH /api/library/tracks/{track_id}/metadata#request_body": {
+    "sha256": "dbd8ebdaae9f1bc7c39c982954d39600b151a876a49b357701bc220e87977df1",
+    "reason": "Approved soundtrack metadata adds optional nullable release_date, original_release_date and composer strings. Omitted fields preserve per-track values; empty/null clears. Dates validate calendar precision and derive the legacy year on readback. A year-only edit that would erase known month/day is deliberately rejected and must instead edit release_date explicitly; unchanged year edits preserve precision. The web editor uses dates, and Baton does not author file tags. See docs/LIBRARY_RICH_METADATA.md."
   }
 }

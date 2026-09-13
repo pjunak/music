@@ -12,6 +12,7 @@
 mod cleanup;
 mod library;
 mod media_path;
+mod metadata_date;
 mod playback;
 
 pub use cleanup::{
@@ -20,6 +21,8 @@ pub use cleanup::{
     DEFAULT_CLEANUP_RULES, NameVerdictKind, NameVerdicts, analyze_cleanup, analyze_cleanup_folders,
     cleanup_disc_folder_number, cleanup_loose_key, pending_cleanup_lookups, verdict_kind,
 };
+
+pub use metadata_date::metadata_date_year;
 
 pub use library::{IndexedTrack, LibraryGeneration, LibraryRecordError, TrackMetadata};
 

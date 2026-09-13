@@ -141,7 +141,14 @@ pub(super) async fn resolve_editions(
             !(credit.preserve && op["field"] == "album_artist")
                 && matches!(
                     op["field"].as_str(),
-                    Some("album" | "album_artist" | "track_no" | "disc_no" | "year")
+                    Some(
+                        "album"
+                            | "album_artist"
+                            | "track_no"
+                            | "disc_no"
+                            | "release_date"
+                            | "original_release_date"
+                    )
                 )
         });
         for op in &mut ops {
@@ -151,7 +158,7 @@ pub(super) async fn resolve_editions(
                 id,
                 op["field"].as_str().unwrap_or_default()
             ));
-            op["evidence"] = json!({"source": "musicbrainz", "entity": "release", "id": id, "release_track_id": slot_id, "date": detail.date});
+            op["evidence"] = json!({"source": "musicbrainz", "entity": if op["field"] == "original_release_date" { "release_group" } else { "release" }, "id": id, "release_group_id": detail.release_group_id, "release_track_id": slot_id, "date": detail.date});
         }
         result.choices.push(json!({
             "id": id, "title": detail.title, "artist": detail.artist, "date": detail.date,

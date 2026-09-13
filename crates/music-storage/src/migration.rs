@@ -35,6 +35,9 @@ const MODEL_BATCH_MIGRATION_SQL: &str = include_str!("../migrations/0012_model_b
 const CLEANUP_REJECTIONS_MIGRATION_SQL: &str =
     include_str!("../migrations/0013_cleanup_rejections.sql");
 
+const RICH_TRACK_METADATA_MIGRATION_SQL: &str =
+    include_str!("../migrations/0014_rich_track_metadata.sql");
+
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
 const BACKUP_NAME_ATTEMPTS: u16 = 100;
@@ -300,6 +303,13 @@ fn migrator() -> Migrator {
             CLEANUP_REJECTIONS_MIGRATION_SQL.into_sql_str(),
             false,
         ),
+        Migration::new(
+            14,
+            "rich track metadata".into(),
+            MigrationType::Simple,
+            RICH_TRACK_METADATA_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
     ])
 }
 
@@ -550,6 +560,72 @@ mod tests {
         LIBRARY_CATALOG_COUNT_MIGRATION_VERSION, LIBRARY_STATE_MIGRATION_SQL,
         LIBRARY_STATE_MIGRATION_VERSION, migrator,
     };
+
+    #[tokio::test]
+    async fn rich_metadata_migrates_years_and_backs_up_the_old_schema()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::{SqliteStorage, SqliteStorageOptions};
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("v13.db");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await?;
+        let old = sqlx::migrate::Migrator::with_migrations(
+            migrator()
+                .iter()
+                .filter(|m| m.version <= 13)
+                .cloned()
+                .collect(),
+        );
+        old.run(&pool).await?;
+        sqlx::query("INSERT INTO tracks (path, title, artist, album_artist, album, year, genre, length_s, size_bytes, mtime, added_at, display_title, origin) VALUES ('old.mp3', 'Song', 'Artist', '', '', 1998, '', 1, 1, 1, '2026-09-13', '', '')").execute(&pool).await?;
+        pool.close().await;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
+        let row: (String, String, String) =
+            sqlx::query_as("SELECT release_date, original_release_date, composer FROM tracks")
+                .fetch_one(&storage.pool)
+                .await?;
+        assert_eq!(row, ("1998".into(), "".into(), "".into()));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
+                .fetch_one(&storage.pool)
+                .await?,
+            14
+        );
+        let backups = std::fs::read_dir(directory.path())?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "bak"))
+            .collect::<Vec<_>>();
+        assert_eq!(backups.len(), 1);
+        let backup = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(backups[0].path())
+                    .read_only(true),
+            )
+            .await?;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
+                .fetch_one(&backup)
+                .await?,
+            13
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT year FROM tracks")
+                .fetch_one(&backup)
+                .await?,
+            1998
+        );
+        backup.close().await;
+        Ok(())
+    }
 
     #[test]
     fn embedded_migration_is_cross_platform_stable() {

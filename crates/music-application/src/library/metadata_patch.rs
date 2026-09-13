@@ -14,6 +14,9 @@ pub enum TrackMetadataField {
     Artist,
     AlbumArtist,
     Album,
+    ReleaseDate,
+    OriginalReleaseDate,
+    Composer,
     TrackNumber,
     DiscNumber,
     Year,
@@ -31,6 +34,9 @@ impl TrackMetadataField {
             Self::Artist => "artist",
             Self::AlbumArtist => "album_artist",
             Self::Album => "album",
+            Self::ReleaseDate => "release_date",
+            Self::OriginalReleaseDate => "original_release_date",
+            Self::Composer => "composer",
             Self::TrackNumber => "track_no",
             Self::DiscNumber => "disc_no",
             Self::Year => "year",
@@ -47,6 +53,9 @@ impl TrackMetadataField {
             "artist" => Ok(Self::Artist),
             "album_artist" => Ok(Self::AlbumArtist),
             "album" => Ok(Self::Album),
+            "release_date" => Ok(Self::ReleaseDate),
+            "original_release_date" => Ok(Self::OriginalReleaseDate),
+            "composer" => Ok(Self::Composer),
             "track_no" => Ok(Self::TrackNumber),
             "disc_no" => Ok(Self::DiscNumber),
             "year" => Ok(Self::Year),
@@ -103,6 +112,14 @@ impl TrackMetadataPatch {
                 return Err(TrackMetadataPatchError::InvalidTextCharacter { field });
             }
             Some(value) => {
+                if matches!(
+                    field,
+                    TrackMetadataField::ReleaseDate | TrackMetadataField::OriginalReleaseDate
+                ) && !value.is_empty()
+                    && music_domain::metadata_date_year(&value).is_none()
+                {
+                    return Err(TrackMetadataPatchError::InvalidDate { field });
+                }
                 let maximum = if field == TrackMetadataField::Genre {
                     MAX_GENRE_LENGTH
                 } else {
@@ -199,7 +216,7 @@ impl TrackMetadataPatch {
         let object = value
             .as_object()
             .ok_or(TrackMetadataPatchError::InvalidJson)?;
-        if object.len() > 11 {
+        if object.len() > 14 {
             return Err(TrackMetadataPatchError::InvalidJson);
         }
         let mut patch = Self::new();
@@ -232,6 +249,9 @@ impl TrackMetadataPatch {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum TrackMetadataPatchError {
     UnknownField,
+    InvalidDate {
+        field: TrackMetadataField,
+    },
     InvalidJson,
     DuplicateField {
         field: TrackMetadataField,
@@ -254,6 +274,11 @@ pub enum TrackMetadataPatchError {
 impl Display for TrackMetadataPatchError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidDate { field } => write!(
+                formatter,
+                "{} must be a calendar date: YYYY, YYYY-MM or YYYY-MM-DD",
+                field.as_str()
+            ),
             Self::UnknownField => formatter.write_str("metadata patch field is unknown"),
             Self::InvalidJson => formatter.write_str("metadata patch JSON is invalid"),
             Self::DuplicateField { field } => {

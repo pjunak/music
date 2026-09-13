@@ -948,6 +948,7 @@ fn parse_recording(value: &Value, expected_id: &str) -> Result<Recording, Catalo
                     .and_then(bounded_catalog_text)
             })
             .collect(),
+        composers: parse_work_composers(value),
         credits: value
             .get("relations")
             .and_then(Value::as_array)
@@ -979,6 +980,61 @@ fn parse_recording(value: &Value, expected_id: &str) -> Result<Recording, Catalo
             })
             .collect(),
     })
+}
+
+// Only an explicit composer relationship on one performed work can supply this
+// credit. Medleys, missing members and oversized lists stay observations for review.
+fn parse_work_composers(value: &Value) -> Vec<String> {
+    let Some(relations) = value
+        .get("relations")
+        .and_then(Value::as_array)
+        .filter(|r| r.len() <= 40)
+    else {
+        return Vec::new();
+    };
+    let works = relations
+        .iter()
+        .filter(|r| r["type-id"] == "a3005666-a872-32c3-ad06-98af558e99b0")
+        .collect::<Vec<_>>();
+    if works.len() != 1 {
+        return Vec::new();
+    }
+    let work = &works[0]["work"];
+    if work.get("id").and_then(parse_mbid).is_none() {
+        return Vec::new();
+    }
+    let Some(relations) = work
+        .get("relations")
+        .and_then(Value::as_array)
+        .filter(|r| r.len() <= 40)
+    else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let mut names = Vec::new();
+    for relation in relations
+        .iter()
+        .filter(|r| r["type-id"] == "d59d99ea-23d4-4a80-b066-edca32ee158f")
+    {
+        let artist = &relation["artist"];
+        let Some(id) = artist.get("id").and_then(parse_mbid) else {
+            return Vec::new();
+        };
+        let Some(name) = artist
+            .get("name")
+            .and_then(Value::as_str)
+            .and_then(bounded_catalog_text)
+        else {
+            return Vec::new();
+        };
+        if seen.insert(id) {
+            names.push(name);
+        }
+    }
+    if names.len() > 8 || names.join("; ").len() > 512 {
+        return Vec::new();
+    }
+    names
 }
 
 fn parse_releases(value: Option<&Value>) -> Vec<ReleaseSummary> {
@@ -1112,6 +1168,16 @@ fn parse_release_detail(
             .get("date")
             .and_then(Value::as_str)
             .and_then(bounded_catalog_text),
+        original_release_date: value
+            .get("release-group")
+            .and_then(|group| group.get("first-release-date"))
+            .and_then(Value::as_str)
+            .filter(|date| music_domain::metadata_date_year(date).is_some())
+            .map(str::to_owned),
+        release_group_id: value
+            .get("release-group")
+            .and_then(|group| group.get("id"))
+            .and_then(parse_mbid),
         track_no,
         disc_no,
         country: value
@@ -1233,6 +1299,22 @@ fn lucene_quote(value: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn composer_proposals_require_one_explicit_work_and_complete_credits() {
+        let artist = json!({"id":"10000000-0000-0000-0000-000000000001","name":"Composer"});
+        let composer = json!({"type-id":"d59d99ea-23d4-4a80-b066-edca32ee158f","type":"composer","artist":artist});
+        let work = json!({"type-id":"a3005666-a872-32c3-ad06-98af558e99b0","work":{"id":"20000000-0000-0000-0000-000000000001","relations":[composer.clone(),composer.clone(),{"type":"lyricist","artist":{"name":"Other"}}]}});
+        assert_eq!(
+            parse_work_composers(&json!({"relations":[work.clone()]})),
+            vec!["Composer"]
+        );
+        assert!(parse_work_composers(&json!({"relations":[composer]})).is_empty());
+        assert!(parse_work_composers(&json!({"relations":[work.clone(),work.clone()]})).is_empty());
+        let mut invalid = work;
+        invalid["work"]["relations"][1]["artist"]["id"] = json!("invalid");
+        assert!(parse_work_composers(&json!({"relations":[invalid]})).is_empty());
+    }
 
     #[test]
     fn artist_credit_preserves_provider_join_phrases() {

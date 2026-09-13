@@ -1098,6 +1098,9 @@ mod tests {
             id: TrackId::new(7)?,
             path: LibraryPath::parse("Battle/Final Boss.flac")?,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: "Final Battle".to_owned(),
                 artist: "Composer".to_owned(),
                 album_artist: String::new(),

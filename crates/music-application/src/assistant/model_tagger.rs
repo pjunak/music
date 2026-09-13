@@ -1669,6 +1669,9 @@ mod tests {
             id: TrackId::new(7)?,
             path: LibraryPath::parse("Albums/Story/song.flac")?,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: "Song".to_owned(),
                 artist: "Composer".to_owned(),
                 album_artist: String::new(),

@@ -859,6 +859,9 @@ fn evaluation_track_evidence(
         path: LibraryPath::parse(fixture.path.clone())
             .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?,
         metadata: TrackMetadata {
+            release_date: String::new(),
+            original_release_date: String::new(),
+            composer: String::new(),
             title: fixture.title.clone(),
             artist: fixture.artist.clone(),
             album_artist: String::new(),

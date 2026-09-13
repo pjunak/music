@@ -30,6 +30,7 @@ import {
   XIcon,
 } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
+import { TrackMetadataDetails } from "@/components/TrackMetadataDetails";
 import { TagInspector } from "@/components/TagInspector";
 import { libraryApi, sfxApi } from "@/core/api";
 import type { SfxFile, UploadCheckItem, UploadConflict } from "@/core/api";
@@ -157,7 +158,7 @@ export function LibraryView() {
               type="search"
               value={pendingQuery}
               onChange={(e) => setPendingQuery(e.target.value)}
-              placeholder="Search title / artist / album / path"
+              placeholder="Search title, artist, composer, album, date or path"
               aria-label="Search music library"
             />
             {pendingQuery !== "" ? (
@@ -1505,7 +1506,7 @@ function MusicTrackList({
                     aria-label={`Select ${trackTitle(t)}`}
                   />
                 </td>
-                <td title={t.path}>{trackTitle(t)}</td>
+                <td title={t.path}>{trackTitle(t)}<TrackMetadataDetails track={t} /></td>
                 <td className="track-file muted">{basename(t.path)}</td>
                 <td className="col-num">{formatDuration(t.length_s)}</td>
                 <td className="col-actions">

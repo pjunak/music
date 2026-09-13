@@ -93,6 +93,8 @@ fn stage_wma_tag_update_inner(
     tools: &FfmpegTools,
 ) -> Result<StagedTagUpdate, MetadataError> {
     let before = probe_wma(source, tools)?;
+    let resolved_patch = super::dates::resolve_patch(patch, &before.metadata)?;
+    let patch = &resolved_patch;
     let source_stream_hash = stream_hash(source, tools)?;
 
     let mut arguments = vec![
@@ -115,6 +117,16 @@ fn stage_wma_tag_update_inner(
         OsString::from("copy"),
     ];
     for (&field, value) in &patch.changes {
+        let aliases: &[&str] = match field {
+            TagField::ReleaseDate => &["year", "WM/Year"],
+            TagField::OriginalReleaseDate => &["originaldate", "WM/OriginalReleaseYear"],
+            TagField::Composer => &["WM/Composer"],
+            _ => &[],
+        };
+        for alias in aliases {
+            arguments.push("-metadata".into());
+            arguments.push(format!("{alias}=").into());
+        }
         arguments.push(OsString::from("-metadata"));
         arguments.push(OsString::from(format!(
             "{}={}",
@@ -254,6 +266,16 @@ fn probe_wma(path: &Path, tools: &FfmpegTools) -> Result<WmaProbe, MetadataError
     let tags = format.tags;
     Ok(WmaProbe {
         metadata: AudioMetadata {
+            release_date: tag_text(&tags, &["date", "year", "WM/Year"]),
+            original_release_date: tag_text(
+                &tags,
+                &[
+                    "WM/OriginalReleaseTime",
+                    "originaldate",
+                    "WM/OriginalReleaseYear",
+                ],
+            ),
+            composer: tag_text(&tags, &["composer", "WM/Composer"]),
             title: tag_text(&tags, &["title"]),
             artist: tag_text(&tags, &["artist", "author"]),
             album_artist: tag_text(&tags, &["albumartist", "album_artist", "WM/AlbumArtist"]),
@@ -328,7 +350,9 @@ const fn ffmpeg_key(field: TagField) -> &'static str {
         TagField::Album => "album",
         TagField::TrackNumber => "tracknumber",
         TagField::DiscNumber => "discnumber",
-        TagField::Year => "date",
+        TagField::Year | TagField::ReleaseDate => "date",
+        TagField::OriginalReleaseDate => "WM/OriginalReleaseTime",
+        TagField::Composer => "composer",
         TagField::Genre => "genre",
         TagField::Bpm => "bpm",
     }

@@ -101,7 +101,7 @@ async fn explicit_source_fields_remain_reviewable_when_catalog_identity_is_unmat
     connector.sources.update("acoustid", false).await?;
     connector.metadata_match.store(false, Ordering::SeqCst);
     let coordinator = start_job_coordinator(storage.clone(), vec![Arc::new(handler)]).await?;
-    let mut parameters = json!({"scope":{"type":"all"},"imports":[{"track_id":1,"source":"Creator tracklist: confirmed deluxe edition","fields":{"title":"Source title","album":"Deluxe album","date":"2025-10-17","original_date":"2015-03-10","track_no":"4"}}]});
+    let mut parameters = json!({"scope":{"type":"all"},"imports":[{"track_id":1,"source":"Creator tracklist: confirmed deluxe edition","fields":{"title":"Source title","album":"Deluxe album","date":"2025-10-17","original_date":"2015-03-10","composer":"Composer One; Composer Two","track_no":"4"}}]});
     let evidence_only = result(&run_parameters(&coordinator.service, parameters.clone()).await?)?;
     assert_eq!(evidence_only["plans"][0]["ops"], json!([]));
     parameters["imports"][0]["propose"] = json!(true);
@@ -111,13 +111,21 @@ async fn explicit_source_fields_remain_reviewable_when_catalog_identity_is_unmat
         assert_eq!(plan["identity"], Value::Null);
         assert_eq!(review["identified"], 0);
         let ops = plan["ops"].as_array().ok_or("ops")?;
-        assert_eq!(ops.len(), 4);
+        assert_eq!(ops.len(), 6);
         assert!(ops.iter().all(|op| op["confidence"] == "low"
             && op["verified"] == false
             && op["rules"] == json!(["imported_metadata"])));
         assert!(
             ops.iter()
-                .any(|op| op["field"] == "year" && op["new"] == 2025)
+                .any(|op| op["field"] == "release_date" && op["new"] == "2025-10-17")
+        );
+        assert!(
+            ops.iter()
+                .any(|op| op["field"] == "original_release_date" && op["new"] == "2015-03-10")
+        );
+        assert!(
+            ops.iter()
+                .any(|op| op["field"] == "composer" && op["new"] == "Composer One; Composer Two")
         );
         assert!(plan["local_evidence"].to_string().contains("2015-03-10"));
     }

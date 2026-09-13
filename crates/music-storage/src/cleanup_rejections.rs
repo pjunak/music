@@ -392,7 +392,8 @@ mod tests {
         sqlx::query("DROP TABLE cleanup_rejections")
             .execute(&storage.pool)
             .await?;
-        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 13")
+        sqlx::raw_sql("ALTER TABLE tracks DROP COLUMN release_date; ALTER TABLE tracks DROP COLUMN original_release_date; ALTER TABLE tracks DROP COLUMN composer;").execute(&storage.pool).await?;
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 13")
             .execute(&storage.pool)
             .await?;
         storage.close().await;
@@ -401,7 +402,7 @@ mod tests {
         assert!(storage.migration_outcome().backup.is_some());
         assert_eq!(
             storage.migration_outcome().schema_after.migration_version,
-            Some(13)
+            Some(crate::CURRENT_SCHEMA_VERSION)
         );
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tracks WHERE album = 'Album'")
             .fetch_one(&storage.pool)

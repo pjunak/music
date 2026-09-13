@@ -17,7 +17,8 @@ The core cleanup, compilation safeguards, informative collision names, album-sco
 retrieval, corroborated discovery within and across explicit disc folders, catalog artist aliases,
 an accessible rejection pool, catalog exports, incomplete-result summaries, safe provider diagnostics,
 offline pilot scoring/comparison tooling, title-style and corroborated full-credit preservation,
-edition targeting, release-position notes, bounded transient recovery and sourced JSON proposals
+edition targeting, release-position notes, bounded transient recovery, sourced JSON proposals,
+full release/original dates and composer credits in file tags and the web library
 are implemented. This is the remaining plan for
 albums and game/film soundtracks, ordered by expected useful corrections, protection of correct metadata,
 review effort and implementation cost. Benefits are engineering estimates;
@@ -28,7 +29,7 @@ Assistant contract and is removed from this backlog.
 | Order | Work and expected usefulness | Downsides and mitigation | Effort / next step |
 |---|---|---|---|
 | 1 | Complete independent identity judgments and assisted edition/source review for the [refreshed development pilot](docs/LIBRARY_METADATA_PILOT.md#refreshed-development-results-13-september-2026). The 114-track comparison is retained: 65 → 83 recording proposals, 30 useful corrections on each side, and improved edition/credit evidence. | Identity precision remains unknown; all refreshed results are partial. Keep source-assisted corrections outside recognition scoring and preserve the holdout. | Small–medium; review source disagreements and obtain a bounded production-side MusicBrainz diagnostic before changing retry or matching limits. No further full-cohort rerun is needed merely to inspect the retained results. |
-| 2 | Writable richer metadata: full/original dates, artist lists, credits, work/movement, label and track totals. Useful for soundtracks/classical libraries and export. | More complicated forms, tag-format differences and cross-client schemas; some catalog facts belong to a work rather than a recording. Choose a small useful field set before changing playback/client models; preserve original values and unknown frames. | Large; consult on fields and whether they need tag export, browsing, or both. |
+| 2 | Further writable metadata: artist lists, performer/production credits, work/movement, label and track totals. The approved full/original dates and composer field set is implemented. | More complicated forms, tag-format differences and cross-client schemas; some catalog facts belong to a work rather than a recording. Preserve original values and unknown frames. | Large; consult on the next concrete field set after using dates/composers. |
 | 3 | Native CUE and purchase/creator manifest adapters beyond the supported sourced JSON format. | Format-specific parsing, private receipt data and uncertain file mapping. Explicit selected imports only; never execute sidecars or split audio implicitly. | Medium; prioritize actual formats present in the collection. |
 | 4 | Exact-file duplicate groups and a comparison/review screen. Finds wasted copies without equating same titles with same audio. | Reading whole files costs I/O. Same audio can carry different tags/artwork; deleting a copy can damage playlists or references. Start with read-only size/hash grouping; discuss retention and deletion before adding actions. Decoded/acoustic comparison is a later, separate experiment. | Medium–large; consult on duplicate retention workflow. |
 | 5 | Fingerprint reuse after renames/tag-only edits. Saves repeated analysis on large libraries. | Audio-content identity and persistent cache invalidation are more complex than path/stat keys; decoding or hashing can itself be expensive. Profile first and retain parameter/version keys. | Medium; conditional on measured repeated work. |
@@ -36,8 +37,8 @@ Assistant contract and is removed from this backlog.
 | 7 | Broader AI text parsing, booklet OCR and audio/ambience models. Could help niche material with little catalog coverage. | Hallucinations/OCR errors, private content disclosure, runtime/model size, licensing and uncertain benefit. Separate experiments with evidence references, abstention, explicit review and small evaluation budgets. | Large; consult after benchmark results justify a specific experiment. |
 
 Albums and soundtracks put edition/position recovery, full dates and credits ahead
-of duplicate cleanup and ambience models. Richer writable fields require a choice
-of the first field set and its tag-export/browsing use before shared schemas change.
+of duplicate cleanup and ambience models. The operator approved full/original dates and composer
+credits in files and Music; subsequent field groups still require a concrete scope decision.
 Paid recognition and broader AI stay deferred pending a concrete gap, proposed
 provider/data scope and cost cap. Normal regression gates establish correctness,
 not recognition accuracy on the collection; field judgments alone do not establish recording or edition identity.

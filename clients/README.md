@@ -149,6 +149,15 @@ clock; position reports from outputs are optional drift corrections on top.
 | EQ preset manifests | `GET /api/modes/{mode_id}/presets` | guest OK (needed by effect-aware outputs) |
 | SFX clip | `GET /api/sfx/file?path=<rel>` | guest OK (must be a path referenced by a loaded soundboard) |
 
+Library track responses add optional `release_date`, `original_release_date` and `composer`
+strings. Unknown values are empty; clients should tolerate their absence on older servers.
+Dates retain source precision (YYYY, YYYY-MM or YYYY-MM-DD), with no timezone conversion.
+The numeric `year` remains the release-year compatibility projection. Composer is a separate
+credit, not a replacement for artist or album artist. Metadata PATCH and bulk metadata PATCH
+accept these strings; omission preserves the value, while empty/null clears it. Editing `year`
+alone cannot discard a known month/day: use `release_date` to explicitly change that date.
+These additive HTTP fields do not change playback messages or protocol version 2.
+
 ## SFX events
 
 The server broadcasts fire-and-forget sound effects to **every** connected socket — play them

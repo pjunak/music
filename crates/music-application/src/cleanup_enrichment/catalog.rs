@@ -125,6 +125,8 @@ pub struct Recording {
     pub releases_complete: bool,
     pub genres: Vec<String>,
     pub credits: Vec<String>,
+    #[serde(default)]
+    pub composers: Vec<String>,
     pub length_ms: Option<u64>,
 }
 
@@ -143,6 +145,10 @@ pub struct ReleaseDetail {
     #[serde(default)]
     pub artist_credits: Vec<ArtistCredit>,
     pub date: Option<String>,
+    #[serde(default)]
+    pub original_release_date: Option<String>,
+    #[serde(default)]
+    pub release_group_id: Option<String>,
     pub track_no: Option<u32>,
     pub disc_no: Option<u32>,
     pub country: Option<String>,

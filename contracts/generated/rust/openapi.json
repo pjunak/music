@@ -7915,6 +7915,17 @@
               }
             ]
           },
+          "composer": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "disc_no": {
             "anyOf": [
               {
@@ -7950,6 +7961,28 @@
             ]
           },
           "origin": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "original_release_date": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "release_date": {
             "anyOf": [
               {
                 "maxLength": 512,
@@ -8044,6 +8077,9 @@
               }
             ]
           },
+          "composer": {
+            "type": "string"
+          },
           "disc_no": {
             "anyOf": [
               {
@@ -8069,7 +8105,13 @@
           "origin": {
             "type": "string"
           },
+          "original_release_date": {
+            "type": "string"
+          },
           "path": {
+            "type": "string"
+          },
+          "release_date": {
             "type": "string"
           },
           "size_bytes": {

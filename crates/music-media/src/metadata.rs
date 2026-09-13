@@ -18,6 +18,7 @@ use lofty::tag::{Accessor, ItemKey, Tag, TagExt, TagType};
 
 mod asf;
 mod cleanup_evidence;
+mod dates;
 mod ffmpeg;
 
 pub use cleanup_evidence::read_cleanup_evidence;
@@ -40,6 +41,9 @@ pub struct AudioMetadata {
     pub artist: String,
     pub album_artist: String,
     pub album: String,
+    pub release_date: String,
+    pub original_release_date: String,
+    pub composer: String,
     pub track_no: Option<u32>,
     pub disc_no: Option<u32>,
     pub year: Option<u32>,
@@ -55,6 +59,9 @@ pub enum TagField {
     Artist,
     AlbumArtist,
     Album,
+    ReleaseDate,
+    OriginalReleaseDate,
+    Composer,
     TrackNumber,
     DiscNumber,
     Year,
@@ -69,6 +76,9 @@ impl Display for TagField {
             Self::Artist => "artist",
             Self::AlbumArtist => "album_artist",
             Self::Album => "album",
+            Self::ReleaseDate => "release_date",
+            Self::OriginalReleaseDate => "original_release_date",
+            Self::Composer => "composer",
             Self::TrackNumber => "track_no",
             Self::DiscNumber => "disc_no",
             Self::Year => "year",
@@ -132,6 +142,11 @@ impl TagPatch {
         let value = value.into();
         if value.is_empty() {
             return self.insert_change(field, None);
+        }
+        if matches!(field, TagField::ReleaseDate | TagField::OriginalReleaseDate)
+            && music_domain::metadata_date_year(&value).is_none()
+        {
+            return Err(MetadataError::InvalidDate { field });
         }
         if value.contains('\0') {
             return Err(MetadataError::InvalidTextCharacter { field });
@@ -292,6 +307,11 @@ pub enum MetadataError {
         tool: &'static str,
     },
     EmptyPatch,
+    InvalidDate {
+        field: TagField,
+    },
+    ConflictingDate,
+    DatePrecisionLoss,
     DuplicateField {
         field: TagField,
     },
@@ -350,6 +370,9 @@ impl Display for MetadataError {
             Self::ExternalToolRequired { extension, tool } => {
                 write!(formatter, "{extension} metadata requires {tool}")
             }
+            Self::InvalidDate { field } => write!(formatter, "{field} must be a calendar date: YYYY, YYYY-MM or YYYY-MM-DD"),
+            Self::ConflictingDate => formatter.write_str("year and release_date disagree"),
+            Self::DatePrecisionLoss => formatter.write_str("This track has a full release date. Edit release_date to change its year without silently discarding date precision."),
             Self::EmptyPatch => formatter.write_str("metadata patch contains no changes"),
             Self::DuplicateField { field } => {
                 write!(formatter, "duplicate metadata field: {field}")
@@ -469,6 +492,8 @@ fn stage_tag_update_inner(
     staged: &Path,
     patch: &TagPatch,
 ) -> Result<StagedTagUpdate, MetadataError> {
+    let resolved_patch = dates::resolve_patch(patch, &read_audio_metadata(source)?)?;
+    let patch = &resolved_patch;
     copy_new_file(source, staged)?;
 
     let before = read_tagged_file(staged)?;
@@ -712,6 +737,15 @@ fn metadata_from_tagged_file(tagged_file: &TaggedFile) -> AudioMetadata {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
     AudioMetadata {
+        release_date: read_first_text(tag, &[ItemKey::RecordingDate, ItemKey::Year]),
+        original_release_date: read_text(tag, ItemKey::OriginalReleaseDate),
+        composer: tag
+            .map(|t| {
+                t.get_strings(ItemKey::Composer)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
+            .unwrap_or_default(),
         title: read_text(tag, ItemKey::TrackTitle),
         artist: read_text(tag, ItemKey::TrackArtist),
         album_artist: read_text(tag, ItemKey::AlbumArtist),
@@ -724,6 +758,13 @@ fn metadata_from_tagged_file(tagged_file: &TaggedFile) -> AudioMetadata {
         duration: tagged_file.properties().duration(),
         artwork: tag.and_then(read_artwork),
     }
+}
+
+fn read_first_text(tag: Option<&Tag>, keys: &[ItemKey]) -> String {
+    keys.iter()
+        .find_map(|key| tag.and_then(|tag| tag.get_string(*key)))
+        .unwrap_or_default()
+        .to_owned()
 }
 
 fn read_text(tag: Option<&Tag>, key: ItemKey) -> String {
@@ -846,6 +887,9 @@ fn read_mp4_metadata(path: &Path) -> Result<AudioMetadata, MetadataError> {
 fn metadata_from_mp4(media: &Mp4File) -> AudioMetadata {
     let tag = media.ilst();
     AudioMetadata {
+        release_date: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9day")),
+        original_release_date: mp4_text(tag, mp4_original_date_ident()),
+        composer: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9wrt")),
         title: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9nam")),
         artist: mp4_text(tag, AtomIdent::Fourcc(*b"\xA9ART")),
         album_artist: mp4_text(tag, AtomIdent::Fourcc(*b"aART")),
@@ -860,6 +904,14 @@ fn metadata_from_mp4(media: &Mp4File) -> AudioMetadata {
             tag.pictures()
                 .and_then(|mut pictures| pictures.next().map(embedded_artwork))
         }),
+    }
+}
+
+// TagLib/Lofty freeform extension; MP4 has no standard original-date atom.
+fn mp4_original_date_ident() -> AtomIdent<'static> {
+    AtomIdent::Freeform {
+        mean: "com.apple.iTunes".into(),
+        name: "ORIGINALDATE".into(),
     }
 }
 
@@ -940,7 +992,9 @@ fn apply_mp4_text(tag: &mut Ilst, field: TagField, value: Option<&TagValue>) {
         TagField::Artist => AtomIdent::Fourcc(*b"\xA9ART"),
         TagField::AlbumArtist => AtomIdent::Fourcc(*b"aART"),
         TagField::Album => AtomIdent::Fourcc(*b"\xA9alb"),
-        TagField::Year => AtomIdent::Fourcc(*b"\xA9day"),
+        TagField::Year | TagField::ReleaseDate => AtomIdent::Fourcc(*b"\xA9day"),
+        TagField::OriginalReleaseDate => mp4_original_date_ident(),
+        TagField::Composer => AtomIdent::Fourcc(*b"\xA9wrt"),
         TagField::Genre => AtomIdent::Fourcc(*b"\xA9gen"),
         TagField::TrackNumber | TagField::DiscNumber | TagField::Bpm => return,
     };
@@ -970,8 +1024,11 @@ fn apply_vorbis_patch(tag: &mut VorbisComments, patch: &TagPatch) {
     for (&field, value) in &patch.changes {
         let key = vorbis_key(field);
         let _ = tag.remove(key);
-        if field == TagField::Year {
+        if matches!(field, TagField::Year | TagField::ReleaseDate) {
             let _ = tag.remove("YEAR");
+        }
+        if field == TagField::OriginalReleaseDate {
+            let _ = tag.remove("ORIGINALYEAR");
         }
         let Some(value) = value else {
             continue;
@@ -992,7 +1049,9 @@ const fn vorbis_key(field: TagField) -> &'static str {
         TagField::Album => "ALBUM",
         TagField::TrackNumber => "TRACKNUMBER",
         TagField::DiscNumber => "DISCNUMBER",
-        TagField::Year => "DATE",
+        TagField::Year | TagField::ReleaseDate => "DATE",
+        TagField::OriginalReleaseDate => "ORIGINALDATE",
+        TagField::Composer => "COMPOSER",
         TagField::Genre => "GENRE",
         TagField::Bpm => "BPM",
     }
@@ -1023,7 +1082,9 @@ fn item_keys(field: TagField, tag_type: TagType) -> Vec<ItemKey> {
         TagField::Album => vec![ItemKey::AlbumTitle],
         TagField::TrackNumber => vec![ItemKey::TrackNumber],
         TagField::DiscNumber => vec![ItemKey::DiscNumber],
-        TagField::Year => vec![ItemKey::RecordingDate, ItemKey::Year],
+        TagField::Year | TagField::ReleaseDate => vec![ItemKey::RecordingDate, ItemKey::Year],
+        TagField::OriginalReleaseDate => vec![ItemKey::OriginalReleaseDate],
+        TagField::Composer => vec![ItemKey::Composer],
         TagField::Genre => vec![ItemKey::Genre],
         TagField::Bpm if matches!(tag_type, TagType::VorbisComments) => {
             vec![ItemKey::Bpm, ItemKey::IntegerBpm]
@@ -1055,6 +1116,11 @@ fn metadata_value(metadata: &AudioMetadata, field: TagField) -> Option<TagValue>
         TagField::TrackNumber => metadata.track_no.map(TagValue::Number),
         TagField::DiscNumber => metadata.disc_no.map(TagValue::Number),
         TagField::Year => metadata.year.map(TagValue::Number),
+        TagField::ReleaseDate => non_empty(&metadata.release_date).map(TagValue::Text),
+        TagField::OriginalReleaseDate => {
+            non_empty(&metadata.original_release_date).map(TagValue::Text)
+        }
+        TagField::Composer => non_empty(&metadata.composer).map(TagValue::Text),
         TagField::Genre => non_empty(&metadata.genre).map(TagValue::Text),
         TagField::Bpm => metadata.bpm.map(TagValue::Number),
     }
@@ -1076,6 +1142,9 @@ const fn is_text_field(field: TagField) -> bool {
             | TagField::AlbumArtist
             | TagField::Album
             | TagField::Genre
+            | TagField::ReleaseDate
+            | TagField::OriginalReleaseDate
+            | TagField::Composer
     )
 }
 
@@ -1261,6 +1330,84 @@ mod tests {
             assert_eq!(clear_update.metadata().artwork, read.artwork);
             drop(clear_update);
             assert!(!cleared.exists());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rich_metadata_round_trips_without_losing_dates_credits_or_artwork()
+    -> Result<(), Box<dyn Error>> {
+        let fixture: MetadataFixture = serde_json::from_str(METADATA_EXAMPLES)?;
+        let adapter = MetadataAdapter::with_ffmpeg(test_ffmpeg_tools());
+        for case in fixture
+            .cases
+            .into_iter()
+            .filter(|case| case.metadata_write_supported)
+        {
+            let temp = tempfile::tempdir()?;
+            let source = temp.path().join(format!("source{}", case.extension));
+            let rich = temp.path().join(format!("rich{}", case.extension));
+            fs::write(&source, STANDARD.decode(&case.source_base64)?)?;
+            let original = adapter.read(&source)?;
+            let mut patch = TagPatch::new();
+            patch.insert_text(TagField::ReleaseDate, "2024-02-29")?;
+            patch.insert_text(TagField::OriginalReleaseDate, "1998-07")?;
+            patch.insert_text(TagField::Composer, "Yuka Kitamura; 久石 譲")?;
+            let written = adapter.stage_update(&source, &rich, &patch)?;
+            let metadata = written.metadata();
+            assert_eq!(metadata.release_date, "2024-02-29", "{}", case.extension);
+            assert_eq!(
+                metadata.original_release_date, "1998-07",
+                "{}",
+                case.extension
+            );
+            assert_eq!(
+                metadata.composer, "Yuka Kitamura; 久石 譲",
+                "{}",
+                case.extension
+            );
+            assert_eq!(metadata.year, Some(2024));
+            assert_eq!(metadata.artwork, original.artwork);
+            let mut unrelated = TagPatch::new();
+            unrelated.insert_text(TagField::Title, "Edited title")?;
+            unrelated.insert_number(TagField::Year, 2024)?;
+            let edited = temp.path().join(format!("edited{}", case.extension));
+            let edit = adapter.stage_update(written.path()?, &edited, &unrelated)?;
+            assert_eq!(edit.metadata().release_date, "2024-02-29");
+            assert_eq!(edit.metadata().original_release_date, "1998-07");
+            assert_eq!(edit.metadata().composer, metadata.composer);
+            assert_eq!(edit.metadata().artwork, original.artwork);
+            let bytes = fs::read(edit.path()?)?;
+            for marker in &case.preservation_markers {
+                assert!(
+                    contains_marker(&bytes, marker),
+                    "{} lost {marker}",
+                    case.extension
+                );
+            }
+            let mut year_only = TagPatch::new();
+            year_only.insert_number(TagField::Year, 2025)?;
+            let invalid = temp.path().join(format!("invalid{}", case.extension));
+            assert!(matches!(
+                adapter.stage_update(written.path()?, &invalid, &year_only),
+                Err(super::MetadataError::DatePrecisionLoss)
+            ));
+            assert!(!invalid.exists());
+            let mut clear = TagPatch::new();
+            for field in [
+                TagField::ReleaseDate,
+                TagField::OriginalReleaseDate,
+                TagField::Composer,
+            ] {
+                clear.clear(field)?;
+            }
+            let cleared = temp.path().join(format!("cleared{}", case.extension));
+            let cleared = adapter.stage_update(edit.path()?, &cleared, &clear)?;
+            assert_eq!(cleared.metadata().release_date, "");
+            assert_eq!(cleared.metadata().original_release_date, "");
+            assert_eq!(cleared.metadata().composer, "");
+            assert_eq!(cleared.metadata().year, None);
+            assert_eq!(cleared.metadata().artwork, original.artwork);
         }
         Ok(())
     }

@@ -505,6 +505,9 @@ mod tests {
                 id: TrackId::new(id)?,
                 path: LibraryPath::parse(path)?,
                 metadata: TrackMetadata {
+                    release_date: String::new(),
+                    original_release_date: String::new(),
+                    composer: String::new(),
                     title: title.to_owned(),
                     artist: "Artist".to_owned(),
                     album_artist: String::new(),

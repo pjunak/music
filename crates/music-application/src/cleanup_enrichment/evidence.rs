@@ -17,6 +17,7 @@ pub enum EvidenceField {
     DiscNo,
     Date,
     OriginalDate,
+    Composer,
     Genre,
     RecordingMbid,
     ReleaseMbid,
@@ -67,7 +68,7 @@ impl ImportedTrackEvidence {
             && self.fields.iter().all(|(field, value)| {
                 normalized_value(*field, value).is_some()
                     && (!self.propose
-                        || *field != EvidenceField::Date
+                        || !matches!(field, EvidenceField::Date | EvidenceField::OriginalDate)
                         || super::imported::release_year(value).is_some())
             })
     }

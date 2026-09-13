@@ -91,6 +91,9 @@ fn playlist_fixture() -> Option<ModelPlaylistTask> {
             id,
             path,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: "Fuzz track".to_owned(),
                 artist: "Fixture artist".to_owned(),
                 album_artist: String::new(),

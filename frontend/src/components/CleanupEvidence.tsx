@@ -79,7 +79,7 @@ export function CleanupEvidenceImport({ imports, onChange }: {
         <input type="text" maxLength={512} value={imports.every((item) => item.source === imports[0]?.source) ? imports[0]?.source ?? "" : ""} placeholder="Album page, booklet, or creator manifest" onChange={(event) => changeSource(event.target.value)} />
       </label>
       <label className="cleanup-evidence-toggle"><input type="checkbox" checked={imports.every((item) => item.propose === true)} disabled={imports.some((item) => !item.source?.trim())} onChange={(event) => onChange(imports.map((item) => ({ ...item, propose: event.target.checked })))} />Propose imported metadata changes for review</label>
-      <p className="muted small">Use this for a confirmed edition or creator tracklist. Title, artist, album, album artist, genre, track/disc numbers and release year become optional suggestions, including when catalog identification fails. Identifiers and full dates remain evidence. Check the file mapping and edition before applying.</p>
+      <p className="muted small">Use this for a confirmed edition or creator tracklist. Title, artist, composer, album, album artist, genre, track/disc numbers, release date and original release date become optional suggestions, including when catalog identification fails. Use date and original_date with YYYY, YYYY-MM or YYYY-MM-DD in the JSON; identifiers remain evidence. Check the file mapping and edition before applying.</p>
     </>}
   </div>;
 }

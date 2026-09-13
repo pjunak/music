@@ -1024,6 +1024,9 @@ export interface MetadataUpdate {
   track_no?: number | null;
   disc_no?: number | null;
   year?: number | null;
+  release_date?: string;
+  original_release_date?: string;
+  composer?: string;
   genre?: string;
   bpm?: number | null;
   // DB-only fields — not written to the file's tags. See backend.

@@ -3356,6 +3356,14 @@ mod tests {
             .is_empty()
         );
 
+        super::cleanup_rejection_tests::exercise_rich_metadata(
+            &router,
+            &cookie,
+            first_id.get(),
+            &directory.path().join("music"),
+        )
+        .await?;
+
         runtime.shutdown().await?;
         Ok(())
     }

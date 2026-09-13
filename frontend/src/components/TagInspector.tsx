@@ -3,6 +3,7 @@ import type { ChangeEvent } from "react";
 
 import { libraryApi } from "@/core/api";
 import type { MetadataUpdate } from "@/core/api";
+import { trackReleaseDate, validMetadataDate } from "@/core/metadataDate";
 import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
@@ -33,7 +34,9 @@ type FieldKey =
   | "album"
   | "track_no"
   | "disc_no"
-  | "year"
+  | "release_date"
+  | "original_release_date"
+  | "composer"
   | "genre"
   | "bpm";
 
@@ -41,6 +44,7 @@ interface FieldDef {
   key: FieldKey;
   label: string;
   numeric?: boolean;
+  date?: boolean;
   hint?: string;
 }
 
@@ -64,13 +68,16 @@ const TAG_FIELDS: FieldDef[] = [
   { key: "album", label: "Album" },
   { key: "track_no", label: "Track #", numeric: true },
   { key: "disc_no", label: "Disc #", numeric: true },
-  { key: "year", label: "Year", numeric: true },
+  { key: "release_date", label: "Release date", date: true, hint: "This edition: YYYY, YYYY-MM or YYYY-MM-DD." },
+  { key: "original_release_date", label: "Original release date", date: true, hint: "First release of the album; retain the precision you know." },
+  { key: "composer", label: "Composer", hint: "Composition credits, separate from the performing artist." },
   { key: "genre", label: "Genre" },
   { key: "bpm", label: "BPM", numeric: true },
 ];
 const ALL_FIELDS = [...LIBRARY_FIELDS, ...TAG_FIELDS];
 
 function fieldStr(t: Track, key: FieldKey): string {
+  if (key === "release_date") return trackReleaseDate(t);
   const v = t[key] as string | number | null | undefined;
   return v === null || v === undefined ? "" : String(v);
 }
@@ -160,6 +167,7 @@ export function TagInspector({
 
   const armed = ALL_FIELDS.filter((f) => values[f.key] !== (common[f.key] ?? ""));
   const dirty = armed.length > 0;
+  const invalidDates = armed.filter((f) => f.date && values[f.key] !== "" && !validMetadataDate(values[f.key]));
 
   function set(key: FieldKey, e: ChangeEvent<HTMLInputElement>) {
     const v = e.target.value;
@@ -197,7 +205,7 @@ export function TagInspector({
   }
 
   async function save() {
-    if (!dirty) return;
+    if (!dirty || invalidDates.length > 0) return;
     const updates: MetadataUpdate = {};
     for (const f of armed) {
       const v = values[f.key];
@@ -208,8 +216,10 @@ export function TagInspector({
         case "disc_no":
           updates.disc_no = v === "" ? null : Number(v);
           break;
-        case "year":
-          updates.year = v === "" ? null : Number(v);
+        case "release_date":
+        case "original_release_date":
+        case "composer":
+          updates[f.key] = v;
           break;
         case "bpm":
           updates.bpm = v === "" ? null : Number(v);
@@ -275,6 +285,8 @@ export function TagInspector({
         <input
           type={f.numeric ? "number" : "text"}
           min={f.numeric ? 0 : undefined}
+          aria-label={f.label}
+          aria-invalid={invalidDates.some((field) => field.key === f.key) || undefined}
           value={values[f.key]}
           placeholder={isVarious ? "‹various›" : ""}
           onChange={(e) => set(f.key, e)}
@@ -331,11 +343,12 @@ export function TagInspector({
           {TAG_FIELDS.map(renderField)}
         </div>
       </div>
+      {invalidDates.length > 0 && <p role="alert">Enter a valid calendar date as YYYY, YYYY-MM or YYYY-MM-DD, or clear the field.</p>}
       <div className="tag-inspector-foot">
         <button
           type="button"
           className="btn-primary"
-          disabled={!dirty || busy}
+          disabled={!dirty || busy || invalidDates.length > 0}
           onClick={() => void save()}
         >
           {busy

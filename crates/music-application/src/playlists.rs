@@ -786,6 +786,9 @@ mod tests {
                 id: TrackId::new(id)?,
                 path: LibraryPath::parse(format!("{title}.mp3"))?,
                 metadata: TrackMetadata {
+                    release_date: String::new(),
+                    original_release_date: String::new(),
+                    composer: String::new(),
                     title: title.to_owned(),
                     artist: String::new(),
                     album_artist: String::new(),

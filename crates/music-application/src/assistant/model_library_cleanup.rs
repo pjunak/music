@@ -270,6 +270,9 @@ pub fn library_cleanup_quality_cases()
         path: LibraryPath::parse("private/never-disclose.mp3")
             .map_err(|_| ModelTaskError::new("fixture_invalid"))?,
         metadata: TrackMetadata {
+            release_date: String::new(),
+            original_release_date: String::new(),
+            composer: String::new(),
             title: "Northern Lights".into(),
             artist: "Synthetic Quartet".into(),
             album: "Fixture Album".into(),

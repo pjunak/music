@@ -93,6 +93,12 @@ struct TrackResponse {
     artist: String,
     album_artist: String,
     album: String,
+    #[schema(required = false)]
+    release_date: String,
+    #[schema(required = false)]
+    original_release_date: String,
+    #[schema(required = false)]
+    composer: String,
     #[schema(required = true, schema_with = openapi_nullable_integer)]
     track_no: Option<u32>,
     #[schema(required = true, schema_with = openapi_nullable_integer)]
@@ -123,6 +129,9 @@ impl TryFrom<IndexedTrack> for TrackResponse {
             artist: track.metadata.artist,
             album_artist: track.metadata.album_artist,
             album: track.metadata.album,
+            release_date: track.metadata.release_date,
+            original_release_date: track.metadata.original_release_date,
+            composer: track.metadata.composer,
             track_no: track.metadata.track_no,
             disc_no: track.metadata.disc_no,
             year: track.metadata.year,
@@ -369,6 +378,15 @@ struct TrackMetadataUpdateRequest {
     #[schema(required = false, schema_with = metadata_nullable_string_schema)]
     album: MetadataUpdateValue<String>,
     #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    release_date: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    original_release_date: MetadataUpdateValue<String>,
+    #[serde(default)]
+    #[schema(required = false, schema_with = metadata_nullable_string_schema)]
+    composer: MetadataUpdateValue<String>,
+    #[serde(default)]
     #[schema(required = false, schema_with = metadata_nullable_integer_schema)]
     track_no: MetadataUpdateValue<u32>,
     #[serde(default)]
@@ -402,6 +420,17 @@ impl TrackMetadataUpdateRequest {
             self.album_artist,
         )?;
         insert_text_update(&mut patch, TrackMetadataField::Album, self.album)?;
+        insert_text_update(
+            &mut patch,
+            TrackMetadataField::ReleaseDate,
+            self.release_date,
+        )?;
+        insert_text_update(
+            &mut patch,
+            TrackMetadataField::OriginalReleaseDate,
+            self.original_release_date,
+        )?;
+        insert_text_update(&mut patch, TrackMetadataField::Composer, self.composer)?;
         insert_number_update(&mut patch, TrackMetadataField::TrackNumber, self.track_no)?;
         insert_number_update(&mut patch, TrackMetadataField::DiscNumber, self.disc_no)?;
         insert_number_update(&mut patch, TrackMetadataField::Year, self.year)?;
@@ -1732,6 +1761,9 @@ fn map_track_delete_error(error: LibraryCoordinatorError) -> ApiError {
 }
 
 fn map_track_metadata_error(error: LibraryCoordinatorError) -> ApiError {
+    if let Some(message) = metadata_date_error(&error) {
+        return ApiError::bad_request(message);
+    }
     match error {
         LibraryCoordinatorError::TrackNotFound { .. } => {
             ApiError::plain_not_found("track not found")
@@ -1756,7 +1788,23 @@ fn map_track_metadata_error(error: LibraryCoordinatorError) -> ApiError {
     }
 }
 
+fn metadata_date_error(error: &LibraryCoordinatorError) -> Option<&'static str> {
+    let LibraryCoordinatorError::Mutation(failure) = error else {
+        return None;
+    };
+    match failure.code() {
+        "track_metadata_date_precision" => Some(
+            "Edit release_date explicitly to change this year while preserving known month/day precision.",
+        ),
+        "track_metadata_date_conflict" => Some("year and release_date disagree"),
+        _ => None,
+    }
+}
+
 fn bulk_metadata_reason(error: &LibraryCoordinatorError) -> String {
+    if let Some(message) = metadata_date_error(error) {
+        return message.to_owned();
+    }
     match error {
         LibraryCoordinatorError::TrackNotFound { .. } => "not found",
         LibraryCoordinatorError::Mutation(failure) => match failure.kind() {

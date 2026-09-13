@@ -62,8 +62,16 @@ impl CleanupReviewProposal {
         }
         match self.kind.as_str() {
             "tag" if self.track_id > 0 => match self.field.as_deref() {
-                Some("title" | "artist" | "album" | "album_artist" | "genre")
-                    if self.new.is_null() || self.new.is_string() => {}
+                Some(
+                    "title"
+                    | "artist"
+                    | "album"
+                    | "album_artist"
+                    | "genre"
+                    | "composer"
+                    | "release_date"
+                    | "original_release_date",
+                ) if self.new.is_null() || self.new.is_string() => {}
                 Some("track_no" | "disc_no" | "year")
                     if self.new.is_null()
                         || self
@@ -166,6 +174,9 @@ pub fn rejection_context(
                 "track_no" => json!(track.metadata.track_no),
                 "disc_no" => json!(track.metadata.disc_no),
                 "year" => json!(track.metadata.year),
+                "release_date" => json!(track.metadata.release_date),
+                "original_release_date" => json!(track.metadata.original_release_date),
+                "composer" => json!(track.metadata.composer),
                 _ => return None,
             },
             _ => return None,

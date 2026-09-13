@@ -210,6 +210,9 @@ pub fn inspect_library_track(
     Ok(DiscoveredTrack {
         path: path.clone(),
         metadata: TrackMetadata {
+            release_date: metadata.release_date,
+            original_release_date: metadata.original_release_date,
+            composer: metadata.composer,
             title: if metadata.title.is_empty() {
                 fallback_title(&absolute)
             } else {
@@ -404,6 +407,9 @@ fn library_path(
 
 fn fallback_metadata(path: &LibraryPath) -> crate::AudioMetadata {
     crate::AudioMetadata {
+        release_date: String::new(),
+        original_release_date: String::new(),
+        composer: String::new(),
         title: path
             .file_name()
             .rsplit_once('.')

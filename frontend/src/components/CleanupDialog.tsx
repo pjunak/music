@@ -188,6 +188,12 @@ function opLabel(op: CleanupOp): string {
       return "Disc #";
     case "year":
       return "Year";
+    case "release_date":
+      return "Release date";
+    case "original_release_date":
+      return "Original release date";
+    case "composer":
+      return "Composer";
     default:
       return op.field ?? "Tag";
   }
@@ -204,6 +210,9 @@ const LABEL_ORDER = [
   "Track #",
   "Disc #",
   "Year",
+  "Release date",
+  "Original release date",
+  "Composer",
 ];
 
 function Value({ value }: { value: string | number | null }) {
@@ -579,7 +588,7 @@ export function CleanupWorkflow({
 
   async function chooseEdition(folder: string, releaseId: string) {
     if (!result) return;
-    const editionFields = new Set(["album", "album_artist", "track_no", "disc_no", "year"]);
+    const editionFields = new Set(["album", "album_artist", "track_no", "disc_no", "year", "release_date", "original_release_date"]);
     const removed = new Set(result.plans.filter((plan) => folderOf(plan.path) === folder).flatMap((plan) => plan.ops)
       .filter((op) => op.rules.includes("catalog_identity") && editionFields.has(op.field ?? "")).map((op) => op.op_id));
     const updated = await updateReview({ ...result, plans: result.plans.map((plan) => {

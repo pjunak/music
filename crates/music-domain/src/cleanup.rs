@@ -2048,6 +2048,9 @@ mod tests {
         Ok(IndexedTrack {
             id: TrackId::new(id)?,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: stem_and_suffix(path.as_str()).0.to_owned(),
                 artist: String::new(),
                 album_artist: String::new(),

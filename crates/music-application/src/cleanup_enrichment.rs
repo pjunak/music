@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 
 pub const CLEANUP_ENRICHMENT_JOB_KIND: &str = "library.cleanup-enrichment";
 pub const CLEANUP_ENRICHMENT_SCHEMA: &str = "library-cleanup-enrichment/v1";
-/// Invalidates evidence generated before corroborated credit preservation and source review.
-pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v10";
+/// Invalidates evidence generated before precise dates and composition credits.
+pub const CATALOG_EVIDENCE_POLICY_CONTRACT: &str = "catalog-evidence-policy/v11";
 pub const MAX_CLEANUP_ENRICHMENT_TRACKS: usize = 500;
 
 pub(crate) fn review_context_signature(
@@ -73,6 +73,9 @@ pub fn cleanup_enrichment_source_signature(track: &IndexedTrack) -> Result<Strin
         track.metadata.track_no,
         track.metadata.disc_no,
         track.metadata.year,
+        track.metadata.release_date,
+        track.metadata.original_release_date,
+        track.metadata.composer,
         track.metadata.genre,
         track.metadata.bpm,
         track.duration.as_millis(),

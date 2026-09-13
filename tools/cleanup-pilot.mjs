@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const COHORT_SCHEMA = "library-cleanup-pilot/v1";
 const RESULT_SCHEMA = "library-cleanup-enrichment/v1";
-const TEXT_FIELDS = ["title", "artist", "album", "album_artist", "genre"];
+const TEXT_FIELDS = ["title", "artist", "album", "album_artist", "genre", "release_date", "original_release_date", "composer"];
 const NUMBER_FIELDS = ["track_no", "disc_no", "year"];
 const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const validId = (id) => Number.isSafeInteger(id) && id > 0;
@@ -53,7 +53,7 @@ function validateCohort(cohort, reviewedSplit = null) {
       requireValue(track.reviewed === true && name(track.evidence_notes), "Finish independent labels and short evidence notes for every scored track.");
     }
     requireValue(validLabels(track.expected_recording_mbids) && validLabels(track.expected_release_mbids), "Expected IDs must be MBID arrays, or null for unknown labels.");
-    requireValue(object(track.fields) && Object.keys(track.fields).length <= 8, "Invalid field judgments.");
+    requireValue(object(track.fields) && Object.keys(track.fields).length <= TEXT_FIELDS.length + NUMBER_FIELDS.length, "Invalid field judgments.");
     for (const [field, judgment] of Object.entries(track.fields)) {
       requireValue(object(judgment) && validField(field, judgment.current) && Array.isArray(judgment.acceptable)
         && judgment.acceptable.length > 0 && judgment.acceptable.length <= 20 && judgment.acceptable.every((value) => validField(field, value)), "Each known field needs its original value and acceptable values of the correct type.");
@@ -73,7 +73,7 @@ function readPlans(run) {
     requireValue(identified ? object(plan.identity) && mbid(plan.identity.recording_mbid)
       && (plan.identity.release_mbid == null || mbid(plan.identity.release_mbid)) : plan.identity == null, "Identity contradicts result status or contains invalid IDs.");
     requireValue(plan.candidates === undefined || Array.isArray(plan.candidates) && plan.candidates.length <= 500 && plan.candidates.every((candidate) => object(candidate) && mbid(candidate.id)), "Invalid recording candidates.");
-    requireValue(Array.isArray(plan.ops) && plan.ops.length <= 8 && (identified || plan.ops.length === 0), "Invalid metadata operations for this status.");
+    requireValue(Array.isArray(plan.ops) && plan.ops.length <= TEXT_FIELDS.length + NUMBER_FIELDS.length && (identified || plan.ops.length === 0), "Invalid metadata operations for this status.");
     const fields = new Set();
     for (const op of plan.ops) {
       requireValue(object(op) && op.kind === "tag" && op.track_id === plan.track_id && !fields.has(op.field)

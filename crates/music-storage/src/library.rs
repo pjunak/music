@@ -26,7 +26,7 @@ use sqlx::{QueryBuilder, Row, Sqlite};
 use crate::{SqliteStorage, StorageError};
 
 pub(crate) const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track_no, disc_no, \
-    year, genre, length_s, bpm, display_title, origin, size_bytes, mtime, \
+    year, release_date, original_release_date, composer, genre, length_s, bpm, display_title, origin, size_bytes, mtime, \
     CAST(strftime('%s', added_at) AS INTEGER) AS added_at_unix_seconds";
 const MAX_RECONCILIATION_TRACKS: usize = 1_000_000;
 const RECONCILIATION_BATCH_SIZE: usize = 500;
@@ -36,24 +36,24 @@ const UPDATED_COUNT_SQL: &str = "SELECT COUNT(*) FROM temp.library_scan_stage AS
     tracks.title IS NOT staged.title OR tracks.artist IS NOT staged.artist OR \
     tracks.album_artist IS NOT staged.album_artist OR tracks.album IS NOT staged.album OR \
     tracks.track_no IS NOT staged.track_no OR tracks.disc_no IS NOT staged.disc_no OR \
-    tracks.year IS NOT staged.year OR tracks.genre IS NOT staged.genre OR \
+    tracks.year IS NOT staged.year OR tracks.release_date IS NOT staged.release_date OR tracks.original_release_date IS NOT staged.original_release_date OR tracks.composer IS NOT staged.composer OR tracks.genre IS NOT staged.genre OR \
     tracks.length_s IS NOT staged.length_s OR tracks.bpm IS NOT staged.bpm OR \
     tracks.size_bytes IS NOT staged.size_bytes OR tracks.mtime IS NOT staged.mtime";
 const TRACK_UPSERT_SQL: &str = "INSERT INTO tracks (\
-        path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, \
+        path, title, artist, album_artist, album, track_no, disc_no, year, release_date, original_release_date, composer, genre, length_s, bpm, \
         display_title, origin, size_bytes, mtime, added_at\
-    ) SELECT path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, \
+    ) SELECT path, title, artist, album_artist, album, track_no, disc_no, year, release_date, original_release_date, composer, genre, length_s, \
              bpm, '', '', size_bytes, mtime, CURRENT_TIMESTAMP \
       FROM temp.library_scan_stage WHERE true \
       ON CONFLICT(path) DO UPDATE SET \
         title = excluded.title, artist = excluded.artist, album_artist = excluded.album_artist, \
         album = excluded.album, track_no = excluded.track_no, disc_no = excluded.disc_no, \
-        year = excluded.year, genre = excluded.genre, length_s = excluded.length_s, \
+        year = excluded.year, release_date = excluded.release_date, original_release_date = excluded.original_release_date, composer = excluded.composer, genre = excluded.genre, length_s = excluded.length_s, \
         bpm = excluded.bpm, size_bytes = excluded.size_bytes, mtime = excluded.mtime \
       WHERE tracks.title IS NOT excluded.title OR tracks.artist IS NOT excluded.artist OR \
         tracks.album_artist IS NOT excluded.album_artist OR tracks.album IS NOT excluded.album OR \
         tracks.track_no IS NOT excluded.track_no OR tracks.disc_no IS NOT excluded.disc_no OR \
-        tracks.year IS NOT excluded.year OR tracks.genre IS NOT excluded.genre OR \
+        tracks.year IS NOT excluded.year OR tracks.release_date IS NOT excluded.release_date OR tracks.original_release_date IS NOT excluded.original_release_date OR tracks.composer IS NOT excluded.composer OR tracks.genre IS NOT excluded.genre OR \
         tracks.length_s IS NOT excluded.length_s OR tracks.bpm IS NOT excluded.bpm OR \
         tracks.size_bytes IS NOT excluded.size_bytes OR tracks.mtime IS NOT excluded.mtime";
 
@@ -933,7 +933,7 @@ impl SqliteStorage {
         .await?;
         let updated = sqlx::query(
             "UPDATE tracks SET path = ?, title = ?, artist = ?, album_artist = ?, album = ?, \
-             track_no = ?, disc_no = ?, year = ?, genre = ?, length_s = ?, bpm = ?, \
+             track_no = ?, disc_no = ?, year = ?, release_date = ?, original_release_date = ?, composer = ?, genre = ?, length_s = ?, bpm = ?, \
              size_bytes = ?, mtime = ? WHERE id = ? AND path = ?",
         )
         .bind(discovered.path.as_str())
@@ -944,6 +944,9 @@ impl SqliteStorage {
         .bind(discovered.metadata.track_no.map(i64::from))
         .bind(discovered.metadata.disc_no.map(i64::from))
         .bind(discovered.metadata.year.map(i64::from))
+        .bind(&discovered.metadata.release_date)
+        .bind(&discovered.metadata.original_release_date)
+        .bind(&discovered.metadata.composer)
         .bind(&discovered.metadata.genre)
         .bind(discovered.duration.as_secs_f64())
         .bind(discovered.metadata.bpm.map(i64::from))
@@ -1122,7 +1125,7 @@ impl SqliteStorage {
 
         let updated = sqlx::query(
             "UPDATE tracks SET title = ?, artist = ?, album_artist = ?, album = ?, track_no = ?, \
-             disc_no = ?, year = ?, genre = ?, length_s = ?, bpm = ?, display_title = ?, \
+             disc_no = ?, year = ?, release_date = ?, original_release_date = ?, composer = ?, genre = ?, length_s = ?, bpm = ?, display_title = ?, \
              origin = ?, size_bytes = ?, mtime = ? WHERE id = ? AND path = ?",
         )
         .bind(&track.metadata.title)
@@ -1132,6 +1135,9 @@ impl SqliteStorage {
         .bind(track.metadata.track_no.map(i64::from))
         .bind(track.metadata.disc_no.map(i64::from))
         .bind(track.metadata.year.map(i64::from))
+        .bind(&track.metadata.release_date)
+        .bind(&track.metadata.original_release_date)
+        .bind(&track.metadata.composer)
         .bind(&track.metadata.genre)
         .bind(track.duration.as_secs_f64())
         .bind(track.metadata.bpm.map(i64::from))
@@ -1215,11 +1221,11 @@ impl SqliteStorage {
         let (affected_tracks, catalog_effect, track) = if let Some(discovered) = discovered {
             sqlx::query(
                 "INSERT INTO tracks (path, title, artist, album_artist, album, track_no, disc_no, \
-                 year, genre, length_s, bpm, display_title, origin, size_bytes, mtime, added_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, CURRENT_TIMESTAMP) \
+                 year, release_date, original_release_date, composer, genre, length_s, bpm, display_title, origin, size_bytes, mtime, added_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, CURRENT_TIMESTAMP) \
                  ON CONFLICT(path) DO UPDATE SET title = excluded.title, artist = excluded.artist, \
                  album_artist = excluded.album_artist, album = excluded.album, \
-                 track_no = excluded.track_no, disc_no = excluded.disc_no, year = excluded.year, \
+                 track_no = excluded.track_no, disc_no = excluded.disc_no, year = excluded.year, release_date = excluded.release_date, original_release_date = excluded.original_release_date, composer = excluded.composer, \
                  genre = excluded.genre, length_s = excluded.length_s, bpm = excluded.bpm, \
                  size_bytes = excluded.size_bytes, mtime = excluded.mtime",
             )
@@ -1231,6 +1237,9 @@ impl SqliteStorage {
             .bind(discovered.metadata.track_no.map(i64::from))
             .bind(discovered.metadata.disc_no.map(i64::from))
             .bind(discovered.metadata.year.map(i64::from))
+            .bind(&discovered.metadata.release_date)
+            .bind(&discovered.metadata.original_release_date)
+            .bind(&discovered.metadata.composer)
             .bind(&discovered.metadata.genre)
             .bind(discovered.duration.as_secs_f64())
             .bind(discovered.metadata.bpm.map(i64::from))
@@ -1477,7 +1486,7 @@ impl SqliteStorage {
             "CREATE TEMP TABLE IF NOT EXISTS library_scan_stage (\
                 path TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL, \
                 album_artist TEXT NOT NULL, album TEXT NOT NULL, track_no INTEGER, disc_no INTEGER, \
-                year INTEGER, genre TEXT NOT NULL, length_s REAL NOT NULL, bpm INTEGER, \
+                year INTEGER, release_date TEXT NOT NULL, original_release_date TEXT NOT NULL, composer TEXT NOT NULL, genre TEXT NOT NULL, length_s REAL NOT NULL, bpm INTEGER, \
                 size_bytes INTEGER NOT NULL, mtime INTEGER NOT NULL\
              ); \
              DELETE FROM temp.library_scan_stage;",
@@ -1487,7 +1496,7 @@ impl SqliteStorage {
         for chunk in discovered.chunks(RECONCILIATION_BATCH_SIZE) {
             let mut insert = QueryBuilder::<Sqlite>::new(
                 "INSERT INTO temp.library_scan_stage (path, title, artist, album_artist, album, \
-                 track_no, disc_no, year, genre, length_s, bpm, size_bytes, mtime) ",
+                 track_no, disc_no, year, release_date, original_release_date, composer, genre, length_s, bpm, size_bytes, mtime) ",
             );
             insert.push_values(chunk, |mut row, track| {
                 row.push_bind(track.path.as_str().to_owned())
@@ -1498,6 +1507,9 @@ impl SqliteStorage {
                     .push_bind(track.metadata.track_no.map(i64::from))
                     .push_bind(track.metadata.disc_no.map(i64::from))
                     .push_bind(track.metadata.year.map(i64::from))
+                    .push_bind(track.metadata.release_date.clone())
+                    .push_bind(track.metadata.original_release_date.clone())
+                    .push_bind(track.metadata.composer.clone())
                     .push_bind(track.metadata.genre.clone())
                     .push_bind(track.duration.as_secs_f64())
                     .push_bind(track.metadata.bpm.map(i64::from))
@@ -1926,6 +1938,9 @@ pub(crate) fn indexed_track_from_row(row: &SqliteRow) -> Result<IndexedTrack, St
         path: LibraryPath::parse(row.try_get::<String, _>("path")?)
             .map_err(StorageError::InvalidLibraryPath)?,
         metadata: TrackMetadata {
+            release_date: row.try_get("release_date")?,
+            original_release_date: row.try_get("original_release_date")?,
+            composer: row.try_get("composer")?,
             title: row.try_get("title")?,
             artist: row.try_get("artist")?,
             album_artist: row.try_get("album_artist")?,
@@ -1966,6 +1981,9 @@ fn push_search_filter(query: &mut QueryBuilder<Sqlite>, pattern: &str) {
         "title",
         "display_title",
         "artist",
+        "composer",
+        "release_date",
+        "original_release_date",
         "album",
         "origin",
         "path",
@@ -2100,6 +2118,9 @@ mod tests {
         Ok(DiscoveredTrack {
             path: LibraryPath::parse(path)?,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: title.to_owned(),
                 artist: artist.to_owned(),
                 album_artist: artist.to_owned(),
@@ -2330,6 +2351,57 @@ mod tests {
             LibraryRepository::track(&storage, TrackId::new(track_id)?)
                 .await
                 .is_err()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rescanning_detects_rich_metadata_changes_without_stat_changes()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage =
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("rich.db")))
+                .await?;
+        insert_track(&storage, "same.mp3", "Song", "Artist").await?;
+        let started = LibraryMutationRepository::begin_reconciliation(&storage).await?;
+        let mut found = discovered("same.mp3", "Song", "Artist", 123, 456)?;
+        found.metadata.release_date = "2024-02-29".into();
+        found.metadata.original_release_date = "1998-07".into();
+        found.metadata.composer = "Composer".into();
+        found.metadata.year = Some(2024);
+        let result = LibraryMutationRepository::commit_reconciliation(
+            &storage,
+            started.generation,
+            vec![found.clone()],
+        )
+        .await?;
+        assert!(matches!(
+            result,
+            ReconciliationCommit::Applied {
+                summary: ReconciliationSummary { updated: 1, .. },
+                ..
+            }
+        ));
+        let all = LibraryRepository::all_tracks(&storage).await?;
+        assert_eq!(all[0].metadata, found.metadata);
+        let started = LibraryMutationRepository::begin_reconciliation(&storage).await?;
+        found.metadata.composer = "Changed composer".into();
+        let result = LibraryMutationRepository::commit_reconciliation(
+            &storage,
+            started.generation,
+            vec![found.clone()],
+        )
+        .await?;
+        assert!(matches!(
+            result,
+            ReconciliationCommit::Applied {
+                summary: ReconciliationSummary { updated: 1, .. },
+                ..
+            }
+        ));
+        assert_eq!(
+            LibraryRepository::all_tracks(&storage).await?[0].metadata,
+            found.metadata
         );
         Ok(())
     }
@@ -2633,7 +2705,11 @@ mod tests {
             patch: mixed_patch.clone(),
         };
         let mixed_journal = applying_journal(&storage, &mixed_mutation).await?;
-        let retagged = discovered("Album/song.wav", "Retagged song", "Artist", 987, 765)?;
+        let mut retagged = discovered("Album/song.wav", "Retagged song", "Artist", 987, 765)?;
+        retagged.metadata.release_date = "2024-02-29".into();
+        retagged.metadata.original_release_date = "1998-07".into();
+        retagged.metadata.composer = "久石 譲".into();
+        retagged.metadata.year = Some(2024);
         let mixed = LibraryMutationRepository::commit_track_metadata(
             &storage,
             &mixed_journal,
@@ -2645,6 +2721,14 @@ mod tests {
         .await?;
         assert_eq!(mixed.track.id, track_id);
         assert_eq!(mixed.track.metadata.title, "Retagged song");
+        assert_eq!(mixed.track.metadata.release_date, "2024-02-29");
+        assert_eq!(mixed.track.metadata.original_release_date, "1998-07");
+        assert_eq!(mixed.track.metadata.composer, "久石 譲");
+        for term in ["久石", "2024-02-29", "1998-07"] {
+            let query =
+                LibrarySearch::new(term, 100, 0, LibrarySortKey::Title, SortOrder::Ascending)?;
+            assert_eq!(LibraryRepository::search(&storage, &query).await?.total, 1);
+        }
         assert_eq!(mixed.track.display_title, "Battle cue");
         assert_eq!(mixed.track.origin, "");
         assert_eq!(mixed.track.size_bytes, 987);
@@ -2669,6 +2753,9 @@ mod tests {
         )
         .await?;
         assert_eq!(cleared.track.metadata.title, "Retagged song");
+        assert_eq!(cleared.track.metadata.release_date, "2024-02-29");
+        assert_eq!(cleared.track.metadata.original_release_date, "1998-07");
+        assert_eq!(cleared.track.metadata.composer, "久石 譲");
         assert_eq!(cleared.track.display_title, "");
         assert_eq!(cleared.status.generation, LibraryGeneration::new(2));
         assert_eq!(cleared.status.discovered_tracks, 1);

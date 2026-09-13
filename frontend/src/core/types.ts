@@ -36,12 +36,15 @@ export interface Track {
   track_no: number | null;
   disc_no: number | null;
   year: number | null;
+  release_date?: string;
+  original_release_date?: string;
+  composer?: string;
   genre: string;
   length_s: number;
   bpm: number | null;
   size_bytes: number;
   added_at: string;
-  // User-entered, DB-only labels — see backend/app/models/track.py.
+  // User-entered, database-only labels.
   display_title: string;
   origin: string;
 }

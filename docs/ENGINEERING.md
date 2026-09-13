@@ -63,6 +63,17 @@ is selected using [the validation matrix](VALIDATION.md).
 - Tag-backed metadata round-trips through typed `TagPatch` values and the format-specific
   Lofty/FFmpeg adapters. Database-only fields stay independent. Preserve per-track
   partial-failure results for bulk operations.
+- Track metadata includes release_date, original_release_date and composer strings in files and
+  the library. Writable dates are calendar values at YYYY, YYYY-MM or YYYY-MM-DD precision;
+  empty/null clears a field, and omission preserves it. The numeric year remains compatible:
+  an unchanged year preserves a full date, while changing/clearing a precise date through year
+  alone is rejected. If both are supplied, their years must agree. A release_date edit updates
+  year on readback. Unrelated edits preserve existing dates, credits, artwork and unknown tags.
+- Schema 14 adds these three columns after the normal verified migration backup. Existing
+  indexed years backfill year-only dates; rescanning reads any richer file metadata. Artist,
+  album artist and composer stay separate. The web library shows and searches these fields;
+  the tag inspector edits only changed fields across a selection. See
+  [rich metadata mappings](LIBRARY_RICH_METADATA.md) for format support and evidence semantics.
 - Library cleanup is propose -> review -> journal -> execute. Detection must
   remain pure and must never mutate files while merely scanning.
 - SFX paths are rooted under `SFX_LIBRARY_DIR`; serving remains gated by loaded

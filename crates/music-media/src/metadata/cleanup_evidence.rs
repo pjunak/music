@@ -81,6 +81,7 @@ fn evidence_from_tags(tags: &[Tag]) -> LocalEvidence {
                 ItemKey::DiscNumber => EvidenceField::DiscNo,
                 ItemKey::RecordingDate | ItemKey::ReleaseDate => EvidenceField::Date,
                 ItemKey::OriginalReleaseDate => EvidenceField::OriginalDate,
+                ItemKey::Composer => EvidenceField::Composer,
                 ItemKey::Genre => EvidenceField::Genre,
                 ItemKey::MusicBrainzRecordingId => EvidenceField::RecordingMbid,
                 ItemKey::MusicBrainzReleaseId => EvidenceField::ReleaseMbid,

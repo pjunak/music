@@ -518,8 +518,8 @@ impl CleanupEnrichmentJobHandler {
                 || editions.preserve_album_artist && op["field"] == "album_artist")
         });
         for op in &mut operations {
-            op["evidence"] = json!({"source": "musicbrainz", "entity": if matches!(op["field"].as_str(), Some("title" | "artist" | "genre")) { "recording" } else { "release" },
-                "recording_id": recording_id, "release_id": editions.selected.as_ref().map(|r| &r.id), "method": method});
+            op["evidence"] = json!({"source": "musicbrainz", "entity": if matches!(op["field"].as_str(), Some("title" | "artist" | "genre")) { "recording" } else if op["field"] == "composer" { "work" } else if op["field"] == "original_release_date" { "release_group" } else { "release" },
+                "recording_id": recording_id, "release_id": editions.selected.as_ref().map(|r| &r.id), "release_group_id": editions.selected.as_ref().and_then(|r| r.release_group_id.as_deref()), "method": method});
         }
         let choices = editions.choices;
         let mut partial = resolution.partial || editions.partial || credit.partial;
@@ -611,7 +611,7 @@ impl CleanupEnrichmentJobHandler {
             },
             "candidates": resolution.candidates,
             "release_choices": choices,
-            "recording_observations": {"first_release_date": recording.first_release_date, "genres": recording.genres, "credits": recording.credits},
+            "recording_observations": {"first_release_date": recording.first_release_date, "genres": recording.genres, "credits": recording.credits, "composers": recording.composers},
             "ops": operations,
             "tag_suggestions": tag_suggestions,
             "notes": notes,
@@ -763,7 +763,9 @@ pub(super) struct CanonicalMetadata {
     album: String,
     track_no: Option<u32>,
     disc_no: Option<u32>,
-    year: Option<u32>,
+    release_date: String,
+    original_release_date: String,
+    composer: String,
     genre: String,
 }
 
@@ -914,9 +916,17 @@ pub(super) fn canonical_metadata(
                 }
                 joined
             }),
-        year: date
-            .and_then(|date| date.get(..4))
-            .and_then(|year| year.parse().ok()),
+        release_date: date
+            .filter(|date| music_domain::metadata_date_year(date).is_some())
+            .unwrap_or_default()
+            .to_owned(),
+        original_release_date: release
+            .filter(|r| r.release_group_id.is_some())
+            .and_then(|r| r.original_release_date.as_deref())
+            .filter(|date| music_domain::metadata_date_year(date).is_some())
+            .unwrap_or_default()
+            .to_owned(),
+        composer: recording.composers.join("; "),
     }
 }
 
@@ -982,14 +992,36 @@ pub(super) fn metadata_operations(
         metadata.disc_no,
         recording_id,
     );
-    push_number_operation(
-        &mut operations,
-        track,
-        "year",
-        track.metadata.year,
-        metadata.year,
-        recording_id,
-    );
+    for (field, old, new) in [
+        (
+            "release_date",
+            &track.metadata.release_date,
+            &metadata.release_date,
+        ),
+        (
+            "original_release_date",
+            &track.metadata.original_release_date,
+            &metadata.original_release_date,
+        ),
+    ] {
+        // A catalog year/month cannot erase a more precise matching authored date.
+        if !(music_domain::metadata_date_year(old).is_some()
+            && old.len() > new.len()
+            && old.starts_with(new))
+        {
+            push_text_operation(&mut operations, track, field, old, new, recording_id);
+        }
+    }
+    if track.metadata.composer.trim().is_empty() {
+        push_text_operation(
+            &mut operations,
+            track,
+            "composer",
+            &track.metadata.composer,
+            &metadata.composer,
+            recording_id,
+        );
+    }
     operations
 }
 
@@ -1264,6 +1296,9 @@ mod tests {
             id: TrackId::new(1)?,
             path: LibraryPath::parse("album/song.mp3")?,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: "Song".to_owned(),
                 artist: "Artist".to_owned(),
                 album_artist: String::new(),
@@ -1296,6 +1331,45 @@ mod tests {
             }],
             provider_score: 1.0,
         }
+    }
+
+    #[test]
+    fn rich_proposals_keep_edition_precision_and_authored_composers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut track = track()?;
+        track.metadata.release_date = "2024-02-29".into();
+        track.metadata.year = Some(2024);
+        track.metadata.composer = "Authored credit".into();
+        let recording = Recording {
+            composers: vec!["Catalog composer".into()],
+            first_release_date: Some("1900".into()),
+            ..Recording::default()
+        };
+        let release = ReleaseDetail {
+            date: Some("2024".into()),
+            original_release_date: Some("1998-07".into()),
+            release_group_id: Some("group".into()),
+            ..ReleaseDetail::default()
+        };
+        let canonical = canonical_metadata(&recording, Some(&release));
+        let ops = metadata_operations(&track, &canonical, "recording");
+        assert!(ops.iter().all(|op| op["field"] != "release_date"
+            && op["field"] != "year"
+            && op["field"] != "composer"));
+        assert!(
+            ops.iter()
+                .any(|op| op["field"] == "original_release_date" && op["new"] == "1998-07")
+        );
+        track.metadata.composer.clear();
+        let no_edition = canonical_metadata(&recording, None);
+        assert!(no_edition.release_date.is_empty());
+        assert!(no_edition.original_release_date.is_empty());
+        let ops = metadata_operations(&track, &no_edition, "recording");
+        assert!(
+            ops.iter()
+                .any(|op| op["field"] == "composer" && op["new"] == "Catalog composer")
+        );
+        Ok(())
     }
 
     #[test]
@@ -1586,7 +1660,7 @@ mod tests {
             first_release_date: Some("1960-02-03".into()),
             ..Recording::default()
         };
-        assert_eq!(canonical_metadata(&recording, None).year, None);
+        assert_eq!(canonical_metadata(&recording, None).release_date, "");
         assert_eq!(
             canonical_metadata(
                 &recording,
@@ -1595,8 +1669,8 @@ mod tests {
                     ..ReleaseDetail::default()
                 })
             )
-            .year,
-            Some(2026)
+            .release_date,
+            "2026-09-10"
         );
         Ok(())
     }

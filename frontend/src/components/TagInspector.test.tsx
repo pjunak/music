@@ -49,6 +49,27 @@ beforeEach(() => {
 });
 
 describe("TagInspector", () => {
+  it("preserves untouched full dates and credits and validates edits", async () => {
+    render(<TagInspector selectedTracks={[track({ release_date: "2024-02-29", original_release_date: "1998-07", composer: "久石 譲" })]} onSaved={() => {}} />);
+    const date = screen.getByLabelText("Release date");
+    expect(date).toHaveValue("2024-02-29");
+    expect(screen.getByLabelText("Original release date")).toHaveValue("1998-07");
+    expect(screen.getByLabelText("Composer")).toHaveValue("久石 譲");
+    await userEvent.type(screen.getByLabelText("Title"), "New title");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(libraryApi.updateBulkMetadata).toHaveBeenLastCalledWith({ track_ids: [1], updates: { title: "New title" } });
+    await userEvent.clear(date);
+    await userEvent.type(date, "2025-02-29");
+    expect(screen.getByRole("alert")).toHaveTextContent("valid calendar date");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await userEvent.clear(date);
+    await userEvent.type(date, "2025-10");
+    await userEvent.clear(screen.getByLabelText("Composer"));
+    await userEvent.type(screen.getByLabelText("Composer"), "Composer A; Composer B");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(libraryApi.updateBulkMetadata).toHaveBeenLastCalledWith({ track_ids: [1], updates: { title: "New title", release_date: "2025-10", composer: "Composer A; Composer B" } });
+  });
+
   it("shows an empty prompt when nothing is selected", () => {
     render(<TagInspector selectedTracks={[]} onSaved={() => {}} />);
     expect(screen.getByText(/select a track/i)).toBeInTheDocument();
@@ -92,16 +113,16 @@ describe("TagInspector", () => {
     });
   });
 
-  it("clears a numeric field to null when emptied", async () => {
+  it("clears the release date including a legacy year value", async () => {
     const t = track({ id: 3, year: 1999 });
     render(<TagInspector selectedTracks={[t]} onSaved={() => {}} />);
-    const year = screen.getByLabelText("Year");
-    expect(year).toHaveValue(1999);
+    const year = screen.getByLabelText("Release date");
+    expect(year).toHaveValue("1999");
     await userEvent.clear(year);
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(libraryApi.updateBulkMetadata).toHaveBeenCalledWith({
       track_ids: [3],
-      updates: { year: null },
+      updates: { release_date: "" },
     });
   });
 });

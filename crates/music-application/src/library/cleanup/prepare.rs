@@ -462,6 +462,9 @@ const fn cleanup_tag_field(field: &str) -> Option<TrackMetadataField> {
         b"track_no" => Some(TrackMetadataField::TrackNumber),
         b"disc_no" => Some(TrackMetadataField::DiscNumber),
         b"year" => Some(TrackMetadataField::Year),
+        b"release_date" => Some(TrackMetadataField::ReleaseDate),
+        b"original_release_date" => Some(TrackMetadataField::OriginalReleaseDate),
+        b"composer" => Some(TrackMetadataField::Composer),
         _ => None,
     }
 }
@@ -489,6 +492,15 @@ fn cleanup_track_value(
             .metadata
             .year
             .map(|value| CleanupInputValue::Integer(i64::from(value))),
+        TrackMetadataField::ReleaseDate => {
+            Some(CleanupInputValue::Text(track.metadata.release_date.clone()))
+        }
+        TrackMetadataField::OriginalReleaseDate => Some(CleanupInputValue::Text(
+            track.metadata.original_release_date.clone(),
+        )),
+        TrackMetadataField::Composer => {
+            Some(CleanupInputValue::Text(track.metadata.composer.clone()))
+        }
         TrackMetadataField::Genre
         | TrackMetadataField::Bpm
         | TrackMetadataField::DisplayTitle

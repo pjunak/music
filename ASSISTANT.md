@@ -555,11 +555,11 @@ You can select a JSON metadata sidecar with this shape (the example ID is illust
 ```
 
 Track IDs appear in each review evidence panel. Supported fields are `title`, `artist`,
-`album_artist`, `album`, `track_no`, `disc_no`, `date`, `original_date`, `genre`, `recording_mbid`,
+`album_artist`, `album`, `track_no`, `disc_no`, `date`, `original_date`, `composer`, `genre`, `recording_mbid`,
 `release_mbid`, `release_track_mbid`, `release_group_mbid`, `isrc`, `barcode` and `catalog_number`.
 Use text values, at most 512 bytes each and 500 unique tracks in the selected scope. Imported
-observations support lookup; full dates/IDs are preserved as evidence rather than automatically
-written into extended embedded tags. CUE splitting, executable sidecars and arbitrary URL scraping
+observations support lookup; dates, credits and IDs remain evidence unless you explicitly enable
+review proposals and select the resulting changes. CUE splitting, executable sidecars and arbitrary URL scraping
 are not part of this import.
 
 For metadata from a confirmed creator tracklist, booklet or purchase manifest, add a `source`
@@ -571,13 +571,20 @@ reference and opt into **Propose imported metadata changes for review**. For exa
 
 These become unchecked suggestions even when the catalog cannot identify the recording.
 Check which file each entry describes; a source label does not verify its content. Album,
-album artist, artist, title, genre, track/disc numbers and release year use the existing tag
-review. Full dates and identifiers stay in evidence, and original release date never replaces
-edition year. Source references are limited to 512 bytes and are not fetched automatically.
+album artist, artist, composer, title, genre, track/disc numbers, full release date and original
+release date use the existing tag review. Use YYYY, YYYY-MM or YYYY-MM-DD without inventing
+missing month/day values. Identifiers stay in evidence. Original release date stays separate
+from the edition date. Source references are limited to 512 bytes and are not fetched automatically.
 Genre proposals use the existing 128-byte catalog limit; longer genre text stays in evidence.
 Catalog lookup must remain enabled for this workflow. Imported and catalog alternatives stay
 visible together; conflicting values are excluded from bulk selection. Rejected source suggestions
 remain accessible in **Rejected suggestions**, just like other cleanup proposals.
+
+The Library tag inspector also edits Release date, Original release date and Composer directly,
+including across selected tracks. Only changed fields are saved. Dates and credits appear below
+track titles and can be searched. After upgrading, rescan to index richer tags already in your files;
+this scan does not rewrite audio tags. Existing indexed years initially appear as year-only dates.
+See [format mappings and compatibility](docs/LIBRARY_RICH_METADATA.md).
 
 Transient MusicBrainz failures receive one paced retry, capped at ten added retries per run.
 Long provider cooldowns return partial results with a retry-later note. Refresh preserves that

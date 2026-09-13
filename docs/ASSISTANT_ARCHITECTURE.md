@@ -348,12 +348,12 @@ field types, up to 500 unique tracks in the selected scope; arbitrary paths and 
 are not accepted. Local cleanup hypotheses can improve retrieval without first writing tags.
 An import may include a nonempty `source` reference (at most 512 bytes, no control characters)
 and explicit `propose: true`. This adds unchecked, low-confidence `imported_metadata` proposals
-for existing writable title/artist/album/album-artist/genre/position/year fields, including when
+for writable title/artist/composer/album/album-artist/genre/position/date fields, including when
 catalog identity is unresolved. The source is an attributed operator observation, not a fetched
 URL. Genre proposals retain the existing 128-byte catalog limit. The source does not establish an
-independently verified recording identity. Release `date` accepts real calendar dates
-at year/month/day precision and proposes only the existing numeric year; `original_date` and
-identifiers remain observations. Imports without `propose` remain retrieval evidence only.
+independently verified recording identity. Release `date` and `original_date` accept real calendar dates
+at year/month/day precision and propose `release_date` and `original_release_date` respectively.
+`composer` proposes an explicit composition credit. Identifiers remain observations. Imports without `propose` remain retrieval evidence only.
 The source and proposal mode participate in evidence signatures; source proposals are appended
 once per response after catalog-cache reuse and never contaminate the stored catalog result.
 The existing one-value-per-field selection, rejection pool and apply/journal own these proposals.
@@ -428,7 +428,13 @@ tracks in one folder; its proposals start unchecked. Corroborated high-confidenc
 from filenames/disc folders can support assignment without changing indexed tags; authored/imported positions take precedence
 and conflicting position observations suppress filename fallback. Low-confidence number guesses
 are excluded from assignment hypotheses. Recording first-release date is retained
-separately from edition year. MusicBrainz genres and credits remain attributed observations;
+separately from edition release date and never supplies the album original-release date. A selected
+edition supplies its full date, and its release group may supply an explicit first-release date.
+Matching catalog dates with less precision do not replace more precise authored dates. Composer
+proposals fill empty composer tags only from explicit composer relationships on one performed work;
+medleys, malformed/missing credit members and oversized lists abstain. Artist credits, lyricists,
+and free-text credit notes never substitute for composer relationships. Existing composer tags
+remain authored; explicit source imports can propose replacements. Other credits remain observations;
 each eligible detailed edition also retains its matched release-track ID and catalog
 disc/track numbers in review notes, including unchanged or unknown positions. An unusable
 assignment is reported separately from a matched slot with missing numbers. Catalog title

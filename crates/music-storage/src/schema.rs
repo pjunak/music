@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 13;
+pub const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
@@ -30,6 +30,8 @@ const HASHED_SESSIONS_SCHEMA_SQL: &str = include_str!("../migrations/0011_hashed
 const MODEL_BATCH_SCHEMA_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
 const CLEANUP_REJECTIONS_SCHEMA_SQL: &str =
     include_str!("../migrations/0013_cleanup_rejections.sql");
+const RICH_TRACK_METADATA_SCHEMA_SQL: &str =
+    include_str!("../migrations/0014_rich_track_metadata.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
@@ -93,6 +95,9 @@ const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
     ("cleanup_track_enrichments", "evidence_revision"),
     ("tracks", "display_title"),
     ("tracks", "origin"),
+    ("tracks", "release_date"),
+    ("tracks", "original_release_date"),
+    ("tracks", "composer"),
     ("track_analyses", "metrics_json"),
     ("assistant_model_roles", "conformance_status"),
     ("assistant_model_roles", "conformance_error_code"),
@@ -634,6 +639,9 @@ async fn expected_shape() -> Result<(DatabaseShape, TableShape), StorageError> {
         .await?;
     sqlx::raw_sql(MODEL_BATCH_SCHEMA_SQL).execute(&pool).await?;
     sqlx::raw_sql(CLEANUP_REJECTIONS_SCHEMA_SQL)
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(RICH_TRACK_METADATA_SCHEMA_SQL)
         .execute(&pool)
         .await?;
     let shape = read_shape(&pool).await;

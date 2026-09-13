@@ -4126,3 +4126,9 @@ kbd,
   color: var(--muted-strong);
   font-size: var(--text-base);
 }
+
+.track-metadata-details {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

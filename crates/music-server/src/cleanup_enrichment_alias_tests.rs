@@ -212,6 +212,9 @@ mod tests {
             id: TrackId::new(1)?,
             path: LibraryPath::parse("album/song.mp3")?,
             metadata: TrackMetadata {
+                release_date: String::new(),
+                original_release_date: String::new(),
+                composer: String::new(),
                 title: "Song".into(),
                 artist: "Artist feat. Guest".into(),
                 album_artist: String::new(),

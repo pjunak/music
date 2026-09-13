@@ -275,3 +275,15 @@ test("CLI comparison reads retained exports, produces JSON and leaves input file
     await assert.rejects(promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths, "all"]), /never combine/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("scores precise dates and composer fields without converting them to years", () => {
+  const labeled = cohort();
+  labeled.tracks[0].fields = {
+    release_date: { current: "2024", acceptable: ["2024-02-29"] },
+    original_release_date: { current: "", acceptable: ["1998-07"] },
+    composer: { current: "", acceptable: ["久石 譲"] },
+  };
+  const predicted = plan(1);
+  predicted.ops = [op("release_date", "2024", "2024-02-29"), op("original_release_date", "", "1998-07"), op("composer", "", "久石 譲")];
+  assert.equal(scorePilot(labeled, run([predicted])).all.useful_corrections, 3);
+});
