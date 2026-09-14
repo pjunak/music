@@ -38,7 +38,8 @@ concurrency:
 jobs:
   rust:
     name: Rust workspace
-    runs-on: ubuntu-latest
+    # Fixed glibc baseline for the downloadable x86-64 appliance.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       MUSIC_TEST_FFMPEG: /usr/bin/ffmpeg
@@ -85,6 +86,7 @@ jobs:
           node --test tools/mood-pilot.test.mjs
           node --test tools/cleanup-pilot.test.mjs
           node --test .github/scripts/workflow-policy.test.mjs
+          node --test .github/scripts/publish-output.test.mjs
           node --test .github/scripts/rust-architecture.test.mjs
           node .github/scripts/rust-architecture.mjs
           node --test .github/scripts/rewrite-tree.test.mjs
@@ -112,6 +114,26 @@ jobs:
 
       - name: Build the release output client
         run: cargo build --locked --release -p music-output --bin music-output
+
+      - name: Package and check the Debian appliance download
+        run: |
+          bash .github/scripts/package-output.sh
+          bash -n .github/scripts/package-output.sh .github/scripts/smoke-output.sh
+          docker run --rm --cpus 2 --memory 1g \
+            -v "$PWD/dist/music-output:/package:ro" \
+            -v "$PWD/.github/scripts/smoke-output.sh:/smoke.sh:ro" \
+            debian:13-slim sh -ec '
+              apt-get -qq -o Acquire::Retries=3 update
+              apt-get -qq -o Acquire::Retries=3 install --yes --no-install-recommends mpv curl ca-certificates procps
+              timeout 90 bash /smoke.sh
+            '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-output-linux-x86_64
+          path: dist/music-output/
+          if-no-files-found: error
+          retention-days: 30
 
   dependency-audit:
     name: Dependency policy and advisories

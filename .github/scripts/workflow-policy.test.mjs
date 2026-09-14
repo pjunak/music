@@ -29,3 +29,14 @@ test("both reusable and manual inputs enable the container by default", () => {
   assert.equal(inputs.length, 2);
   for (const [input] of inputs) assert.match(input, /        default: true/);
 });
+
+
+test("output publication waits for verification and image smoke tests on main", () => {
+  const release = readFileSync(new URL("../workflows/build-and-dispatch.yml", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const output = release.split("\n  output-release:\n")[1]?.split("\n  deploy:\n")[0];
+  assert.match(output, /needs: \[verify, release\]/);
+  assert.match(output, /if: github.ref == 'refs\/heads\/main'/);
+  assert.match(output, /name: music-output-linux-x86_64/);
+  assert.match(output, /contents: write/);
+  assert.match(workflow, /runs-on: ubuntu-24.04/);
+});

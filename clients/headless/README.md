@@ -10,50 +10,86 @@ It's a deliberately *dumb* player — ambient music + soundboard SFX, no crossfa
 colouring (those are a browser-engine feature). That's the right trade-off for a
 leave-it-on-a-shelf speaker box.
 
-## Install (Debian/Ubuntu)
+## Tested Linux download
 
-```sh
-# 1. Install mpv. The appliance controls subprocesses over local JSON IPC;
-#    it does not link libmpv or require Python.
-sudo apt update && sudo apt install -y mpv
+Each current `main` commit that passes the release checks publishes a
+[GitHub release](https://github.com/pjunak/music/releases/latest) containing
+`music-output-linux-x86_64.tar.gz`, `SHA256SUMS` and `REVISION`. The download is
+for **x86-64 Debian 13 / Ubuntu 24.04 or newer** (glibc 2.39 or newer). It needs
+mpv and trusted system CA certificates, but no Rust compiler or GitHub token.
+Other architectures, including ARM Raspberry Pi boards, currently build from source.
 
-# 2. Build on the target (or copy a release binary built for the target architecture).
-cargo build --locked --release -p music-output
-sudo install -D -m 0755 target/release/music-output /opt/music-output/music-output
+A release is named `music-output-<full commit ID>`. This identifies the tested
+source without waiting for a version-number change. CI reuses the binary it tested;
+reruns never replace already published bytes. Publishing makes an update available
+and does not install it on any device.
+
+### D&D table: install, update and rollback
+
+Use the table's [Music installer](https://github.com/pjunak/dnd-table#music-output):
+
+```bash
+# From the updated dnd-table source folder. The same command installs or updates.
+bash install-music.sh
+# Restore the previous player and service if necessary.
+bash install-music.sh --rollback
 ```
 
-## Run it once to test
+This checks the package checksum and source revision before stopping the old player.
+It preserves `/etc/music-output.env`, the existing `dndtable` account and its stable
+client ID. The old binary and unit are saved; a startup failure restores them.
+Legacy runtime files stay available for rollback until the physical check below
+passes. The display/kiosk installation and normal table Update button stay separate.
 
-```sh
-MUSIC_SERVER_URL=http://192.168.1.50:8000 /opt/music-output/music-output
+### Other Linux speaker boxes
+
+Download and verify the public package before installing it:
+
+```bash
+mkdir -p music-output-download && cd music-output-download
+# Resolve latest once so both files come from the same source revision.
+release=$(curl --fail --silent --show-error --location --output /dev/null --write-out '%{url_effective}' https://github.com/pjunak/music/releases/latest)
+base="${release/\/tag\//\/download\/}"
+curl --fail --show-error --location --remote-name "$base/music-output-linux-x86_64.tar.gz"
+curl --fail --show-error --location --remote-name "$base/SHA256SUMS"
+sha256sum -c SHA256SUMS
+tar -xzf music-output-linux-x86_64.tar.gz
+sudo apt update && sudo apt install -y mpv ca-certificates
+sudo install -D -m 0755 music-output /opt/music-output/music-output
 ```
 
-You should see it connect and register under the supplied name (default: the hostname). It
-immediately appears in the Console's **Outputs** picker. Saving it in Settings → Devices is
-optional; enabling **output by default** there makes the server auto-activate its stable
-`client_id` whenever it reconnects.
+For a fresh systemd installation, create `/etc/music-output.env` containing:
 
-## Run it forever (systemd)
-
-```sh
-# config
-sudo tee /etc/music-output.env >/dev/null <<'EOF'
-MUSIC_SERVER_URL=http://192.168.1.50:8000
+```ini
+MUSIC_SERVER_URL=http://your-music-server:8000
 MUSIC_OUTPUT_NAME=Living-room speaker
-# optional: expose a tiny LAN on/off + volume endpoint (see "control surface" below)
+# Optional loopback control endpoint:
 MUSIC_CONTROL_PORT=8731
-EOF
+```
 
-# service
+Then install the included service and start it:
+
+```bash
 sudo cp music-output.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now music-output
-journalctl -u music-output -f          # watch it
+journalctl -u music-output -f
 ```
 
-The unit uses a dynamic unprivileged user, adds only the host's `audio` group, and keeps its stable
-client identity in systemd's protected `/var/lib/music-output` state directory. Filesystem access is
-otherwise read-only; no long-lived service account or writable home directory is required.
+The generic unit uses a dynamic unprivileged user and stores its identity in
+`/var/lib/music-output`. When migrating an existing speaker, retain its service
+account and state directory instead of switching to this fresh-install unit.
+The table installer handles that migration for the `dndtable` account.
+
+### Build from source
+
+```bash
+cargo build --locked --release -p music-output
+MUSIC_SERVER_URL=http://your-music-server:8000 target/release/music-output
+```
+
+The device appears in the Console's Outputs picker. Saving it in Settings → Devices
+is optional; output by default makes the server activate its stable identity on reconnect.
 
 ## Options
 
