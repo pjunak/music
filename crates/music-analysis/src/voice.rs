@@ -36,7 +36,7 @@ const MAX_AUDIO_SECONDS: u64 = 24 * 60 * 60;
 const FRAMES_PER_CHUNK: usize = 8_192;
 const VOICE_REQUEST_CAPACITY: usize = 1;
 const VOICE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-const TRACT_RUNTIME_ID: &str = "tract-tensorflow/0.23.5+musicnn-compat/v1+preprocess/v1";
+const TRACT_RUNTIME_ID: &str = "tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoiceAnalysisDocument {

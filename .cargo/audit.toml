@@ -1,4 +1,4 @@
-# Lofty 0.25.1 uses `paste` only while compiling its macro expansions. The
+# Lofty 0.25.2 uses `paste` only while compiling its macro expansions. The
 # advisory records that the finished crate is archived; it reports no
 # vulnerability or unsoundness. Remove this exception when Lofty replaces it.
 [advisories]
