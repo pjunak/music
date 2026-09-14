@@ -13,8 +13,12 @@ output=$(cd "$output" && pwd)
 stage=$(mktemp -d)
 trap 'rm -rf -- "$stage"' EXIT
 install -m 0755 "$source_binary" "$stage/music-output"
-install -m 0644 clients/headless/README.md clients/headless/music-output.service "$stage/"
+install -m 0644 clients/headless/music-output.service "$stage/"
+# The download remains readable outside a source checkout.
+sed "s|(\.\./README\.md)|(https://github.com/pjunak/music/blob/$sha/clients/README.md)|g" \
+  clients/headless/README.md > "$stage/README.md"
 printf '%s\n' "$sha" > "$stage/REVISION"
+chmod 0644 "$stage/README.md" "$stage/REVISION"
 # Stable metadata keeps reruns of an unchanged binary byte-identical.
 tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
   -C "$stage" -cf - music-output REVISION README.md music-output.service | \
