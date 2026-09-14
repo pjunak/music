@@ -734,7 +734,7 @@ non-critical service was:
 - [x] Validate and deploy the retained host mounts for the database/data directory, music and SFX
   libraries, authored modes, legacy device import, credential key, and checksum-pinned voice model.
 - [x] Complete the live additive migration. Infrastructure
-  [run 33264033294](https://github.com/pjunak/junak.eu/actions/runs/33264033294) pulled the exact
+  [run 33264033294](https://github.com/pjunak/infra/actions/runs/33264033294) pulled the exact
   dispatched image and reported `music-server` healthy; public readiness reports the database and
   database schema as `ready`.
 - [x] Fast-forward `main` to the verified rewrite without rewriting history, with explicit owner

@@ -516,5 +516,8 @@ Contents read and Actions write. The target is the `music` stack;
 Use **Deploy published release** with a completed build run ID to retry its
 retained `published-image` artifact without rebuilding. The shared pinned infra
 client checks the source and publication job, dispatches the exact digest and
-waits for the matching health-checked rollout. Failure or an unknown result fails
-the workflow. See the [shared contract](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md).
+waits for the exact returned deployment run and its health-checked result.
+Dispatch uses infra's main-only workflow with `service=music`, full source `sha`,
+immutable `image_ref` and unique `request_id`; the infra registry approves that
+stack/image pair. Failure or an unknown result fails the workflow. Inspect infra
+Actions before retrying an ambiguous request. See the [shared contract](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md).

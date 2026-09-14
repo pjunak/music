@@ -65,8 +65,14 @@ clients/                   external output and authoring contracts
 - Durable jobs declare restartability and bounded cancellation. Preserve
   transaction/recovery ordering and never substitute development data for live
   data. Detailed persistence rules are in the engineering reference.
-- Deployment rollout belongs to the infrastructure repository. This repository
-  builds its image and does not SSH to production.
+- Production rollout belongs to `pjunak/infra`, target `music`. This repo
+  verifies/publishes its image and waits for the exact main-only infrastructure
+  run to deploy the immutable digest and verify health. It never SSHes to
+  production. The [deployment guide](README.md#automated-deployment) and infra's
+  [shared contract](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md)
+  own token scope, pinned client use and **Deploy published release** retries.
+  `INFRA_SERVICE` is unused here; headless output and Baton installation remain
+  separate from server rollout.
 
 ## Completion
 
