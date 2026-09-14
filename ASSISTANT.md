@@ -539,6 +539,25 @@ preserve your existing Romanized/native-script spelling. All artists and join ph
 agree; abbreviated or otherwise different same-script spellings still receive ordinary review
 proposals. Missing evidence stays visible and never turns an alias into a confirmed recording.
 
+The folder has one **Album edition for this folder** selector. Switching editions replaces
+its suggestions, including full dates, and leaves new suggestions unchecked. **Keep edition
+unresolved** removes those edition proposals while preserving independent recording/imported
+suggestions. Open **Compare editions and tracklist differences** to see MusicBrainz release
+descriptions, formats, labels, dates, barcodes/catalog numbers and links to the complete releases.
+Unique songs show whether their title is present in your folder and their duration agrees.
+Title/duration counts are descriptive clues, separate from strict recording assignment (which
+also depends on artist tags). A preferred edition is shown only for a complete, unique
+tracklist/duration match with a distinguishing song. Ties, incomplete data, mixed folders,
+unknown durations and duplicate titles do not establish a preferred edition. Check the original
+store download or booklet; converting WAV to MP3 does not change the source edition.
+
+**Ask AI about these editions** uses the configured Library cleanup role, its current disclosure,
+and an explicit one-request consent. It explains bounded catalog comparisons and can recommend
+only a supported supplied edition or abstain. **Use suggested edition** is a separate operator
+action; it does not apply or tick changes. A fresh catalog lookup is needed for older saved
+results without comparisons. The updated harness requires fresh conformance and the full
+fourteen-case quality suite; no live-library AI request is made by deployment itself.
+
 Deluxe, expanded and remastered album alternatives now remain in the edition selector when
 their base title agrees. They require an explicit edition choice. If a known edition is outside
 the shortlist, open **Find a known album edition** for the folder, paste its MusicBrainz release
@@ -591,7 +610,7 @@ Long provider cooldowns return partial results with a retry-later note. Refresh 
 cooldown and can retry incomplete results later; it does not override the provider's limit.
 
 For ambiguous catalog results, configure **Library cleanup** in **AI setup**, verify its
-connection, pass conformance and all eight synthetic quality cases, and enable the role. On an
+connection, pass conformance and all fourteen synthetic quality cases, and enable the role. On an
 unresolved track, choose **Review ambiguous candidates with AI** and review the disclosure.
 Explicit consent permits one request, which may incur provider charges. Only bounded indexed
 metadata, supplied candidates and comparison facts are sent. The model can abstain or recommend

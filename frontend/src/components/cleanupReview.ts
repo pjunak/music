@@ -93,3 +93,27 @@ export function releaseIdFromInput(value: string): string | null {
   }
   return /^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(id) ? id.toLowerCase() : null;
 }
+
+/** Replace the complete edition proposal set, including old/duplicated date operations. */
+export function replaceEdition(result: CleanupAnalyzeResult, catalogs: CleanupEnrichmentPlan[], folder: string, releaseId: string) {
+  const folderOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
+  const editionFields = new Set(["album", "album_artist", "track_no", "disc_no", "year", "release_date", "original_release_date"]);
+  const removed = new Set<string>();
+  const plans = result.plans.map((plan) => {
+    if (folderOf(plan.path) !== folder) return plan;
+    const catalog = catalogs.find((item) => item.track_id === plan.track_id);
+    const alternatives = new Set(catalog?.release_choices?.flatMap((choice) => choice.ops.map((op) => op.op_id)));
+    const retained = plan.ops.filter((op) => {
+      const owned = alternatives.has(op.op_id) || op.op_id.startsWith(`edition:${plan.track_id}:`)
+        || (op.rules.includes("catalog_identity") && editionFields.has(op.field ?? ""));
+      if (owned) removed.add(op.op_id);
+      return !owned;
+    });
+    const choice = catalog?.release_choices?.find((item) => item.id === releaseId);
+    const added = (choice?.ops ?? []).map((op) => ({ ...op, review_context: catalogReviewContext(catalog!) }));
+    // Stable operation IDs also repair repeated entries in saved or older reviews.
+    const ops = [...new Map([...retained, ...added].map((op) => [op.op_id, op])).values()];
+    return { ...plan, ops };
+  });
+  return { result: { ...result, plans }, removed };
+}

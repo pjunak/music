@@ -26,6 +26,14 @@ const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
         include_str!("../../../music-domain/src/cleanup.rs"),
     ),
     (
+        "assistant/model_library_edition.rs",
+        include_str!("model_library_edition.rs"),
+    ),
+    (
+        "cleanup_enrichment/edition_review.rs",
+        include_str!("../cleanup_enrichment/edition_review.rs"),
+    ),
+    (
         "assistant/model_library_cleanup.rs",
         include_str!("model_library_cleanup.rs"),
     ),
@@ -197,6 +205,8 @@ fn artifact_affects_role(name: &str, role: &str) -> bool {
         "cleanup_enrichment/workflow.rs"
         | "cleanup_enrichment.rs"
         | "music-domain/cleanup.rs"
+        | "assistant/model_library_edition.rs"
+        | "cleanup_enrichment/edition_review.rs"
         | "assistant/model_library_cleanup.rs"
         | "assistant/model_jobs/library_cleanup.rs"
         | "cleanup_enrichment/ai.rs"

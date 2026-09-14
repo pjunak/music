@@ -80,8 +80,8 @@
     "reason": "Adds authenticated availability and versioned disclosure for optional Library cleanup candidate review. Only the web cleanup workflow consumes this endpoint; playback and Baton contracts are unaffected."
   },
   "POST /api/library/cleanup/model/jobs#operation": {
-    "sha256": "d94b77f532014af4c45cd33d0439739597718211434a39c118b3f7c84a35a0aa",
-    "reason": "Adds authenticated single-track candidate review with current consent, conformance and quality gates. One checkpointed provider attempt yields unchecked catalog-owned title/artist proposals; it never writes tags or retries uncertain cost automatically. The web cleanup client is updated together; Baton does not consume this route."
+    "sha256": "3dc9acb7fb945540cc45a0afaa9c787f578e5a1fd4c5d34cb237e3c522661497",
+    "reason": "Adds authenticated review with current consent, conformance and quality gates. Optional edition_review defaults to false, preserving recording review requests. Edition mode returns advice and a supplied release ID with no operations; the browser requires a separate edition choice. One checkpointed provider attempt never writes tags or retries uncertain cost automatically. Web cleanup is updated together; Baton does not consume this route."
   },
   "GET /api/assistant/providers/roles#responses": {
     "sha256": "25bf832fe5d3a100b3d3311baa906cc772bb57d8909f33690ae126cb36f43b9a",

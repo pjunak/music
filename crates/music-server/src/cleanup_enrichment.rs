@@ -1153,7 +1153,37 @@ fn parse_release_detail(
         track_no = None;
         disc_no = None;
     }
+    let media = value["media"]
+        .as_array()
+        .ok_or(CatalogError::InvalidResponse)?;
+    let declared_tracks = media.iter().try_fold(0_u64, |sum, medium| {
+        sum.checked_add(medium["track-count"].as_u64()?)
+    });
     Ok(ReleaseDetail {
+        disambiguation: value
+            .get("disambiguation")
+            .and_then(Value::as_str)
+            .and_then(bounded_catalog_text)
+            .unwrap_or_default(),
+        formats: media
+            .iter()
+            .take(20)
+            .filter_map(|medium| medium["format"].as_str().and_then(bounded_catalog_text))
+            .collect(),
+        labels: value["label-info"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(20)
+            .filter_map(|label| {
+                label["label"]["name"]
+                    .as_str()
+                    .and_then(bounded_catalog_text)
+            })
+            .collect(),
+        tracklist_complete: !slots.is_empty()
+            && media.len() <= MAX_MEDIA
+            && declared_tracks == Some(slots.len() as u64),
         id: expected_release_id.to_owned(),
         title: value
             .get("title")
@@ -1443,6 +1473,30 @@ mod tests {
         assert!(
             parse_release_detail(&json!({"id": "different"}), "expected", "recording").is_err()
         );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod edition_display_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn release_description_and_completeness_survive_parsing() -> Result<(), CatalogError> {
+        let release = "00000000-0000-0000-0000-000000000001";
+        let recording = "00000000-0000-0000-0000-000000000002";
+        let mut payload = json!({"id":release,"title":"Album","disambiguation":"GOG.com MP3",
+        "label-info":[{"label":{"name":"Fixture Label"}}],
+        "media":[{"format":"Digital Media","position":1,"track-count":1,"tracks":[
+            {"id":"00000000-0000-0000-0000-000000000003","position":1,"title":"Finale","recording":{"id":recording}}
+        ]}]});
+        let parsed = parse_release_detail(&payload, release, recording)?;
+        assert_eq!(parsed.disambiguation, "GOG.com MP3");
+        assert_eq!(parsed.formats, ["Digital Media"]);
+        assert_eq!(parsed.labels, ["Fixture Label"]);
+        assert!(parsed.tracklist_complete);
+        payload["media"][0]["track-count"] = json!(2);
+        assert!(!parse_release_detail(&payload, release, recording)?.tracklist_complete);
         Ok(())
     }
 }

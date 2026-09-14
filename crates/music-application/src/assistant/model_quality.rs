@@ -26,7 +26,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         id: super::LIBRARY_CLEANUP_QUALITY_ID,
         role_id: "library_cleanup",
         label: "Library metadata matching quality",
-        description: "Runs eight synthetic candidate, abstention, Unicode, version, order and injection cases. No live library data are sent.",
+        description: "Runs fourteen synthetic recording and edition comparison, abstention, Unicode, version, order and injection cases. No live library data are sent.",
         suite_id: super::LIBRARY_CLEANUP_SUITE_ID,
         job_kind: "assistant.model-evaluation.library-cleanup-quality-v1",
     },

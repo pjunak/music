@@ -58,6 +58,7 @@ async fn status(
             "This track's title, artist, album and duration",
             "Up to 25 catalog candidates with opaque IDs, titles, artists, album names and durations",
             "Locally computed comparison facts and evidence references",
+            "For edition advice: up to five release titles/descriptions, folder comparison counts and eight distinguishing song titles per edition",
         ],
         never_shared: vec![
             "Audio and artwork",
@@ -72,6 +73,8 @@ async fn status(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CleanupModelStart {
+    #[serde(default)]
+    edition_review: bool,
     track_id: i64,
     catalog_job_id: String,
     disclosure_version: String,
@@ -109,6 +112,7 @@ async fn start(
             )
         })?;
     let parameters = json!(CleanupAiParameters {
+        edition_review: payload.edition_review,
         track_id: payload.track_id,
         catalog_job_id: payload.catalog_job_id,
         consent: true,

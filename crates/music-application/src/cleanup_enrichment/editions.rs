@@ -69,6 +69,7 @@ pub(super) async fn resolve_editions(
     if ids.len() > 5 || !recording.releases_complete {
         result.notes.push("Release browsing is bounded to 100 editions and five detailed alternatives. More editions may exist; import a release ID to target one explicitly.".into());
     }
+    let mut review_releases = Vec::new();
     for id in ids.iter().take(5) {
         let mut detail = match connector.release(id, recording_id).await {
             Ok(detail) => detail,
@@ -165,10 +166,19 @@ pub(super) async fn resolve_editions(
             "country": detail.country, "barcode": detail.barcode, "catalog_numbers": detail.catalog_numbers,
             "assignment": assignment, "ops": ops,
         }));
+        review_releases.push(detail.clone());
         if unique {
             result.preserve_album_artist = credit.preserve;
             result.selected = Some(detail);
         }
+    }
+    let comparisons = super::edition_review::compare_editions(
+        &review_releases,
+        siblings,
+        !result.partial && ids.len() == review_releases.len(),
+    );
+    for (choice, review) in result.choices.iter_mut().zip(comparisons) {
+        choice["edition_review"] = json!(review);
     }
     if result.selected.is_none() && !result.choices.is_empty() {
         result.notes.push("Recording identified; choose an album edition to propose its date, album artist and track positions.".into());

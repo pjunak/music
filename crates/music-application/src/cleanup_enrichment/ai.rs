@@ -1,9 +1,9 @@
 use super::{CleanupEnrichmentRepository, cleanup_enrichment_source_signature};
 use crate::assistant::{
     CleanupModelDecision, LIBRARY_CLEANUP_DISCLOSURE, LIBRARY_CLEANUP_ENGINE_ID,
-    LIBRARY_CLEANUP_QUALITY_ID, LibraryCleanupModelTask, ModelQualityService,
-    ModelReviewDestination, ModelRunManifest, ProviderUsageAccumulator, StructuredModelTransport,
-    execute_recorded_provider_request,
+    LIBRARY_CLEANUP_QUALITY_ID, LibraryCleanupModelTask, LibraryCleanupTask,
+    LibraryEditionModelTask, ModelQualityService, ModelReviewDestination, ModelRunManifest,
+    ProviderUsageAccumulator, StructuredModelTransport, execute_recorded_provider_request,
 };
 use crate::cleanup::{CleanupScope, CleanupService};
 use crate::cleanup_sources::CleanupSourceService;
@@ -30,6 +30,8 @@ pub struct CleanupAiJobHandler {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CleanupAiParameters {
+    #[serde(default)]
+    pub edition_review: bool,
     pub track_id: i64,
     pub catalog_job_id: String,
     pub consent: bool,
@@ -74,7 +76,7 @@ impl CleanupAiJobHandler {
                     .find(|p| p["track_id"].as_i64() == Some(parameters.track_id))
             })
             .ok_or_else(|| JobHandlerError::new("cleanup_catalog_track_unavailable"))?;
-        if plan["status"].as_str() != Some("unmatched") {
+        if !parameters.edition_review && plan["status"].as_str() != Some("unmatched") {
             return Err(JobHandlerError::new("cleanup_identity_already_resolved"));
         }
         if !plan
@@ -108,12 +110,35 @@ impl CleanupAiJobHandler {
         {
             return Err(JobHandlerError::new("cleanup_evidence_stale"));
         }
-        let task = LibraryCleanupModelTask::new(
-            track,
-            serde_json::from_value(plan["candidates"].clone())
-                .map_err(|_| JobHandlerError::new("cleanup_candidates_invalid"))?,
-        )
-        .map_err(|e| JobHandlerError::new(e.code))?;
+        let task = if parameters.edition_review {
+            let reviews = plan["release_choices"]
+                .as_array()
+                .ok_or_else(|| JobHandlerError::new("cleanup_edition_evidence_unavailable"))?
+                .iter()
+                .map(|choice| {
+                    let review: super::edition_review::EditionReview =
+                        serde_json::from_value(choice["edition_review"].clone()).map_err(|_| {
+                            JobHandlerError::new("cleanup_edition_evidence_unavailable")
+                        })?;
+                    if choice["id"].as_str() != Some(&review.release_id) {
+                        return Err(JobHandlerError::new("cleanup_edition_evidence_invalid"));
+                    }
+                    Ok(review)
+                })
+                .collect::<Result<Vec<_>, JobHandlerError>>()?;
+            LibraryCleanupTask::Edition(
+                LibraryEditionModelTask::new(reviews).map_err(|e| JobHandlerError::new(e.code))?,
+            )
+        } else {
+            LibraryCleanupTask::Recording(
+                LibraryCleanupModelTask::new(
+                    track,
+                    serde_json::from_value(plan["candidates"].clone())
+                        .map_err(|_| JobHandlerError::new("cleanup_candidates_invalid"))?,
+                )
+                .map_err(|e| JobHandlerError::new(e.code))?,
+            )
+        };
         let request = task.request();
         let mut usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(
             context,
@@ -194,6 +219,8 @@ impl CleanupAiJobHandler {
         Ok(
             json!({"schema_version": "assistant-library-cleanup-result/v1", "engine_id": LIBRARY_CLEANUP_ENGINE_ID,
             "track_id": parameters.track_id, "source_signature": signature, "role_fingerprint": role.fingerprint,
+            "mode": if parameters.edition_review { "edition" } else { "recording" },
+            "recommended_release_id": decision.candidate_id.as_deref().and_then(|id| task.release_id(id)),
             "decision": decision, "ops": ops, "usage": usage.summary()}),
         )
     }

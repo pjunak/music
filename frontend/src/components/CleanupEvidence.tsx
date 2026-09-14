@@ -3,22 +3,8 @@ import type { CleanupEnrichmentPlan, CleanupImportedEvidence } from "@/core/api"
 import { toast } from "@/core/toast";
 import { releaseIdFromInput } from "./cleanupReview";
 
-export function CleanupEvidence({ plan, edition, onEdition }: {
-  plan: CleanupEnrichmentPlan;
-  edition: string;
-  onEdition: (id: string) => void;
-}) {
+export function CleanupEvidence({ plan }: { plan: CleanupEnrichmentPlan }) {
   return <div className="cleanup-evidence">
-    {(plan.release_choices?.length ?? 0) > 0 && <label>
-      Album edition for this folder
-      <select value={edition} onChange={(event) => onEdition(event.target.value)}>
-        <option value="">Keep edition unresolved</option>
-        {plan.release_choices?.map((release) => <option key={release.id} value={release.id}>
-          {release.title} · {release.date ?? "date unknown"} · {release.country ?? "country unknown"} · {release.catalog_numbers.join(", ") || release.id.slice(0, 8)} · {release.assignment.matched}/{release.assignment.considered} tracks matched
-        </option>)}
-      </select>
-      <span className="muted small">Changes the proposed edition for tracks in this folder with that release available. New proposals start unchecked.</span>
-    </label>}
     <details>
       <summary>Evidence and alternatives · track {plan.track_id}</summary>
       {plan.retrieved_at && <p>Retrieved {new Date(plan.retrieved_at * 1000).toLocaleString()}</p>}

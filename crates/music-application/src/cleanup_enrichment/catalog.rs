@@ -139,6 +139,14 @@ pub struct ReleaseSummary {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ReleaseDetail {
+    #[serde(default)]
+    pub disambiguation: String,
+    #[serde(default)]
+    pub formats: Vec<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub tracklist_complete: bool,
     pub id: String,
     pub title: String,
     pub artist: String,

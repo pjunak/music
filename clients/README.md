@@ -336,6 +336,13 @@ release choices and field provenance. Playback/WS track DTOs are unchanged.
 
 `GET /api/library/cleanup/model` reports the central role/quality gate and versioned disclosure.
 `POST /api/library/cleanup/model/jobs` takes `track_id`, `catalog_job_id`, `disclosure_version` and
-`consent: true`. It reviews one unresolved track from a successful catalog job and returns only
+`consent: true`, with optional `edition_review: true` for album edition advice (omission defaults
+to the existing recording review). Edition advice uses the referenced track's retained release
+comparisons, returns `mode: "edition"`, `recommended_release_id` or null and an empty `ops` list.
+The client must explicitly request an edition change after displaying the advice. Disclosure v2
+adds up to five release descriptions and eight distinguishing titles per release, plus folder
+comparison counts; paths, filenames, audio and internal IDs remain excluded. Release choices
+may now include `edition_review` comparison evidence; tolerate its absence in old job results.
+The default recording mode reviews one unresolved track from a successful catalog job and returns only
 unchecked title/artist proposals or abstention. It checks source/track/role freshness and never
 applies changes. Neither new API is needed by output clients or Baton playback.

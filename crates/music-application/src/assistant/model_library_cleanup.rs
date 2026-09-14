@@ -11,9 +11,9 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 pub const LIBRARY_CLEANUP_QUALITY_ID: &str = "library-cleanup-quality-v1";
-pub const LIBRARY_CLEANUP_SUITE_ID: &str = "closed-catalog-adjudication-v2";
-pub const LIBRARY_CLEANUP_ENGINE_ID: &str = "model-catalog-adjudication/v1";
-pub const LIBRARY_CLEANUP_DISCLOSURE: &str = "assistant-library-cleanup-disclosure/v1";
+pub const LIBRARY_CLEANUP_SUITE_ID: &str = "closed-catalog-adjudication-v3";
+pub const LIBRARY_CLEANUP_ENGINE_ID: &str = "model-catalog-adjudication/v2";
+pub const LIBRARY_CLEANUP_DISCLOSURE: &str = "assistant-library-cleanup-disclosure/v2";
 const OUTPUT: &str = "assistant-library-cleanup-output/v1";
 
 const TASK: StructuredTaskDefinition = StructuredTaskDefinition {

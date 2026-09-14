@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { catalogReviewContext, mergeEnrichment, rejectedOperationIds, reviewProposal, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
+import { mergeEnrichment, replaceEdition, rejectedOperationIds, reviewProposal, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
 import { CleanupRejectedPanel } from "@/components/CleanupRejectedPanel";
 import { CleanupEvidence, CleanupEvidenceImport, CleanupEditionTarget } from "@/components/CleanupEvidence";
+import { CleanupEditionComparison } from "@/components/CleanupEditionComparison";
 import { CleanupModelReview } from "@/components/CleanupModelReview";
 import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { CleanupCatalogCopy } from "@/components/CleanupCatalogCopy";
@@ -588,15 +589,8 @@ export function CleanupWorkflow({
 
   async function chooseEdition(folder: string, releaseId: string) {
     if (!result) return;
-    const editionFields = new Set(["album", "album_artist", "track_no", "disc_no", "year", "release_date", "original_release_date"]);
-    const removed = new Set(result.plans.filter((plan) => folderOf(plan.path) === folder).flatMap((plan) => plan.ops)
-      .filter((op) => op.rules.includes("catalog_identity") && editionFields.has(op.field ?? "")).map((op) => op.op_id));
-    const updated = await updateReview({ ...result, plans: result.plans.map((plan) => {
-      if (folderOf(plan.path) !== folder) return plan;
-      const catalog = catalogPlanByTrack.get(plan.track_id);
-      const choice = catalog?.release_choices?.find((item) => item.id === releaseId);
-      return { ...plan, ops: [...plan.ops.filter((op) => !removed.has(op.op_id)), ...(choice?.ops ?? []).map((op) => ({ ...op, ...(catalog ? { review_context: catalogReviewContext(catalog) } : {}) }))] };
-    }) }, removed);
+    const replacement = replaceEdition(result, enrichmentSummary?.plans ?? [], folder, releaseId);
+    const updated = await updateReview(replacement.result, replacement.removed);
     if (updated) setEditions((current) => ({ ...current, [folder]: releaseId }));
   }
 
@@ -920,6 +914,10 @@ export function CleanupWorkflow({
           <section key={folder || "(root)"}>
             <h3 className="section-label cleanup-folder">{folder || "(root)"}</h3>
             {enrichmentSummary?.plans.some((plan) => folderOf(plan.path) === folder) && <CleanupEditionTarget folder={folder} disabled={busy} onTarget={(id) => prepareEditionLookup(folder, id)} />}
+            <CleanupEditionComparison key={enrichmentJob?.id ?? "local"}
+              plans={enrichmentSummary?.plans.filter((plan) => folderOf(plan.path) === folder) ?? []}
+              edition={editions[folder]} catalogJobId={enrichmentJob?.id} disabled={busy}
+              onEdition={(id) => void chooseEdition(folder, id)} />
             {folderSugg ? (
               <div className="cleanup-review-row"><label className="cleanup-op cleanup-op-folder">
                 <input
@@ -990,8 +988,6 @@ export function CleanupWorkflow({
                 ))}
                 {catalogPlanByTrack.get(plan.track_id) && <CleanupEvidence
                   plan={catalogPlanByTrack.get(plan.track_id)!}
-                  edition={editions[folderOf(plan.path)] ?? catalogPlanByTrack.get(plan.track_id)?.identity?.release_mbid ?? ""}
-                  onEdition={(id) => void chooseEdition(folderOf(plan.path), id)}
                 />}
                 {enrichmentJob && catalogPlanByTrack.get(plan.track_id)?.status === "unmatched" && (catalogPlanByTrack.get(plan.track_id)?.candidates?.length ?? 0) > 0 && <CleanupModelReview
                   trackId={plan.track_id} catalogJobId={enrichmentJob.id} onResult={(review) => void acceptModelReview(review)}

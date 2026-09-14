@@ -157,6 +157,34 @@ describe("CleanupWorkflow catalog enrichment", () => {
     });
   });
 
+  it("replaces unchecked edition dates on repeated switches and clearing", async () => {
+    const job = structuredClone(catalogJob);
+    const result = job.result as unknown as CleanupEnrichmentResult;
+    result.plans[0].identity!.release_mbid = null;
+    result.plans[0].release_choices = ["edition-a", "edition-b"].map((id) => ({
+      id, title: "Album", artist: "Artist", date: "2023", country: "XW", barcode: null, catalog_numbers: [],
+      assignment: { classification: "album", matched: 1, considered: 1, unmatched_tracks: [], unmatched_slots: [] },
+      ops: ["release_date", "original_release_date"].map((field) => ({ op_id: `edition:7:${id}:${field}`, track_id: 7, kind: "tag", field,
+        old: "2023", new: id === "edition-a" ? "2023-08-03" : "2023-08-04", rules: ["catalog_identity"], confidence: "low", verified: true })),
+    }));
+    vi.mocked(cleanupApi.enrich).mockResolvedValue(job);
+    const user = userEvent.setup(); renderWorkflow();
+    await user.click(screen.getByRole("button", { name: "Find issues" }));
+    const selector = await screen.findByRole("combobox", { name: "Album edition for this folder" });
+    for (const id of ["edition-a", "edition-b", "edition-a", "edition-b"]) {
+      await user.selectOptions(selector, id);
+      await waitFor(() => expect(selector).toHaveValue(id));
+      expect(screen.getAllByRole("button", { name: /Reject .*date suggestion/ })).toHaveLength(2);
+      expect(screen.getAllByText(id === "edition-a" ? "2023-08-03" : "2023-08-04")).toHaveLength(2);
+      for (const button of screen.getAllByRole("button", { name: /Reject .*date suggestion/ })) {
+        expect(button.parentElement?.querySelector("input")).not.toBeChecked();
+      }
+    }
+    await user.selectOptions(selector, "");
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Reject .*date suggestion/ })).not.toBeInTheDocument());
+    expect(cleanupApi.apply).not.toHaveBeenCalled();
+  });
+
   it("keeps local suggestions reviewable when a catalog request is unavailable", async () => {
     vi.mocked(cleanupApi.enrich).mockRejectedValue(new Error("catalog offline"));
     const user = userEvent.setup();

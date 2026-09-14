@@ -285,7 +285,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v22+output/v4+local-context/v2` | `assistant-model-music-tagging-disclosure/v13` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
-| Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1` | `assistant-library-cleanup-disclosure/v1` | `model-catalog-adjudication/v1` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |
+| Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1` | `assistant-library-cleanup-disclosure/v2` | `model-catalog-adjudication/v2` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |
 
 Full task output contracts are `assistant-playlist-planner-output/v1`,
 `assistant-music-tagger-output/v4`, `assistant-model-tag-cleanup-output/v2`,
@@ -532,13 +532,27 @@ title/artist matches distinguished by version evidence; missing album evidence a
 does not force abstention. Evidence text distinguishes support, absent agreement and
 hard contradictions. Provider failures retain safe execution codes.
 
-Suite `closed-catalog-adjudication-v2` retains all eight expected outcomes and the
-all-pass gate. Synthetic case results include the expected candidate (null for
+Suite `closed-catalog-adjudication-v3` retains all eight recording outcomes, adds six
+edition cases and keeps the all-pass gate. Synthetic case results include the expected candidate (null for
 abstention), validated output and bounded reason, and separate decision-mismatch
 errors from execution failures. Raw rejected output and provider error bodies are
 not retained. Harness changes require fresh conformance and a complete quality run.
 
-The eight synthetic quality cases cover version/order changes, indistinguishable recordings,
+Edition advice adds a separate closed task in `model_library_edition.rs`. The folder comparison
+in `cleanup_enrichment/edition_review.rs` uses up to 100 local tracks and 500 release slots;
+retained summaries include descriptions, formats/labels, counts and at most eight missing and
+distinguishing titles. It never changes recording identity or writable slot assignment. Advice
+requires every compared tracklist to be complete and a unique full title/duration match with a
+present distinguishing song. Duplicate titles, unknown durations, conflicting/mixed folders and
+incomplete alternatives abstain. The provider sees opaque candidate IDs and bounded facts;
+validation permits only the supported candidate with both support references. Results contain
+no operations and require a separate operator edition choice. Review replacement owns all
+edition operation IDs, deduplicates them and retains independent local/imported/recording values.
+Catalog policy v12 invalidates older cached results without these comparisons.
+
+Six synthetic edition cases add distinguishing/reordered tracklists, ties, incomplete data,
+duration conflicts and instruction injection. Together with the eight recording cases below,
+all fourteen must pass the current role fingerprint. The eight recording quality cases cover version/order changes, indistinguishable recordings,
 Unicode, absent evidence, duration contradiction and injected instructions. All must pass for a
 configured model to become usable. This is a pilot gate, not measured accuracy on a private library.
 Additional providers, OCR/audio models and broader recognition remain conditional research pilots;

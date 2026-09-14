@@ -1760,6 +1760,9 @@
           "disclosure_version": {
             "type": "string"
           },
+          "edition_review": {
+            "type": "boolean"
+          },
           "track_id": {
             "format": "int64",
             "type": "integer"

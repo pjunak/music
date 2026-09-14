@@ -11,6 +11,7 @@ mod model_batch;
 mod model_eq;
 mod model_jobs;
 mod model_library_cleanup;
+mod model_library_edition;
 mod model_playlist;
 mod model_quality;
 mod model_tag_cleanup;
@@ -49,6 +50,7 @@ pub use model_jobs::{
     model_feature_job_handlers,
 };
 pub use model_library_cleanup::*;
+pub use model_library_edition::*;
 pub use model_playlist::*;
 pub use model_quality::*;
 pub use model_tag_cleanup::*;

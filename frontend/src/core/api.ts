@@ -1291,7 +1291,17 @@ export interface CleanupImportedEvidence {
   propose?: boolean;
 }
 
+export interface CleanupEditionReview {
+  release_id: string; compared_release_ids: string[]; title: string; description: string; formats: string[]; labels: string[];
+  folder_tracks: number; compared_tracks: number; release_tracks: number;
+  title_matches: number; duration_matches: number; duration_conflicts: number;
+  distinguishing_tracks: { title: string; disc_no: number | null; track_no: number | null; present: boolean; duration_agrees: boolean }[];
+  distinguishing_tracks_total: number; missing_titles: string[]; missing_titles_total: number;
+  complete: boolean; recommended: boolean;
+}
+
 export interface CleanupReleaseChoice {
+  edition_review?: CleanupEditionReview;
   id: string;
   title: string;
   artist: string;
@@ -1355,6 +1365,8 @@ export interface CleanupModelStatus {
 
 export interface CleanupModelResult {
   schema_version: "assistant-library-cleanup-result/v1";
+  mode?: "recording" | "edition";
+  recommended_release_id?: string | null;
   track_id: number;
   decision: { decision: string; reason: string; candidate_id: string | null; evidence_ids: string[] };
   ops: CleanupOp[];
@@ -1373,9 +1385,9 @@ export const cleanupApi = {
   restoreRejected: (id: number) => api.post<CleanupReviewProposal>(`/api/library/cleanup/rejections/${id}/restore`),
   forgetRejected: (id: number) => api.delete<void>(`/api/library/cleanup/rejections/${id}`),
   modelStatus: () => api.get<CleanupModelStatus>("/api/library/cleanup/model"),
-  reviewCandidates: (trackId: number, catalogJobId: string, disclosureVersion: string) =>
+  reviewCandidates: (trackId: number, catalogJobId: string, disclosureVersion: string, editionReview = false) =>
     api.post<BackgroundJob>("/api/library/cleanup/model/jobs", {
-      track_id: trackId, catalog_job_id: catalogJobId, disclosure_version: disclosureVersion, consent: true,
+      track_id: trackId, catalog_job_id: catalogJobId, disclosure_version: disclosureVersion, consent: true, edition_review: editionReview,
     }),
   analyze: (scope: CleanupScope, rules: CleanupRuleId[]) =>
     api.post<CleanupAnalyzeResult>("/api/library/cleanup/analyze", { scope, rules }),

@@ -93,7 +93,7 @@
     "POST /api/assistant/providers/credential-storage/reset#responses": "7238f0900008144926576c2e8f7e58fe7517308fe8c205076ac5de7d2f5dd060",
     "POST /api/assistant/providers/roles/{role_id}/test#responses": "b83432452300f499ce480deaf29cd29ed03f2b5f2fc083c76b30bf385ff9789f",
     "POST /api/library/cleanup/enrichment-jobs#operation": "282a7902b9e1df5cce5254bbe2ac5abf2b86f70a809af2fbfe2add4bf0bb7ab9",
-    "POST /api/library/cleanup/model/jobs#operation": "d94b77f532014af4c45cd33d0439739597718211434a39c118b3f7c84a35a0aa",
+    "POST /api/library/cleanup/model/jobs#operation": "3dc9acb7fb945540cc45a0afaa9c787f578e5a1fd4c5d34cb237e3c522661497",
     "POST /api/library/cleanup/rejections#operation": "5a85e0e760f420a11c7b6682a90c4ff8e5e0f0cee5a0630325253e3fe938f4e9",
     "POST /api/library/cleanup/rejections/match#operation": "fa1921ca51fbfad367a0766e025215c2693da53b6f4b1f4a37a7efcb02110cfd",
     "POST /api/library/cleanup/rejections/{id}/restore#operation": "49e5e8faeea792fc2cbdf7892145e18d71a38eefde6c985e766384afb67bc428",

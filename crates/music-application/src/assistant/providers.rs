@@ -150,7 +150,7 @@ pub const MODEL_ROLES: &[ModelRoleDefinition] = &[
         description: "Review ambiguous catalog candidates using disclosed text and closed evidence references.",
         required_capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
         configuration_available: true,
-        runtime_contract: "assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1",
+        runtime_contract: "assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1",
     },
     ModelRoleDefinition {
         id: "eq_assistant",

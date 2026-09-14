@@ -1,7 +1,8 @@
 use super::*;
 use crate::assistant::{
     CleanupModelDecision, CleanupModelOutput, LIBRARY_CLEANUP_ENGINE_ID, LIBRARY_CLEANUP_SUITE_ID,
-    ModelTaskError, library_cleanup_quality_cases,
+    LibraryCleanupTask, ModelTaskError, library_cleanup_quality_cases,
+    library_edition_quality_cases,
 };
 
 impl ModelEvaluationJobHandler {
@@ -10,7 +11,12 @@ impl ModelEvaluationJobHandler {
         context: &JobExecutionContext,
         parameters: &ModelEvaluationJobParameters,
     ) -> Result<Map<String, Value>, JobHandlerError> {
-        let cases = library_cleanup_quality_cases().map_err(model_task_failure)?;
+        let mut cases = library_cleanup_quality_cases()
+            .map_err(model_task_failure)?
+            .into_iter()
+            .map(|(name, task, expected)| (name, LibraryCleanupTask::Recording(task), expected))
+            .collect::<Vec<_>>();
+        cases.extend(library_edition_quality_cases().map_err(model_task_failure)?);
         let execution = self.prepare(parameters).await?;
         let mut usage =
             start_evaluation_run(context, &execution.role, parameters, cases.len()).await?;
