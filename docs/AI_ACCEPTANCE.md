@@ -19,6 +19,29 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Library cleanup checkpoint: 2026-09-14
+
+The supplied v1 exports used Thinking disabled. DeepSeek (`deepseek-flash`,
+generic OpenAI-compatible adapter) returned all eight responses and passed 6/8.
+Only `version` and `reordered` failed without contract errors: valid abstentions
+where selection was expected. The old report discarded decisions and reasons,
+so the precise rationale is unknown. The prompt lacked a positive selection rule,
+and evidence text asserted agreement even when its support flag was false.
+
+Terra (`gpt-5.6-terra`, OpenAI Responses) passed conformance but failed all cases
+as `cleanup_model_incomplete`, returning in 193-351 ms without reported usage or
+model IDs. A failing regression confirmed that nullable `candidate_id` was absent
+from `required`, violating [OpenAI strict-schema requirements](https://developers.openai.com/api/docs/guides/structured-outputs#all-fields-must-be-required).
+Cleanup also masked every provider failure as incomplete output. Schema rejection
+fits this export; the discarded original error prevents recovering its exact code.
+
+The fix requires explicit nullable candidate output, closes supplied references,
+clarifies evidence and selection, and preserves safe errors and validated synthetic
+decisions. Suite `closed-catalog-adjudication-v2` retains all eight expected outcomes
+and the all-pass gate. The schema and error regressions failed before the fix and
+passed afterward. No paid provider run or deployment was performed. Fresh
+conformance and complete v2 runs remain required before model certification.
+
 ## Operator checkpoint: 2026-09-10
 
 The supplied Sol (`gpt-5.6-sol`, Thinking disabled) v23 export contains a full run

@@ -191,3 +191,46 @@ fn completed_responses_ignore_reasoning_but_reject_refusals_and_tool_calls()
     }
     Ok(())
 }
+
+#[test]
+fn cleanup_openai_request_requires_nullable_candidate() -> Result<(), Box<dyn std::error::Error>> {
+    let handler = provider_handler(OPENAI_RESPONSES_ADAPTER).ok_or("handler missing")?;
+    for (_, task, _) in music_application::assistant::library_cleanup_quality_cases()? {
+        let body = handler
+            .prepare_structured_request(
+                "gpt-5.6-terra",
+                10000,
+                ThinkingMode::Disabled,
+                &task.request(),
+            )?
+            .payload;
+        let schema = &body["text"]["format"]["schema"];
+        assert_eq!(body["text"]["format"]["strict"], true);
+        assert_eq!(schema["additionalProperties"], false);
+        let required = schema["required"].as_array().ok_or("missing required")?;
+        for field in schema["properties"]
+            .as_object()
+            .ok_or("missing properties")?
+            .keys()
+        {
+            assert!(
+                required.contains(&json!(field)),
+                "OpenAI rejects optional property {field}"
+            );
+        }
+        assert!(
+            schema["properties"]["candidate_id"]["type"]
+                .as_array()
+                .ok_or("missing type")?
+                .contains(&json!("null"))
+        );
+        assert!(
+            schema["properties"]["candidate_id"]["enum"]
+                .as_array()
+                .ok_or("missing enum")?
+                .contains(&Value::Null)
+        );
+        assert_eq!(body["reasoning"]["effort"], "none");
+    }
+    Ok(())
+}

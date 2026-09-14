@@ -526,6 +526,18 @@ disclosed identity evidence. The server reconstructs only candidate title/artist
 proposals, starts them unchecked and checks role/source revision and track signature again after
 the call. No model-authored metadata value reaches the cleanup journal.
 
+The nullable `candidate_id` key is required in both the schema and local parsing.
+Candidate and evidence references are closed enums. The rubric permits corroborated
+title/artist matches distinguished by version evidence; missing album evidence alone
+does not force abstention. Evidence text distinguishes support, absent agreement and
+hard contradictions. Provider failures retain safe execution codes.
+
+Suite `closed-catalog-adjudication-v2` retains all eight expected outcomes and the
+all-pass gate. Synthetic case results include the expected candidate (null for
+abstention), validated output and bounded reason, and separate decision-mismatch
+errors from execution failures. Raw rejected output and provider error bodies are
+not retained. Harness changes require fresh conformance and a complete quality run.
+
 The eight synthetic quality cases cover version/order changes, indistinguishable recordings,
 Unicode, absent evidence, duration contradiction and injected instructions. All must pass for a
 configured model to become usable. This is a pilot gate, not measured accuracy on a private library.
