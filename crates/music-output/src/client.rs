@@ -42,6 +42,28 @@ enum ConnectionError {
 
 pub async fn run_websocket_client(
     runtime: Arc<OutputRuntime>,
+    shutdown: watch::Receiver<bool>,
+) -> Result<(), OutputClientError> {
+    // Supervise audio even while connecting or waiting to reconnect. A dead mpv
+    // process needs a complete service restart regardless of server reachability.
+    let connection = reconnect(Arc::clone(&runtime), shutdown);
+    tokio::pin!(connection);
+    let mut audio_health = tokio::time::interval(AUDIO_HEALTH_INTERVAL);
+    audio_health.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            result = &mut connection => return result,
+            _ = audio_health.tick() => {
+                runtime.audio_healthcheck().await.map_err(|error| {
+                    OutputClientError(format!("audio backend failed: {error}"))
+                })?;
+            }
+        }
+    }
+}
+
+async fn reconnect(
+    runtime: Arc<OutputRuntime>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), OutputClientError> {
     loop {
@@ -113,9 +135,6 @@ async fn run_connection(
     let mut reports = tokio::time::interval(POSITION_REPORT_INTERVAL);
     reports.set_missed_tick_behavior(MissedTickBehavior::Skip);
     reports.tick().await;
-    let mut audio_health = tokio::time::interval(AUDIO_HEALTH_INTERVAL);
-    audio_health.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    audio_health.tick().await;
     let mut ping_sent_at: Option<Instant> = None;
 
     loop {
@@ -148,9 +167,6 @@ async fn run_connection(
                         .map_err(|error| ConnectionError::Fatal(error.to_string()))?;
                     send_action(&mut writer, ClientAction::PositionReport { position_ms }).await?;
                 }
-            }
-            _ = audio_health.tick() => {
-                runtime.audio_healthcheck().await.map_err(ConnectionError::Audio)?;
             }
             message = reader.next() => {
                 let Some(message) = message else {
