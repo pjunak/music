@@ -155,7 +155,8 @@ setInterval(refresh, 2000);
 ## Want full-fidelity effects on this box instead?
 
 This client supervises separate ambient and SFX mpv subprocesses through bounded Unix-socket
-JSON IPC. If either subprocess dies, the appliance exits so systemd restarts the complete,
+JSON IPC. Audio health checks run every five seconds, including while connecting or waiting
+to reconnect. If either subprocess dies, the appliance exits so systemd restarts the complete,
 stable-ID client cleanly. It plays plain ambient + SFX. If you specifically want crossfades and EQ-preset
 colouring on this output, run a kiosk browser pointed at the player's web app instead of
 this client (it's heavier, and not needed just to get music out of the speakers). The headless

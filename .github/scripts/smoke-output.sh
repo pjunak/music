@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+phase='unpacking the download'
+report_failure() {
+  local status=$?
+  echo "OUTPUT_LINUX_SMOKE_FAILED: $phase (exit $status)" >&2
+  if [[ -f /tmp/output.log ]]; then cat /tmp/output.log >&2; fi
+  return "$status"
+}
+trap report_failure ERR
 # Disposable Debian container only: real mpv processes with a null audio sink.
 cd /tmp
 tar -xzf /package/music-output-linux-x86_64.tar.gz
@@ -14,39 +22,61 @@ printf '#!/bin/sh\nexec /usr/bin/mpv --ao=null "$@"\n' > "$MUSIC_MPV"
 chmod +x "$MUSIC_MPV"
 pid=''
 cleanup() {
-  if [[ -n $pid ]]; then kill -INT "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fi
+  if [[ -n $pid ]]; then
+    kill -INT "$pid" 2>/dev/null || true
+    for attempt in $(seq 1 50); do
+      if ! kill -0 "$pid" 2>/dev/null; then break; fi
+      sleep 0.2
+    done
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 start() {
   ./music-output > /tmp/output.log 2>&1 &
   pid=$!
   for attempt in $(seq 1 30); do
-    if curl --fail --silent http://127.0.0.1:18731/control > /tmp/control.json; then return; fi
-    kill -0 "$pid" || { cat /tmp/output.log; return 1; }
+    if curl --fail --silent --max-time 2 http://127.0.0.1:18731/control > /tmp/control.json; then return; fi
+    kill -0 "$pid" || return 1
     sleep 0.2
   done
-  cat /tmp/output.log
   return 1
 }
+phase='starting the output with an offline server'
 start
-curl --fail --silent --header 'Content-Type: application/json' \
+echo 'OUTPUT_LINUX_SMOKE: local control ready'
+phase='updating local volume and preserving identity'
+curl --fail --silent --max-time 2 --header 'Content-Type: application/json' \
   --data '{"on":false,"volume":0.25}' http://127.0.0.1:18731/control | \
   grep -q '"volume":0.25'
 [[ $(cat "$MUSIC_STATE_DIR/client-id") == fixture-existing-device ]]
+phase='stopping the output cleanly'
 kill -INT "$pid"
 wait "$pid"
 pid=''
-start
-[[ $(cat "$MUSIC_STATE_DIR/client-id") == fixture-existing-device ]]
-# A supervised player failure must exit the client for systemd to restart it.
-child=$(pgrep -P "$pid" -x mpv | head -n1)
-[[ -n $child ]]
-kill -TERM "$child"
-for attempt in $(seq 1 50); do
-  if ! kill -0 "$pid" 2>/dev/null; then break; fi
-  sleep 0.2
+# Either player failure must exit the client even while its server is offline.
+for lane in ambient sfx; do
+  phase="restarting before the $lane failure check"
+  start
+  [[ $(cat "$MUSIC_STATE_DIR/client-id") == fixture-existing-device ]]
+  phase="detecting a dead $lane player while offline"
+  echo "OUTPUT_LINUX_SMOKE: $phase"
+  child=$(pgrep -P "$pid" -f -- "--input-ipc-server=.*-${lane}-")
+  [[ $child =~ ^[0-9]+$ ]]
+  kill -TERM "$child"
+  for attempt in $(seq 1 50); do
+    if ! kill -0 "$pid" 2>/dev/null; then break; fi
+    sleep 0.2
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo 'Client did not exit after player failure' >&2
+    false
+  fi
+  if wait "$pid"; then
+    echo 'Client unexpectedly succeeded after player failure' >&2
+    false
+  fi
+  pid=''
 done
-if kill -0 "$pid" 2>/dev/null; then cat /tmp/output.log; exit 1; fi
-if wait "$pid"; then echo 'Client unexpectedly succeeded after player failure' >&2; exit 1; fi
-pid=''
 echo 'OUTPUT_LINUX_SMOKE_OK: real mpv, local control, stable identity and child-failure exit'

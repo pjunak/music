@@ -504,6 +504,64 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[tokio::test]
+    async fn client_detects_dead_audio_while_server_is_unavailable()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Reserve an unused port without listening, so reconnects are refused.
+        let socket = tokio::net::TcpSocket::new_v4()?;
+        socket.bind("127.0.0.1:0".parse()?)?;
+        assert_client_detects_dead_audio(socket.local_addr()?).await
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn client_detects_dead_audio_during_a_stalled_websocket_handshake()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Keep TCP open without answering the WebSocket handshake.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        assert_client_detects_dead_audio(listener.local_addr()?).await
+    }
+
+    #[cfg(unix)]
+    async fn assert_client_detects_dead_audio(
+        address: std::net::SocketAddr,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::client::run_websocket_client;
+        use crate::config::OutputConfig;
+        use crate::runtime::OutputRuntime;
+        use std::sync::Arc;
+
+        let directory = tempfile::tempdir()?;
+        let executable = fake_mpv_wrapper(directory.path(), true)?;
+        let runtime = OutputRuntime::start(OutputConfig {
+            server_url: format!("http://{address}").parse()?,
+            name: "test-output".to_owned(),
+            client_id: "test-client".to_owned(),
+            state_dir: directory.path().to_owned(),
+            control_port: None,
+            control_bind: "127.0.0.1".to_owned(),
+            control_token: None,
+            respect_console: false,
+            play_sfx: true,
+            local_on: true,
+            local_volume: 1.0,
+            mpv_executable: executable,
+        })
+        .await?;
+        let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            run_websocket_client(Arc::clone(&runtime), receiver),
+        )
+        .await;
+        runtime.shutdown().await;
+        let error = result?.err().ok_or("client ignored a dead SFX child")?;
+        assert!(error.to_string().contains("audio backend failed:"));
+        assert!(error.to_string().contains("sfx lane exited unexpectedly"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
     fn fake_mpv_wrapper(
         directory: &Path,
         exit_sfx: bool,

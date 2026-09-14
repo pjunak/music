@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,6 +42,46 @@ enum ConnectionError {
 }
 
 pub async fn run_websocket_client(
+    runtime: Arc<OutputRuntime>,
+    shutdown: watch::Receiver<bool>,
+) -> Result<(), OutputClientError> {
+    supervise(
+        reconnect(Arc::clone(&runtime), shutdown.clone()),
+        monitor_audio(&runtime),
+        shutdown,
+    )
+    .await
+}
+
+async fn supervise(
+    connection: impl Future<Output = Result<(), OutputClientError>>,
+    audio_health: impl Future<Output = Result<(), MpvError>>,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), OutputClientError> {
+    if *shutdown.borrow() {
+        return Ok(());
+    }
+    // Poll independently: connection setup, retry delays and IPC commands must
+    // neither suspend audio supervision nor prevent a requested shutdown.
+    tokio::select! {
+        result = connection => result,
+        result = audio_health => {
+            result.map_err(|error| OutputClientError(format!("audio backend failed: {error}")))
+        }
+        _ = shutdown.wait_for(|requested| *requested) => Ok(()),
+    }
+}
+
+async fn monitor_audio(runtime: &OutputRuntime) -> Result<(), MpvError> {
+    let mut audio_health = tokio::time::interval(AUDIO_HEALTH_INTERVAL);
+    audio_health.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        audio_health.tick().await;
+        runtime.audio_healthcheck().await?;
+    }
+}
+
+async fn reconnect(
     runtime: Arc<OutputRuntime>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), OutputClientError> {
@@ -113,9 +154,6 @@ async fn run_connection(
     let mut reports = tokio::time::interval(POSITION_REPORT_INTERVAL);
     reports.set_missed_tick_behavior(MissedTickBehavior::Skip);
     reports.tick().await;
-    let mut audio_health = tokio::time::interval(AUDIO_HEALTH_INTERVAL);
-    audio_health.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    audio_health.tick().await;
     let mut ping_sent_at: Option<Instant> = None;
 
     loop {
@@ -148,9 +186,6 @@ async fn run_connection(
                         .map_err(|error| ConnectionError::Fatal(error.to_string()))?;
                     send_action(&mut writer, ClientAction::PositionReport { position_ms }).await?;
                 }
-            }
-            _ = audio_health.tick() => {
-                runtime.audio_healthcheck().await.map_err(ConnectionError::Audio)?;
             }
             message = reader.next() => {
                 let Some(message) = message else {
@@ -250,6 +285,60 @@ mod tests {
     use music_protocol::AmbientState;
 
     use super::*;
+
+    #[tokio::test]
+    async fn audio_failure_interrupts_a_pending_connection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_shutdown, receiver) = watch::channel(false);
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            supervise(
+                std::future::pending(),
+                async { Err(MpvError::configuration("test player exited")) },
+                receiver,
+            ),
+        )
+        .await?
+        .err()
+        .ok_or("expected an audio failure")?;
+        assert!(error.to_string().contains("audio backend failed:"));
+        assert!(error.to_string().contains("test player exited"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_pending_connection_and_audio_checks()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (shutdown, receiver) = watch::channel(false);
+        let client = supervise(std::future::pending(), std::future::pending(), receiver);
+        let request = async {
+            tokio::task::yield_now().await;
+            shutdown.send(true)
+        };
+        let (result, sent) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(client, request)
+        })
+        .await?;
+        result?;
+        sent?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn supervision_preserves_fatal_connection_errors()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_shutdown, receiver) = watch::channel(false);
+        let error = supervise(
+            async { Err(OutputClientError("registration failed".to_owned())) },
+            std::future::pending(),
+            receiver,
+        )
+        .await
+        .err()
+        .ok_or("expected the connection failure")?;
+        assert_eq!(error.to_string(), "registration failed");
+        Ok(())
+    }
 
     #[test]
     fn detects_legacy_volume_by_wire_field_presence() -> Result<(), Box<dyn std::error::Error>> {
