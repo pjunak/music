@@ -12,6 +12,8 @@ not a second description of the implementation.
 - Optional model setup and operator acceptance: [AI setup guide](../ASSISTANT.md)
 - Mood workflow rework and remaining evaluation: [findings and plan](MOOD_CONTEXT_REVIEW.md),
   [offline listening pilot](MOOD_PILOT.md)
+- Song evidence, audio models, datasets, and Jev assessment:
+  [research and proposed experiments](SONG_EVIDENCE_RESEARCH.md)
 - Library cleanup detection, metadata sources and bounded AI options:
   [metadata research](LIBRARY_METADATA_RESEARCH.md), [offline metadata pilot](LIBRARY_METADATA_PILOT.md),
   [full dates and composer tags](LIBRARY_RICH_METADATA.md)
