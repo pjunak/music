@@ -6,6 +6,9 @@ Source inspection and public documentation support the findings below. No privat
 library, listening labels, model weights, paid inference, or production service was
 used. Expected quality gains require the experiments described here.
 
+The follow-up [implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md) specifies
+components, code owners, dependencies and completion gates.
+
 ## Recommendation
 
 The largest opportunity is to improve what the system knows about the music before
