@@ -1,68 +1,102 @@
 # Song evidence and mood tagging implementation plan
 
-Prepared 23 September 2026 against `music` commit `15722c7`.
+Prepared 23 September 2026; scope reviewed against `music` commit `588c9d3`.
 Status: proposed implementation; no runtime changes or model certification.
 This turns the [research](SONG_EVIDENCE_RESEARCH.md) into dependency-ordered work.
 Public model specifications and current source were inspected; native compatibility,
 listening accuracy, licensing suitability, and production cost still need the gates below.
 All new module names, schemas, commands, and limits below are proposals.
 
-## Recommended implementation
+## Product purpose and admission rule
 
-Build a local, versioned song evidence pipeline and compare three decision engines
-on the same independently judged recordings: a small local classifier, the existing
-structured-output tagger, and optional Jev. Select components by measured usefulness.
+Music is a single-operator, self-hosted music player and tabletop-session orchestrator.
+Song evidence should reduce the work of finding suitable music and preparing normal
+playlists/sessions. Everyday library use and dependable playback remain primary.
+Analysis is optional preparation; playback must never depend on a model or provider.
+Follow the existing [Assistant and Authoring workflow](assistant-ux-philosophy.md).
 
-| Component | Starting choice |
-|---|---|
-| Persistence | Existing SQLite/SQLx plus immutable local feature files; existing review transactions |
-| Audio baseline | Discogs-EffNet ONNX encoder with its matching mood/theme and instrument heads |
-| Native inference | First probe `tract-onnx` matching the existing Tract release; `ort` only if that probe fails |
-| Musical language challenger | `laion/larger_clap_music`; benchmark before committing to a native integration |
-| Local decision baseline | Separate regularized binary logistic models per supported mood; optional learned source combination |
-| Jev | Dedicated typed-decision transport, pinned model, independently calibrated results |
-| Evaluation | Grouped listening dataset with explicit negative, uncertain, and unjudged labels |
+Every addition must name an observed problem, its consumer, a measurable benefit,
+and the simplest viable solution. Include setup, compute/storage, provider cost,
+maintenance, failure recovery and removal/fallback. Complexity is justified when a
+simpler choice demonstrably fails an important use case; an unused field is not progress.
 
-The fundamental correction is to distinguish measured sound, learned musical
-predictions, catalog claims, perceived emotion, and editorial session suitability.
-A new provider alone cannot repair missing evidence or an invalid evaluation set.
+Example outcomes to validate: a quiet exploration bed without disruptive vocals or
+climaxes, sustained tension, energetic combat, or a desired listening mood. Evaluate
+perceived sound and session suitability separately within existing product workflows.
 
-## 1. Define targets and build the evaluation harness
+## Recommended first delivery
+
+Reuse the existing catalog, analysis jobs, structured-output tagger, Mood Library
+review, and playlist workflow. Trial one additional audio model family and retain
+only the evidence that improves decisions. Jev is an optional comparison on the same
+evidence, reflecting the owner's ongoing investigation; it is not a release dependency.
+
+| Component | First delivery | Expand only when |
+|---|---|---|
+| Evaluation | Small owner-judged, grouped pilot and untouched confirmation cohort | Results are inconclusive, more tags matter, or training needs more examples |
+| Audio | Probe Discogs-EffNet with matching mood/theme and instrument heads; adopt only useful heads | A measured failure warrants another model |
+| Native inference | Probe `tract-onnx` matching existing Tract; `ort` only if necessary | Compatibility and quality justify native packaging cost |
+| Storage | Existing SQLite records plus one bounded learned-feature summary per track/analyzer | An actual consumer needs retained tensors, history, or cross-file reuse |
+| Interpretation | Existing tagger with improved evidence; optional Jev comparison | Local training offers a measured quality, offline-use, or cost advantage |
+| Review | Existing Mood Library and Authoring transactions | Repeated operator friction justifies a small UI extension |
+
+Keep measured sound, learned predictions, catalog claims, listener judgments and
+session suitability distinct. Verified recording identity does not verify mood.
+Use all relevant, permitted evidence already available; acquire more sources only
+when a missing field would change a useful decision. Source count is not a quality target.
+
+Follow stages 1-7, skip optional stage 8 unless needed, then integrate and release
+successful parts through stages 9-10. If stage 2 rejects learned audio, skip its storage
+and extraction; catalog/DSP improvements can proceed. Stop expanding when the owner's
+needs are met. The conditional backlog is not a commitment.
+
+## 1. Define useful outcomes and establish a small honest baseline
 
 **Owners:** [vocabulary](../crates/music-application/src/assistant/vocabulary.rs),
-[pilot tooling](../tools/mood-pilot.mjs), [CLI](../crates/music-server/src/bin/music-cli.rs).
+[pilot tooling](../tools/mood-pilot.mjs), existing Mood Library review.
 
-- Preserve current tag IDs and the four groups. Add a revisioned target definition:
-  perceived mood; setting/scene suitability; period feel. Provide positive and
-  confusable examples. Keep the eight-suggestion limit initially; retain all internal scores.
-- Keep the existing 30-track pilot intact. Add `assistant-mood-dataset/v1` and proposed
-  `music-cli mood-dataset {init,validate,import,score}` commands. Use JSONL judgments
-  and a manifest containing vocabulary, source/audio hashes, grouping, split seed,
-  annotator, listened interval, blind/assisted status, and dataset revision.
-- Use `positive | negative | uncertain | unjudged` per assessed tag. Omission is
-  unjudged. Score only adjudicated positives/negatives and report judgment coverage;
-  never count a rejected suggestion as evidence that every other tag is negative.
-- Start with the pilot, then target about 400 distinct recordings and 60/20/20
-  train/calibration/test partitions. Keep duplicate/version/excerpt families together;
-  group by album/composer where feasible and retain an unseen-composer/franchise
-  challenge slice. Report impossible grouping constraints instead of breaking them.
-  Tune within grouped training folds; lock the test manifest before comparison.
-- Collect blind listening judgments separately from session-use judgments. Double-label
-  at least 20% plus ambiguous cases, retaining disagreement. A single listener's
-  dataset measures that listener's preferences. Begin with a supported subset of
-  common moods; 400 tracks cannot certify all 138 default labels. Fix this core label
-  set before predictions and assess every core label per track; other tags remain unvalidated.
+- Record a small fixed set of real listening/session requests and current failures.
+  Measure useful candidates found, auditioning time, rejected suggestions and review
+  effort using the existing planner/review flow. Keep track suitability separate from
+  tag accuracy; more tags need not make selection easier.
+- Preserve tag IDs, the four groups, and the eight-suggestion limit. Define a small
+  core of common tags with positive and confusable examples. Judge every core tag
+  per selected recording; do not attempt to certify all 138 default labels at once.
+- Keep the existing 30-track pilot as a smoke test. Extend its tooling with a versioned
+  JSONL judgment/manifest format and a separate grouped mode; do not silently reinterpret
+  its old fixtures. Start with roughly 60-100 representative recordings if available,
+  including actual failure cases and a random library sample. This is a pilot size,
+  not a statistical claim or a prerequisite for inspecting obvious defects.
+- Store stable recording/file references, vocabulary revision, grouping, split seed,
+  annotator, listened intervals and blind/assisted status. Keep related versions,
+  duplicates and excerpts in one partition. Separate composers/albums where feasible;
+  report residual overlap. Use grouped development and untouched confirmation cohorts
+  initially; a training/calibration split becomes necessary only for fitted models.
+- Label `positive | negative | uncertain | unjudged`; omission is unjudged. Score only
+  judged positives/negatives and report judgment coverage. Do not turn all unselected
+  tags into negatives. Record whole-track versus excerpt scope explicitly.
+- Collect perceived-mood judgments without showing predictions where practicable;
+  collect session-use judgments separately. The owner's preferences are the primary
+  product target. A second listener can investigate ambiguity; broad multi-listener
+  annotation is needed only for claims beyond that owner. Preserve disagreement and
+  known blinding limitations. Keep private audio and judgments outside Git.
 
-**Gate:** deterministic partitions, leakage detection, partial-label scoring,
-missing-versus-abstained results, per-tag/group metrics, and recording-group bootstrap
-intervals pass fixtures. Freeze the current pipeline's configuration and outputs as
-baseline A before changing its behavior. Real baseline collection uses existing consent.
+**Gate:** freeze current configuration and outputs as baseline A before changes;
+lock confirmation groups before tuning. Verify grouping, partial-label scoring and
+missing-versus-abstained reporting with fixtures. Report per-tag counts and recording-group
+bootstrap intervals; small samples cannot certify rare tags. Reuse existing consent
+for baseline collection.
+A new general dataset CLI or annotation application is unnecessary for this pilot.
 
 ## 2. Resolve native model feasibility before building around it
 
 **Owners:** [analysis crate](../crates/music-analysis/src/lib.rs),
 [voice implementation](../crates/music-analysis/src/voice.rs), optional probe binary.
 
+First compare reference head scores on a few development failures through an experimental
+evidence projection. Use updated disclosure/consent for external calls. Require a plausible
+decision benefit before production storage/integration; otherwise stop this model branch.
+Then probe one EffNet stack, with no parallel production runtimes or encoders.
 Use a small licensed reference corpus containing silence, impulses/tones, short clips,
 stereo, ordinary music, and a long changing recording. Produce reference tensors and
 outputs with pinned upstream tooling in an isolated research environment. Keep upstream
@@ -74,7 +108,6 @@ and permitted numerical fixtures, not private audio or model weights.
 | Encoder | `discogs-effnet-bsdynamic-1.onnx`: published input `[n,128,96]`, embedding output `PartitionedCall:1`, 1,280 values; 16 kHz audio preprocessing | Preferred first baseline. Inspect actual ONNX tensors: its JSON even links to a `.pb` filename despite declaring ONNX. [Metadata](https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bsdynamic-1.json), [actual artifacts](https://essentia.upf.edu/models/feature-extractors/discogs-effnet/) |
 | Heads | `mtg_jamendo_moodtheme-discogs-effnet-1.onnx` and `mtg_jamendo_instrument-discogs-effnet-1.onnx`; 56 and 40 scores | Validate the ONNX encoder against the documented TensorFlow encoder/head pairing. Never attach these heads to voice-model activations. [Mood metadata](https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.json), [instrument metadata](https://essentia.upf.edu/models/classification-heads/mtg_jamendo_instrument/mtg_jamendo_instrument-discogs-effnet-1.json) |
 | Runtime | Probe `tract-onnx = 0.23.7` with concrete batch size 1, matching current `tract-tensorflow` | Gate on supported operators, numerical parity and resources; matching versions alone proves nothing. If unsupported, compare a pinned CPU ONNX Runtime through `ort`, including native-library packaging. [Pinned Tract API](https://docs.rs/tract-onnx/0.23.7/tract_onnx/), [ort](https://github.com/pykeio/ort) |
-| Challenger | `laion/larger_clap_music`: 48 kHz, ten-second inputs, 512-dimensional projected embeddings | Pin checkpoint, processor and tokenizer. First compare upstream results; export audio/text branches and prove native parity only if useful. [Model](https://huggingface.co/laion/larger_clap_music), [configuration](https://huggingface.co/laion/larger_clap_music/blob/main/config.json) |
 
 Create a model manifest with artifact SHA-256, source revision, license, tensor names,
 preprocessing version, label order, runtime and permitted use. Essentia's published
@@ -89,181 +122,180 @@ error <=1e-3 on nonsilent fixtures, with separate near-zero handling. Investigat
 systematic differences; do not loosen tolerances to hide a preprocessing mismatch.
 Run within the documented [three-CPU/4 GB resource contract](RUST_REWRITE_ARCHITECTURE.md#non-functional-requirements)
 before production adoption.
-A failed probe selects a fallback or records rejection; it does not block dataset work.
+A failed probe records rejection or justifies one fallback; it does not block useful
+catalog/DSP corrections. Benchmark both heads, but ship only heads with a useful consumer.
 
-## 3. Add evidence types and additive storage
+## 3. Add the smallest evidence contract and storage extension
 
-**Owners:** new domain `song_evidence` types and application `assistant/song_evidence`
-module; [storage](../crates/music-storage/src/analysis.rs) and the next SQLx migration.
-Keep the current eight-crate structure and dependency direction.
+**Owners:** application `assistant` evidence types,
+[storage](../crates/music-storage/src/analysis.rs), and one additive SQLx migration
+if the existing storage cannot express the separate learned-feature record.
+Keep the eight-crate structure and current dependency direction.
 
-| Proposed record | Contents and authority |
+| Record | First-delivery responsibility |
 |---|---|
-| `track_audio_identities` | Track/file revision, encoded-file hash, decoded-PCM hash, decoding policy, native format and frame count |
-| `song_observations` | Subject kind/ID, recording/version association, claim, original and normalized values, source/reference, source family, time scope, match status, retrieval/policy revision and permitted uses |
-| `audio_feature_runs` | Feature key, upstream feature keys, exact model/preprocessing/runtime manifest, completion/coverage, artifact references and performance |
-| `track_feature_bindings` | Current track/file revision to reusable feature-run association |
-| Existing `track_analyses` | Current reviewable interpretation; add a validated per-tag decision document in its versioned payload, not a second manual-tag store |
-| Dataset files | Immutable snapshot manifests, independent judgments and prediction exports; private files outside Git |
+| Existing `track_contexts` | Factual DSP and current source/implementation identity |
+| Proposed `track_audio_features` | One bounded record per `(track_id, analyzer_id)`: source/model/preprocessing signatures, coverage/status, aggregate scores, selected intervals, and completion/error facts |
+| Existing catalog observations/result JSON | Original claim, source/reference, entity scope, match status and policy revision; extend fields only where the evidence consumer needs them |
+| Existing `track_analyses` | Reviewable interpretation with versioned per-tag support/abstention and evidence references |
+| Existing `track_user_tags` and review records | Operator-owned accepted state and current review lifecycle |
+| Private pilot files | Revisioned manifests, independent judgments and comparison exports |
 
-Use typed enums for measured, catalog-observed, model-predicted and human-judged
-origin. Represent missing, not configured, unavailable, failed, partial and complete
-explicitly. Per-tag decisions contain raw score, optional calibrated probability,
-calibrator ID, supported/unsupported/abstained status, evidence references,
-contradictions and temporal scope. Validate finite values, dimensions, references
-and size limits before persistence. Retain track-level confidence only as a legacy
-summary, never as a fabricated per-tag probability.
+Keep a typed distinction between measured, catalog-observed and model-predicted inputs.
+Represent missing, unavailable, failed, partial and complete states explicitly; missing
+is not a zero score. A per-tag decision records support or abstention, bounded evidence
+references, contradictions and temporal scope. Raw model scores and optional calibrated
+probabilities are different fields; omit calibrated probability until demonstrated.
+Retain track-level confidence only as a legacy summary, not a per-tag probability.
+Validate finite values, label dimensions, references and payload limits.
 
-Large arrays use little-endian float32 NPY with a JSON manifest, bounded chunks and
-checksums; [npyz](https://docs.rs/npyz/latest/npyz/) provides Rust streaming I/O.
-Store files below the configured data root, not the media tree. Write temporary
-files, flush and atomically publish, then commit database references. Recovery
-removes unreferenced temporary/orphan files; referenced corruption marks features
-unavailable. Include artifact backup/restore and a quota; pin benchmark artifacts
-against cache eviction. No vector database is needed.
+Use a proposed 64 KiB maximum learned-feature payload per track as an initial budget,
+checked against the actual projection. Store summaries in SQLite; keep full tensors
+only for selected research fixtures outside the normal application lifecycle. Introduce
+a separate ledger or artifact store only when a concrete query/retention requirement
+outgrows existing ownership.
 
-**Gate:** additive migration/doctor compatibility, crash-between-file-and-DB tests,
-corrupt artifact handling, quota failure and stale-write rejection. Existing accepted
-`track_user_tags` and review behavior survive unchanged.
+**Gate:** additive migration/doctor compatibility, bounded serialization, missing-data
+handling and stale-write rejection. Regenerable evidence can be cleared without changing
+accepted tags. Existing database backup/restore remains sufficient for this stage.
 
-## 4. Implement audio identity, provenance and dataset ingestion
+## 4. Connect existing sources and preserve correct invalidation
 
-**Owners:** new evidence service; [catalog workflow](../crates/music-application/src/cleanup_enrichment/workflow.rs),
+**Owners:** evidence projection;
+[catalog workflow](../crates/music-application/src/cleanup_enrichment/workflow.rs),
 [typed catalog port](../crates/music-application/src/cleanup_enrichment/catalog.rs),
 [catalog invalidation](../crates/music-storage/src/catalog_evidence.rs).
 
-- Use file facts for the existing fast staleness check, encoded hashes for exact
-  reuse, and a hash of unnormalized decoded PCM plus native format/decoder revision
-  to reuse inference after metadata-only rewrites. A rewrite may still require a
-  decode to establish identity. Chromaprint/MBIDs group related recordings; they do
-  not justify sharing measurements across remasters, edits or lossy encodings.
-- Define `encoder_key = H(audio_identity, encoder, preprocessing, runtime)` and
-  `head_key = H(encoder_key, head, runtime)`. A head change reuses the embedding.
-  `decision_key = H(feature_refs, metadata_projection, allowed_observations,
-  source_policy, vocabulary, engine/question_revision, calibration)` identifies
-  interpretation. Recheck track and policy identity inside the write transaction.
-- Extend existing catalog observations rather than build another matcher. Retain
-  original Last.fm tags/counts before exact-alias filtering, including unmapped tags.
-  Reuse MusicBrainz recording/release/work evidence, embedded IDs, AcoustID and imported
-  observations. Extend the typed recording response to retain referenced work IDs
-  with composer claims. Preserve ambiguity, entity scope and source family; never make an
-  artist-level genre or recording match a verified mood.
-- Read enabled, current observations through one projection. Disabling a source or
-  changing its policy expires dependent decisions. Preserve accepted manual tags.
-  Exclude generated suggestions and review history from ordinary model evidence.
-- Implement bounded import adapters for selected external datasets; retain IDs,
-  audio/excerpt scope, label masks, splits, licenses and overlap groups. External
-  examples remain reference data unless an exact local recording/version match is
-  established. Download manifests/annotations first, then only selected permitted audio.
+- Begin with the current source signature and exact model/preprocessing/runtime
+  revisions for feature reuse. Bind decisions additionally to allowed metadata,
+  observation revision, source policy, vocabulary, engine and question/prompt revision.
+  Recheck these dependencies inside the write transaction. Preserve the existing
+  signature's limitations; add content hashing if it proves insufficient for correct
+  invalidation. Full decoded-PCM identity and reuse across renamed files are optimizations,
+  not a prerequisite for better mood evidence.
+- Reuse the existing conservative MusicBrainz/AcoustID matcher and imported evidence.
+  Preserve entity and recording/version scope. MBIDs and fingerprints can help group
+  evaluation families; they do not prove interchangeable audio across remasters or edits.
+- Retain original Last.fm tags/counts before exact-alias filtering in the existing
+  observation payload. Mark them as external claims, including unmapped tags, and
+  project only relevant, permitted entries under a size bound. An artist genre is not
+  recording mood; several copied tags are not independent corroboration. Start with
+  sources already configured. Extra work/composer relationships need a demonstrated
+  decision benefit before expanding catalog fetching or typed responses.
+- Read enabled, current observations through one shared projection. Changing source
+  policy or disabling a source expires dependent suggestions, preserving accepted
+  manual tags. Exclude generated suggestions and review history from ordinary model
+  input. Keep identity details that are unnecessary for inference local.
+- Build the pilot from the owner's existing library and reviewed identity groups.
+  External dataset importers are optional experiments for a specific question, not
+  a new ingestion platform. A public dataset's labels do not become ground truth for
+  a local recording without an exact version match and matching annotation scope.
 
-| First importer | Purpose and rule |
-|---|---|
-| [MTG-Jamendo](https://github.com/MTG/mtg-jamendo-dataset) TSV/splits/licenses | Reproduce source-domain behavior and retain weak positive tags; use published 56-label mood split. Missing uploader tags are not verified negatives. Its current terms specify noncommercial research/academic use; audio licenses are per file. |
-| [DEAM](https://cvml.unige.ch/databases/DEAM/) annotations/audio manifest | Preserve valence/arousal scales, timestamps and whole-track versus excerpt labels for the optional affect experiment. |
-| [OpenMIC](https://github.com/cosmir/openmic-2018) annotations/masks | Validate supporting instrument evidence on judged labels; retain unknowns. |
+**Gate:** changed-source/model invalidation, ambiguous-match exclusion, source-disable
+races, bounded raw-tag handling and duplicate-family grouping. A tag-only file edit
+may trigger fresh analysis initially; measure that cost before adding another cache.
 
-**Gate:** rename/tag-edit reuse, changed-audio invalidation, ambiguous-match exclusion,
-source-disable races and duplicate-family leakage tests pass. Build the larger
-listening cohort from these identities; do not treat a model's training dataset as
-independent proof of generalization.
-
-## 5. Repair factual DSP and extract reusable preprocessing
+## 5. Correct misleading factual inputs and share required preprocessing
 
 **Owners:** [context DSP](../crates/music-analysis/src/context.rs),
-[voice frontend](../crates/music-analysis/src/voice.rs), new `mel`/`rhythm` modules.
+[voice frontend](../crates/music-analysis/src/voice.rs), a shared mel module if adopted.
 
-- Extract the existing MusiCNN frontend behind parity tests: 16 kHz, 512-sample
-  frames, 256-sample hop, 96 Slaney mel bands and log compression. EffNet uses this
-  feature family but **128-frame patches**, unlike the voice model's 187. Preserve
-  voice behavior while checking centering, downmixing, resampling, silence and tails
-  against the pinned reference. [EffNet preprocessing](https://essentia.upf.edu/reference/std_TensorflowPredictEffnetDiscogs.html).
-- Replace the coarse 20 Hz/integer-lag tempo path with a 100 Hz onset envelope,
-  autocorrelation peak interpolation and beat-event interval checks. Retain plausible
-  half/double-tempo candidates and an unstable/no-pulse state; do not force a BPM.
-  Test 113/127 BPM, tempo changes, rubato and no-beat audio against real annotations.
-- Keep absolute loudness as technical evidence. Add relative dynamic range and
-  gain-resistant rhythmic/spectral descriptors. Do not feed the current loudness-
-  dominated intensity proxy into a classifier as independent evidence of arousal.
-  Add chroma/tonal-change features only as an ablation; key mode is not a mood label.
-- Version changed factual context semantics and implementation identities. Learned
-  mood/instrument outputs live in `audio-features/v1`, not factual `local-context`.
+- Extract the existing MusiCNN frontend only as needed by the successful EffNet probe,
+  behind parity tests: 16 kHz, 512-sample frames, 256-sample hop, 96 Slaney mel bands
+  and log compression. EffNet uses this feature family but **128-frame patches**,
+  unlike the voice model's 187. Check centering, downmixing, resampling, silence and
+  tails against the pinned reference. [EffNet preprocessing](https://essentia.upf.edu/reference/std_TensorflowPredictEffnetDiscogs.html).
+- Stop treating the current loudness-heavy intensity proxy as independent evidence
+  of emotional arousal, or duration/activity heuristics as calibrated accuracy.
+  Keep absolute loudness for technical uses; trial relative dynamics where it helps
+  detect unsuitable climaxes. Preserve the distinction between coverage and accuracy.
+- The current 20 Hz/integer-lag tempo estimator is coarse. Mark its uncertainty or
+  omit unreliable tempo evidence from mood decisions first. If the pilot shows rhythm
+  errors drive bad selections, implement a 100 Hz onset envelope, peak interpolation,
+  interval checks and half/double-tempo candidates, including unstable/no-pulse output.
+  Validate 113/127 BPM, rubato, tempo changes and no-beat recordings. This rhythm upgrade
+  does not block catalog or learned-feature improvements.
+- Version any changed factual semantics. Learned mood/instrument outputs remain in
+  the separate feature record. Defer chroma/key features until an ablation shows value;
+  major/minor mode must not become a mood rule.
 
-**Gate:** gain-change, clipping, silence, short-file and tempo regression fixtures;
-no regression in current voice inference. Compare DSP error on labeled audio, not
-just synthetic metronomes. Export measured coverage separately from calibrated accuracy.
+**Gate:** relevant gain-change, clipping, silence and short-file fixtures; no voice
+inference regression. Any adopted rhythm change needs real annotated music as well
+as synthetic metronomes. Repair misleading semantics even if no new model is adopted.
 
-## 6. Build bounded feature extraction and temporal aggregation
+## 6. Extract bounded audio evidence without a feature-storage platform
 
-**Owners:** new analysis `features` module, application `audio_features` port/job,
+**Owners:** analysis feature module, application feature port/job,
 [server composition](../crates/music-server/src/analysis.rs), existing analysis executor.
-Depends on stages 2-5.
+For learned audio, depends on the successful parts of stages 2-5.
 
-- Add a restartable `assistant.library-feature-analysis` job, defaulting to one model
-  worker and a bounded queue. Stream into small chunks; checkpoint completed tracks
-  against feature keys. Cancellation never marks a partial track complete. Keep
-  optional model failure independent of factual DSP and playback.
-- Run the chosen EffNet encoder once per patch, then its matching heads. Save
-  raw embeddings, all raw scores, actual intervals, padding/valid duration and model
-  identities. Use the documented 62-frame hop initially. Handle short/tail patches
-  explicitly and report padded coverage. Whole-track-trained heads produce window
-  estimates; they do not establish precise human-labeled mood boundaries.
-- Aggregate overlapping outputs by actual time support into ten-second bins and
-  whole-track mean, variation and upper quantiles. Retain transitions, sustained
-  support and contradicting passages. A brief climax must not label the entire track.
-  Bound provider projections independently of stored detail.
-- CLAP comparison uses deterministic ten-second windows with five-second hops,
-  including the ending, and cached text embeddings for tag definitions plus confusable
-  alternatives. Its published processor defaults to random truncation; replace that
-  selection policy with explicit windows, retaining model preprocessing. Similarity
-  remains uncalibrated. Decode at 48 kHz from the source, not upsampled 16 kHz context.
-  [Processor settings](https://huggingface.co/laion/larger_clap_music/blob/main/preprocessor_config.json).
-- Persist full window features for the benchmark first. Estimate library storage and
-  runtime from those measurements before choosing retention or pooling. Quantization,
-  reduced sampling and shared decoding are later optimizations with parity/quality gates.
+- Register a restartable feature-analysis pass in the existing durable job/executor
+  infrastructure, defaulting to one worker and a bounded queue. Checkpoint completed
+  tracks against their source/model signatures. Cancellation never marks partial work
+  complete. Model installation and failure remain independent of server boot, factual
+  DSP and playback. Release model memory after the analysis pass.
+- Run the selected EffNet encoder once per patch, then only retained heads. Start
+  with the documented 62-frame hop. Stream the recording, including its ending;
+  account for padding and valid duration. Avoid a single central excerpt that misses
+  a disruptive ending or climax. Model window estimates are not verified mood boundaries.
+- Aggregate outputs incrementally using actual time support, accounting for overlap.
+  Persist bounded means, variation, upper quantiles, coarse temporal coverage and a
+  few useful support/contradiction intervals. Select the exact fields against the
+  pilot's decision needs and the stage 3 byte budget. A brief climax must not silently
+  describe the whole recording. Bound provider projections separately.
+- Do not retain every embedding or window score across the library by default.
+  Save full outputs only for selected pilot/debug fixtures when needed to diagnose
+  aggregation or test a later classifier. Record exact manifests and valid intervals
+  in those exports. Ordinary operation requires no NPY lifecycle, orphan-file cleanup,
+  vector search, or second backup path.
 
-**Gate:** deterministic reference export, full/tail coverage, bounded long-file
-memory, interruption/resume, stale-file races, cache hits and disk exhaustion pass.
-Publish seconds per audio minute, bytes per track and peak RSS for each candidate.
+**Gate:** reference parity, full/tail coverage, bounded long-file memory and payloads,
+interruption/resume, stale-file races, cache hits and storage failure handling. Measure
+seconds per audio minute, bytes per track and peak RSS. Test concurrent playback before
+backfilling; reduce batch scheduling or reject the stack if the product budget is exceeded.
 
-## 7. Build the shared evidence projection and local decision baseline
+## 7. Improve the existing tagger using one shared evidence projection
 
-**Owners:** new application `mood_evidence`/`mood_decisions` modules;
-[tagger](../crates/music-application/src/assistant/model_tagger.rs) and dataset tooling.
+**Owners:** application `mood_evidence`/decision types,
+[tagger](../crates/music-application/src/assistant/model_tagger.rs), pilot tooling.
 
-Create one `song-evidence/v1` projection for all interpreters: allowed metadata,
-source-attributed observations, musical predictions, temporal summaries, missingness
-and conflicts. Exclude titles, filenames, paths, existing suggestions, manual tags
-and listening-test labels. Raw identity records stay local. Feature names, units,
-score meaning and source family travel together. Apply source-use permissions before
-projection. Never send embeddings as unexplained numbers to a text model.
+Create a bounded `song-evidence/v1` projection: allowed metadata, source-attributed
+claims, learned musical predictions, temporal summaries, missingness and conflicts.
+Exclude titles, filenames, paths, generated suggestions, manual tags and listening-test
+labels. Include units, score meaning and source family; apply source-use permissions
+before projection. Keep raw identities and embedding arrays local. Scope the common contract
+to the current tagger and optional Jev.
 
-Implement independent L2-regularized binary logistic heads for supported moods using
-`linfa-logistic` in an offline CLI feature. Begin with learned head scores and DSP;
-measure the extra value of pooled embeddings. Export coefficient/scaling manifests
-and use simple Rust inference in the server. Train only on independently judged
-positives/negatives; mask uncertain/unjudged entries. Bind exported models to their
-training manifest, vocabulary and permitted-use policy. Do not use multinomial softmax
-for coexisting moods. [Rust binary logistic implementation](https://rust-ml.github.io/linfa/rustdocs/linfa_logistic/type.LogisticRegression.html).
+Adapt the current structured-output tagger to this evidence and a per-tag support/
+abstention result. Preserve its full-vocabulary route and eight-suggestion limit;
+new evidence must not become hidden local preselection of allowed tags. Version input,
+output, analyzer, disclosure, role fingerprint and quality fixtures together. Do not
+send additional catalog/learned evidence under the previous consent contract.
 
-Use grouped training folds for feature selection and regularization. If combining
-an audio classifier, catalog features and an interpreter helps, fit a small combiner
-on out-of-fold predictions, with missing-source indicators. Do not average vendor
-confidence values or count correlated heads/copied tags as independent votes.
-Calibrate on the separate calibration partition using a sigmoid mapping first;
-retain raw scores and per-tag abstention thresholds. Sparse labels stay experimental.
-Evaluate reliability diagrams alongside Brier/log loss: Brier alone mixes calibration
-and discrimination. [Calibration reference](https://scikit-learn.org/stable/modules/calibration.html).
+Compare baseline A with the updated tagger on development recordings. Use bounded
+source-only, audio-only and combined ablations to establish which evidence helps.
+Start with the most relevant failures; budget external calls before broad comparisons.
+Retain an input or head only when its gain justifies extraction cost and complexity.
+Test missing sources and contradictory passages; a consistent abstention is preferable
+to a confident unsupported scene label.
 
-**Gate:** replayable training/export/inference parity, no test-label access,
-missing-source tests and per-tag calibration reports. Compare audio-only,
-metadata-only and combined evidence before adopting the combiner.
+A trained local classifier, learned source combiner and per-tag calibration are later
+options, not requirements. Raw scores can be useful when clearly labeled and reviewed;
+do not present them as validated probabilities or average unrelated provider scores.
+Keep any initial decision thresholds fixed from development before confirmation.
 
-## 8. Add Jev as an interchangeable decision engine
+**Gate:** contract/disclosure fixtures, deterministic projection, source withdrawal,
+missing-data behavior and listening comparison. Retain useful catalog/DSP changes if
+additional learned audio fails to improve the owner's results.
+Custom training remains conditional.
+
+## 8. Optionally compare Jev through a small typed-decision adapter
 
 **Owners:** [provider inventory](../crates/music-application/src/assistant/providers.rs),
 [transport port](../crates/music-application/src/assistant/model_transport.rs),
 [HTTP transport](../crates/music-server/src/provider_transport.rs), new `typesafe` handler.
-Depends on the shared decision contract; it need not wait for local classifier training.
+Depends on the shared decision contract. Run this comparison if the owner continues
+the Jev investigation; it does not block the existing tagger or stages 9-10.
 
 Add `TypedDecisionTransport` and `typed-decisions/v1`. Let the music-tagger role
 select a structured-text or typed-decision engine with matching conformance tests;
@@ -285,8 +317,8 @@ Allow an explicit pinned `jev-1.13.0` even when discovery lists only aliases.
   total calls/cost before running. Never silently omit custom tags or assume one call
   handles a 1,200-tag vocabulary. Cache by exact state/questions/model identity.
 - Keep aggregation, thresholds and consistency in Rust. For proposed tags, an
-  explicitly budgeted follow-up may judge support/contradiction against bounded supplied
-  observation IDs. Render application-authored explanations from validated references;
+  optional, budgeted follow-up may judge support/contradiction against bounded observation
+  IDs. Render application-authored explanations from validated references;
   distinguish considered evidence from evidence the engine actually selected.
 - Reuse pre-call checkpoints and usage accounting. Disable automatic retries initially,
   including SDK defaults; uncertain attempts remain interrupted. Test 401/422/429/529,
@@ -295,79 +327,92 @@ Allow an explicit pinned `jev-1.13.0` even when discovery lists only aliases.
   gates a decision; do not multiply correlated answers as independent probabilities.
 
 **Gate:** fixture HTTP tests, dedicated conformance, injection/missing-evidence
-checks and the same listening comparison as other engines. Refit any optional
-combiner/calibrator on development data after adding Jev, without reopening test tuning.
+checks and the same listening/workflow comparison as the current engine. Adopt Jev
+only for demonstrated quality, cost or operational benefit.
 
-## 9. Integrate decisions, disclosure and review
+## 9. Integrate through existing review and authoring
 
 **Owners:** [tagging jobs](../crates/music-application/src/assistant/model_jobs/tagging.rs),
 [atomic review](../crates/music-storage/src/assistant/review.rs),
 [Assistant HTTP DTOs](../crates/music-server/src/assistant/mod.rs),
 [review UI](../frontend/src/views/assistant/AnalysisTagReview.tsx).
 
-Version the tagger input/output, analyzer, role fingerprint, disclosure and quality
-fixtures together. Adapt the existing structured-output tagger to the shared evidence
-and per-tag contract. Do not pass new catalog/learned evidence under old consent.
-Keep its current full-vocabulary classification route as a baseline; proposing a
-local classifier is an explicit new engine, not hidden tag preselection for that route.
+Keep the normal interaction: analyze selected music, review useful suggestions, accept
+chosen tags, and use normal playlists. Provider configuration remains in AI setup.
+Show concise per-tag support or uncertainty; put source, model, age, coverage and
+contradictions in existing details/disclosures. Add a seek-to-evidence action only
+if auditioning intervals saves effort. Do not create a second editor or permanent
+research/diagnostics dashboard.
 
-Show measured versus predicted evidence, source, age, model, usable audio coverage,
-per-tag support, contradictions and abstention. Add playback links to supporting
-intervals. Keep raw scores distinct from calibrated confidence. Recheck the complete
-decision identity during acceptance, including source policy, feature runs, vocabulary
-and engine/calibrator revisions. Only explicit review writes `track_user_tags`.
-
-Add a separate blind listening view or export mode: anonymized IDs, no metadata or
-predictions, interval playback and four-state judgments. Assisted corrections retain
-that status and do not automatically become locked benchmark labels.
+Recheck the complete decision identity during acceptance, including source policy,
+features, vocabulary and engine revision. Only explicit review writes `track_user_tags`.
+Keep generated evidence and accepted state separate so a model can be removed safely.
+Use pilot exports and a documented listening protocol first; a dedicated annotation
+screen needs repeated annotation work to justify it. Assisted corrections retain that
+status and do not silently become independent confirmation labels.
 
 **Gate:** stale-review races, bulk acceptance atomicity, partial-source disclosure,
-blind-label isolation and frontend tests. Generate/validate changed HTTP contracts
-and browser guards. Playback wire changes are unnecessary; inspect/update Baton only
-if an actually consumed shared schema changes.
+judgment isolation and focused frontend tests. Generate/validate changed HTTP contracts
+and browser guards. No playback wire change is planned; inspect/update Baton only if
+an actually consumed shared schema changes. No additional frontend state store.
 
-## 10. Select, release gradually and measure
+## 10. Confirm practical benefit, release gradually, and stop when sufficient
 
-Nominate the primary configuration using development results; freeze manifests,
-thresholds and its baseline comparison before opening the locked test results.
-Compare baseline A, improved evidence with the current tagger, the local classifier,
-and Jev; include CLAP only after its feasibility gate. Treat additional test-set
-comparisons as exploratory; a test-informed redesign needs a fresh confirmation set.
-Use identical tracks and judgments. Report per-tag precision/recall/PR-AUC,
-useful-track coverage, abstention,
-judgment counts, calibration, latency, storage and provider cost. Separate mood from
-session suitability and period. Run no-audio, shuffled-audio and source-removal controls.
+Choose a primary configuration using development results; freeze its manifests,
+thresholds and comparison with baseline A before opening confirmation results. Jev
+or another candidate can be evaluated separately if justified; do not require every
+researched engine. A test-informed redesign needs fresh confirmation examples.
 
-**Proposed promotion targets:** retain at least 0.80 precision and 0.60 useful-track
-coverage on adequately judged target labels; seek >=5 percentage points more coverage
-at matched precision, with recording-group confidence intervals. Insufficient samples
-or inconclusive improvement means more evaluation, not a claim of success. Do not
-certify rare tags from pooled averages. Preserve the existing semantic/safety gates.
+Report both kinds of outcome on the same recordings and requests:
 
-Ship behind explicit feature/engine selection: pilot -> selected folders -> resumable
-library backfill. No automatic paid tagging or silent retagging. Keep the previous
-engine available, preserve manual tags, and make feature cache deletion independent
-of authored state. Verify backup/restore, source withdrawal and model-version rollback.
-Backfill must fit the current container budget without material playback regression;
-measure that with concurrent playback before enabling it broadly.
+- **Owner benefit:** suitable candidates found, time spent auditioning, disruptive
+  false positives such as vocals/climaxes in a quiet bed, corrections and review time.
+  Use the existing planner and ordinary playlist flow, with comparable request order.
+- **Technical cost and quality:** per-tag precision/recall, useful-track coverage,
+  abstention and judgment counts; analysis time, RAM/disk, setup burden and provider
+  cost. Report uncertainty and known domain gaps; keep mood, scene and period separate.
+  Add calibration metrics only for calibrated outputs. Use small source-removal or
+  shuffled-audio controls when needed to establish what caused an apparent gain.
 
-Each stage should land as a logical local commit after its focused tests. Runtime
-changes then run the applicable [validation matrix](VALIDATION.md): Rust and contract
-gates, frontend gates for visible changes, both dependency lockfiles and license checks
-for new crates, plus container checks for inference packaging. Mark paid-provider,
-licensed-model and listening evidence separately from CI fixture success.
+The pilot's 0.80 precision/0.60 coverage targets are starting thresholds. Seek a clear
+gain on adequately judged core labels: for example, five percentage points more coverage
+at matched precision, or equivalent quality with materially less review/cost. Confirm
+workflow benefit; inconclusive results do not justify broad rollout or claims about all
+138 labels. Drop models that add no value and retain independently useful fixes.
 
-## Extensions only after a measured gap
+Release through explicit selection: pilot -> selected folders -> resumable backfill.
+No automatic paid tagging or silent retagging. Preserve manual tags and the previous
+engine; make clearing regenerable evidence independent of authored state. Verify source
+withdrawal, database restore and model rollback. Measure concurrent playback under the
+current resource budget before broad backfill. A cache or provider outage must leave
+ordinary library browsing, playback and authored playlists usable.
 
-| Observed gap | Concrete next implementation |
+Each stage lands as a logical local commit after focused checks. Runtime changes use
+the applicable [validation matrix](VALIDATION.md): Rust and contract gates, frontend
+checks for visible changes, dependency locks/license checks for new crates, and container
+checks for inference packaging. Distinguish CI fixtures from paid-provider, licensed-model
+and owner-listening validation. Reopen the conditional backlog only against an observed
+shortcoming.
+
+## Conditional work, with explicit reasons to add it
+
+These are implementation options, not commitments or prerequisites. Use the admission
+rule above before promoting one into the ordered plan.
+
+| Observed need | Specific next implementation and boundary |
 |---|---|
-| Affect dimensions remain weak | Benchmark `msd-musicnn-1` plus `deam-msd-musicnn-2` separately; the head expects 200 values and outputs `(valence, arousal)`. It cannot consume EffNet or the voice classifier's two scores. [Exact head](https://essentia.upf.edu/models/classification-heads/deam/deam-msd-musicnn-2.json) |
-| Rhythm still unreliable | Export/probe [Beat This!](https://github.com/CPJKU/beat_this), retaining no-beat/rubato evaluation and resource gates. |
-| CLAP misses soundtrack semantics | Compare [MuQ-MuLan](https://github.com/tencent-ailab/MuQ) on the same cohort before accepting its larger runtime and weight-license constraints. |
-| Catalog coverage is insufficient | Add Discogs edition/credit and referenced Wikidata work relationships through typed observation adapters; prioritize measured missing fields, not unrestricted scraping. Lyrics need a separate permitted, versioned text channel. |
-| Too few difficult examples | Add active-learning selection from uncertainty/disagreement plus a random audit fraction; keep recording groups and frozen tests protected. |
-| Local quality remains insufficient | Benchmark [Cyanite](https://docs.cyanite.ai/docs/intro/) behind the dedicated audio-upload consent/job contract. It is not part of the initial text-only Jev integration. |
+| Source/learned scores remain insufficient, or offline use/provider cost matters | Train independent L2 binary logistic heads for supported moods with [linfa-logistic](https://rust-ml.github.io/linfa/rustdocs/linfa_logistic/type.LogisticRegression.html), export scaling/coefficients, and run simple Rust inference. Start with existing scores/DSP; test embeddings only if needed. No multinomial softmax for coexisting moods. |
+| A trained model or wider label claim needs more evidence | Expand the judged library cohort, potentially toward 400 distinct recordings; add grouped train/calibration/test partitions and secondary listeners where justified. Fit on judged labels only, mask unknowns, and keep confirmation protected. The sample count alone still cannot certify every tag. |
+| Several useful sources cannot be combined reliably | Fit a small combiner on grouped out-of-fold predictions, with missing-source indicators; use separate held-out calibration if probabilities are needed. Never average vendor confidence or count correlated heads as independent votes. [Calibration methodology](https://scikit-learn.org/stable/modules/calibration.html). |
+| The first stack misses useful soundtrack semantics | Compare [larger CLAP music](https://huggingface.co/laion/larger_clap_music) upstream before native integration: deterministic ten-second windows/five-second hops including the ending, 48 kHz decoding, cached text embeddings for tag definitions/confusable alternatives. Preserve preprocessing while replacing its default random truncation; similarity is not calibrated probability. [Processor](https://huggingface.co/laion/larger_clap_music/blob/main/preprocessor_config.json). |
+| Repeated inference or a concrete training/retrieval feature needs reusable tensors | Measure cost first. Then add encoded/decoded-PCM identity with decoder revisions, separate encoder/head keys, or bounded NPY artifacts via [npyz](https://docs.rs/npyz/latest/npyz/), whichever addresses the need. Include quota, atomic publication, corruption recovery and backup/regeneration. Do not introduce all three automatically. |
+| An independent source-domain question cannot be answered with local examples | Add a narrow manifest/annotation importer: [MTG-Jamendo](https://github.com/MTG/mtg-jamendo-dataset) for weak mood labels, [DEAM](https://cvml.unige.ch/databases/DEAM/) for timestamped valence/arousal, or [OpenMIC](https://github.com/cosmir/openmic-2018) for masked instrument labels. Preserve scope, unknowns, official splits, overlap and licensing. MTG terms/audio licenses require separate review; training-set performance is not independent validation. |
+| Affect dimensions remain weak | Probe `msd-musicnn-1` plus `deam-msd-musicnn-2`; its [head](https://essentia.upf.edu/models/classification-heads/deam/deam-msd-musicnn-2.json) expects 200 values and outputs valence/arousal, incompatible with EffNet or the voice classifier's two scores. Keep only if session/listening results improve. |
+| Rhythm remains a material selection failure | After the stage 5 repair, probe [Beat This!](https://github.com/CPJKU/beat_this) with no-beat/rubato and resource gates. A standalone beat-analysis product is outside scope. |
+| A missing catalog fact changes a useful decision | Add the specific MusicBrainz work relationship, Discogs credit, or referenced Wikidata claim through existing typed adapters. Preserve version/entity scope; lyrics require a separately permitted text channel. Avoid collecting fields without a consumer. |
+| Manual pilot management repeatedly becomes a bottleneck | Extend pilot automation or a compact blind-listening mode, then consider active-learning selection with a random audit fraction. Preserve grouping and frozen tests; do not build a general dataset product. |
+| The smaller choices fail an important use case | Compare [MuQ-MuLan](https://github.com/tencent-ailab/MuQ) or [Cyanite](https://docs.cyanite.ai/docs/intro/) against that failure before integration. Account for larger runtime/weight terms or explicit audio-upload consent and recurring cost. |
 
-Do not begin with fine-tuning a large encoder, training on generated tags, a vector
-database, or several production analysis services. The immediate deliverable is a
-reproducible dataset and a demonstrably better, replaceable evidence-to-tag pipeline.
+Large-encoder fine-tuning, training on generated tags, several production analysis
+services, and a vector database have no demonstrated first-delivery requirement.
+Keep the researched alternatives available without turning them into product scope.
