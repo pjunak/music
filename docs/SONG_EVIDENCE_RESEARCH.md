@@ -7,7 +7,10 @@ library, listening labels, model weights, paid inference, or production service 
 used. Expected quality gains require the experiments described here.
 
 The follow-up [implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md) specifies
-components, code owners, dependencies and completion gates.
+components, code owners, dependencies and completion gates. It governs implementation
+scope: a clean cutover recomputes all generated analysis from original audio, removes
+legacy formats/engines and preserves authored data and attributable source facts.
+The broader experiments below are options, not a requirement to build them all.
 
 ## Recommendation
 
@@ -108,7 +111,8 @@ data from differently licensed supplementary data. Dataset or code access does n
 automatically grant every use of its music.
 [MusicBrainz licensing](https://musicbrainz.org/doc/About/Data_License).
 
-Historical AcousticBrainz outputs should remain attributed legacy predictions.
+Historical AcousticBrainz outputs are research context only; exclude them from the
+new evidence pipeline and analyze the source audio afresh.
 The project's retirement announcement itself raises concerns about the accuracy
 represented by its data; they are unsuitable as unquestioned new ground truth.
 [MetaBrainz announcement](https://musicbrainz.wordpress.com/2022/02/16/acousticbrainz-making-a-hard-decision-to-end-the-project/).
@@ -121,7 +125,7 @@ feature dataset is available for the proposed training or model-input use.
 
 ## Improve the audio evidence
 
-Retain technical measurements and trajectories. Add learned representations and
+Recompute technical measurements and trajectories. Add learned representations and
 small task-specific classifiers so the system can estimate instrument families,
 vocal character, broad styles, arousal, valence, and mood descriptors. These remain
 predictions with explicit model and preprocessing identities.
@@ -241,10 +245,12 @@ complementary evidence, not assuming any mood head generalizes to cinematic musi
 
 ### 3. Private listening benchmark and learning set
 
-Keep the existing [30-track pilot](MOOD_PILOT.md) as a first check. If promising,
-create a separate larger cohort. A proposed initial budget is 300–500 distinct
-recordings, expanded according to per-tag evidence; this does not guarantee
-statistical sufficiency. Many of 138 labels would still have few examples.
+Replace the existing [30-track pilot](MOOD_PILOT.md) format with the grouped pilot
+specified in the implementation plan; do not retain a compatibility mode. Start small.
+A later learning experiment could require 300–500 distinct recordings, expanded according
+to per-tag evidence. That count does not guarantee statistical sufficiency; many of
+138 labels would still have few examples. Preserve any pre-change baseline as a static
+research report, outside runtime and current pilot inputs.
 
 Sample soundtrack families, composers/artists, genres, vocal states, mastering
 levels, durations, changing sections, and metadata richness. Include ambient/no-beat,
@@ -408,12 +414,16 @@ Measure operational cost too: time and peak memory per minute of music, projecte
 library cost from measured samples, cache reuse, failures, correction calls, and
 review minutes per useful accepted tag. Measure incremental benefit per source.
 
-## Phased implementation proposal
+## Research workstreams
+
+The implementation plan above defines the lean sequence and clean rebuild. These
+workstreams retain alternatives for later measured gaps; they do not require keeping
+an old pipeline, result format, or cache alongside the replacement.
 
 | Phase | Work | Completion criterion |
 |---|---|---|
 | 0: Targets and evaluation | Define labels, separate mood/use/context, independently judge the initial pilot, design grouped larger partitions. | Reproducible baseline, explicit unknowns, no test tuning or related-track leakage. |
-| 1: Reusable evidence | Reuse catalog identity, preserve source observations, add typed manifests and audio-content identity separate from metadata/vocabulary. | Attributable claims; unchanged audio reused; source-policy changes invalidate dependent decisions. |
+| 1: Rebuilt evidence | Preserve catalog identities/source facts and add current typed manifests; consider audio-content identity only if later reuse warrants it. | Fresh generated evidence for every track at cutover; subsequent reuse is confined to the new contract; source policy invalidates dependent decisions. |
 | 2: Audio comparison | Test exact Essentia encoder/heads and music CLAP; measure tempo, resources, temporal behavior, and labels. Add MuQ-MuLan for a remaining gap. | Demonstrated winner or rejection; native outputs match reference preprocessing/inference within declared tolerances. |
 | 3: Decision comparison | Fit a small local baseline, combine sources, benchmark Jev, add per-tag provenance/calibration. | Better held-out usefulness at measured cost; abstention, missing-source behavior, and safety preserved. |
 | 4: Learn and expand | Sample corrections, disagreements, rare labels; retain random audits and locked tests. | Demonstrated generalization without recycling generated suggestions into supposed ground truth. |
@@ -442,4 +452,5 @@ learning for community annotations, domain-specific calibration, and teacher/stu
 distillation where source terms allow it. Preserve human/generated distinctions
 and test each addition against the simpler system. The durable asset is the
 independently judged, versioned evidence dataset, allowing future models to be
-replaced without rebuilding the library's knowledge.
+replaced while preserving human judgments and source facts. Generated analysis is
+disposable and can be rebuilt instead of maintaining legacy compatibility.

@@ -1,6 +1,6 @@
 # Song evidence and mood tagging implementation plan
 
-Prepared 23 September 2026; scope reviewed against `music` commit `588c9d3`.
+Prepared 23 September 2026; clean-cutover scope reviewed against `music` commit `046f67e`.
 Status: proposed implementation; no runtime changes or model certification.
 This turns the [research](SONG_EVIDENCE_RESEARCH.md) into dependency-ordered work.
 Public model specifications and current source were inspected; native compatibility,
@@ -17,17 +17,31 @@ Follow the existing [Assistant and Authoring workflow](assistant-ux-philosophy.m
 
 Every addition must name an observed problem, its consumer, a measurable benefit,
 and the simplest viable solution. Include setup, compute/storage, provider cost,
-maintenance, failure recovery and removal/fallback. Complexity is justified when a
+maintenance, failure recovery and removal. Complexity is justified when a
 simpler choice demonstrably fails an important use case; an unused field is not progress.
 
 Example outcomes to validate: a quiet exploration bed without disruptive vocals or
 climaxes, sustained tension, energetic combat, or a desired listening mood. Evaluate
 perceived sound and session suitability separately within existing product workflows.
 
+## Clean cutover: recompute all generated analysis
+
+Replace the analysis contract and rebuild every indexed recording from its source audio.
+Remove superseded analyzers, schemas, parsers, aliases, pilot formats, compatibility
+branches and old-engine fallback. Do not translate or reuse old generated results.
+Only results produced by the new pipeline can satisfy analysis or review freshness.
+
+Preserve source files, embedded metadata, track identities, attributable catalog facts,
+accepted/manual tags, independently collected judgments and authored playlists/campaigns.
+Refresh external observations under current source policy. Clear derived contexts,
+features, predictions and proposal-bound review state; retain paid-attempt accounting
+only as non-executable audit history. A failed or unfinished rebuild remains visibly
+unavailable instead of displaying old results. Ordinary playback remains usable.
+
 ## Recommended first delivery
 
-Reuse the existing catalog, analysis jobs, structured-output tagger, Mood Library
-review, and playlist workflow. Trial one additional audio model family and retain
+Reuse catalog and job infrastructure and update the tagger in place; keep Mood Library
+review and the playlist workflow. Trial one additional audio model family and retain
 only the evidence that improves decisions. Jev is an optional comparison on the same
 evidence, reflecting the owner's ongoing investigation; it is not a release dependency.
 
@@ -36,8 +50,8 @@ evidence, reflecting the owner's ongoing investigation; it is not a release depe
 | Evaluation | Small owner-judged, grouped pilot and untouched confirmation cohort | Results are inconclusive, more tags matter, or training needs more examples |
 | Audio | Probe Discogs-EffNet with matching mood/theme and instrument heads; adopt only useful heads | A measured failure warrants another model |
 | Native inference | Probe `tract-onnx` matching existing Tract; `ort` only if necessary | Compatibility and quality justify native packaging cost |
-| Storage | Existing SQLite records plus one bounded learned-feature summary per track/analyzer | An actual consumer needs retained tensors, history, or cross-file reuse |
-| Interpretation | Existing tagger with improved evidence; optional Jev comparison | Local training offers a measured quality, offline-use, or cost advantage |
+| Storage | Replace the generated-data contract in SQLite; add one bounded summary per track/analyzer if learned audio is adopted | An actual consumer needs retained tensors, history, or cross-file reuse |
+| Interpretation | One new tagger contract with improved evidence; optional Jev comparison | Local training offers a measured quality, offline-use, or cost advantage |
 | Review | Existing Mood Library and Authoring transactions | Repeated operator friction justifies a small UI extension |
 
 Keep measured sound, learned predictions, catalog claims, listener judgments and
@@ -62,11 +76,10 @@ needs are met. The conditional backlog is not a commitment.
 - Preserve tag IDs, the four groups, and the eight-suggestion limit. Define a small
   core of common tags with positive and confusable examples. Judge every core tag
   per selected recording; do not attempt to certify all 138 default labels at once.
-- Keep the existing 30-track pilot as a smoke test. Extend its tooling with a versioned
-  JSONL judgment/manifest format and a separate grouped mode; do not silently reinterpret
-  its old fixtures. Start with roughly 60-100 representative recordings if available,
-  including actual failure cases and a random library sample. This is a pilot size,
-  not a statistical claim or a prerequisite for inspecting obvious defects.
+- Replace the 30-track pilot format and fixtures with one grouped JSONL judgment/
+  manifest format. Remove the old mode and parser. Start with roughly 60-100 representative
+  recordings if available, including actual failures and a random library sample.
+  This is a pilot size, not a statistical claim or a prerequisite for correcting defects.
 - Store stable recording/file references, vocabulary revision, grouping, split seed,
   annotator, listened intervals and blind/assisted status. Keep related versions,
   duplicates and excerpts in one partition. Separate composers/albums where feasible;
@@ -81,7 +94,8 @@ needs are met. The conditional backlog is not a commitment.
   annotation is needed only for claims beyond that owner. Preserve disagreement and
   known blinding limitations. Keep private audio and judgments outside Git.
 
-**Gate:** freeze current configuration and outputs as baseline A before changes;
+**Gate:** capture baseline A once before replacement as a private research report;
+the new runtime and pilot tools do not load old analysis formats. Freeze its configuration;
 lock confirmation groups before tuning. Verify grouping, partial-label scoring and
 missing-versus-abstained reporting with fixtures. Report per-tag counts and recording-group
 bootstrap intervals; small samples cannot certify rare tags. Reuse existing consent
@@ -122,42 +136,52 @@ error <=1e-3 on nonsilent fixtures, with separate near-zero handling. Investigat
 systematic differences; do not loosen tolerances to hide a preprocessing mismatch.
 Run within the documented [three-CPU/4 GB resource contract](RUST_REWRITE_ARCHITECTURE.md#non-functional-requirements)
 before production adoption.
-A failed probe records rejection or justifies one fallback; it does not block useful
+A failed probe records rejection or justifies one alternative runtime; it does not block useful
 catalog/DSP corrections. Benchmark both heads, but ship only heads with a useful consumer.
 
-## 3. Add the smallest evidence contract and storage extension
+## 3. Define the new storage contract and one-way reset
 
 **Owners:** application `assistant` evidence types,
-[storage](../crates/music-storage/src/analysis.rs), and one additive SQLx migration
-if the existing storage cannot express the separate learned-feature record.
+[storage](../crates/music-storage/src/analysis.rs),
+[migrations](../crates/music-storage/src/migration.rs) and
+[schema checks](../crates/music-storage/src/schema.rs).
 Keep the eight-crate structure and current dependency direction.
 
-| Record | First-delivery responsibility |
+| Record | New contract and cutover treatment |
 |---|---|
-| Existing `track_contexts` | Factual DSP and current source/implementation identity |
-| Proposed `track_audio_features` | One bounded record per `(track_id, analyzer_id)`: source/model/preprocessing signatures, coverage/status, aggregate scores, selected intervals, and completion/error facts |
-| Existing catalog observations/result JSON | Original claim, source/reference, entity scope, match status and policy revision; extend fields only where the evidence consumer needs them |
-| Existing `track_analyses` | Reviewable interpretation with versioned per-tag support/abstention and evidence references |
-| Existing `track_user_tags` and review records | Operator-owned accepted state and current review lifecycle |
-| Private pilot files | Revisioned manifests, independent judgments and comparison exports |
+| `track_contexts` | Clear old rows; recompute factual DSP/voice evidence from source audio |
+| Proposed `track_audio_features` | One bounded record per `(track_id, analyzer_id)`: pipeline/source/model/preprocessing signatures, coverage/status, aggregate scores and selected intervals; no old-cache import |
+| Catalog observations/result JSON | Preserve attributable source facts under current policy; refresh unsupported/expired cached payloads instead of adding readers for old formats |
+| `track_analyses` | Replace the result shape with per-tag support/abstention and evidence references; clear old interpretations and remove obsolete columns |
+| `track_user_tags` | Preserve accepted/operator-owned tags independently of generated analysis |
+| `track_analysis_tag_reviews` and analysis failures | Clear state tied to superseded results; new proposals start a new review lifecycle |
+| Private pilot files | One current manifest/judgment format; static pre-change research reports are not application inputs |
 
-Keep a typed distinction between measured, catalog-observed and model-predicted inputs.
-Represent missing, unavailable, failed, partial and complete states explicitly; missing
-is not a zero score. A per-tag decision records support or abstention, bounded evidence
-references, contradictions and temporal scope. Raw model scores and optional calibrated
-probabilities are different fields; omit calibrated probability until demonstrated.
-Retain track-level confidence only as a legacy summary, not a per-tag probability.
-Validate finite values, label dimensions, references and payload limits.
+Use measured, catalog-observed and model-predicted input types. Missing, unavailable,
+failed, partial and complete are explicit; missing is not zero. Per-tag decisions carry
+support/abstention, bounded evidence references, contradictions and temporal scope.
+Raw scores differ from optional demonstrated calibrated probabilities. Remove legacy
+track-level confidence from analysis storage, DTOs and UI; do not carry a compatibility
+summary or placeholder. Validate finite values, dimensions, references and payload limits.
 
-Use a proposed 64 KiB maximum learned-feature payload per track as an initial budget,
-checked against the actual projection. Store summaries in SQLite; keep full tensors
-only for selected research fixtures outside the normal application lifecycle. Introduce
-a separate ledger or artifact store only when a concrete query/retention requirement
-outgrows existing ownership.
+Specify one forward SQLx migration that resets derived records and removes obsolete
+schema objects. Keep applied migration history intact; register the cutover migration
+with the matching writers/readers and old-path deletion in stage 9. It must preserve
+source/authored data without translating old analysis payloads. Supersede old queued
+analysis work before job recovery; completed/uncertain paid attempts remain audit-only
+and are never resumed or reinterpreted as fresh results. Expire old analysis-role
+certification/consent fingerprints and old review links under the new contract.
 
-**Gate:** additive migration/doctor compatibility, bounded serialization, missing-data
-handling and stale-write rejection. Regenerable evidence can be cleared without changing
-accepted tags. Existing database backup/restore remains sufficient for this stage.
+Use a proposed 64 KiB maximum learned-feature payload per track. Store summaries in
+SQLite; retain full tensors only for selected private research fixtures. A separate
+ledger/artifact store needs a concrete query or retention requirement.
+
+**Gate:** fresh-database and upgrade/reset fixtures reach the same current schema;
+reset preserves accepted tags and authored resources, rejects old result/job/review
+identities, and recovers from interruption without exposing partial state. Repeated
+startup preserves completed new-pipeline work; the reset migration runs once. Doctor and
+backup/restore tests use the new contract. Restoring an older backup runs the same
+one-way reset before analysis is available; there is no legacy-reader mode.
 
 ## 4. Connect existing sources and preserve correct invalidation
 
@@ -166,9 +190,11 @@ accepted tags. Existing database backup/restore remains sufficient for this stag
 [typed catalog port](../crates/music-application/src/cleanup_enrichment/catalog.rs),
 [catalog invalidation](../crates/music-storage/src/catalog_evidence.rs).
 
-- Begin with the current source signature and exact model/preprocessing/runtime
-  revisions for feature reuse. Bind decisions additionally to allowed metadata,
-  observation revision, source policy, vocabulary, engine and question/prompt revision.
+- Include the new pipeline revision plus source/model/preprocessing/runtime identity
+  in every generated result and job. Force fresh extraction for every track at cutover,
+  regardless of matching old file signatures; subsequent reuse accepts only new-contract
+  results. Bind decisions to allowed metadata, observation revision, source policy,
+  vocabulary, engine and question/prompt revision.
   Recheck these dependencies inside the write transaction. Preserve the existing
   signature's limitations; add content hashing if it proves insufficient for correct
   invalidation. Full decoded-PCM identity and reuse across renamed files are optimizations,
@@ -191,8 +217,8 @@ accepted tags. Existing database backup/restore remains sufficient for this stag
   a new ingestion platform. A public dataset's labels do not become ground truth for
   a local recording without an exact version match and matching annotation scope.
 
-**Gate:** changed-source/model invalidation, ambiguous-match exclusion, source-disable
-races, bounded raw-tag handling and duplicate-family grouping. A tag-only file edit
+**Gate:** rejection of pre-cutover results, source/model invalidation, ambiguous-match
+exclusion, source-disable races, bounded raw-tag handling and duplicate-family grouping. A tag-only file edit
 may trigger fresh analysis initially; measure that cost before adding another cache.
 
 ## 5. Correct misleading factual inputs and share required preprocessing
@@ -229,11 +255,12 @@ as synthetic metronomes. Repair misleading semantics even if no new model is ado
 [server composition](../crates/music-server/src/analysis.rs), existing analysis executor.
 For learned audio, depends on the successful parts of stages 2-5.
 
-- Register a restartable feature-analysis pass in the existing durable job/executor
-  infrastructure, defaulting to one worker and a bounded queue. Checkpoint completed
-  tracks against their source/model signatures. Cancellation never marks partial work
-  complete. Model installation and failure remain independent of server boot, factual
-  DSP and playback. Release model memory after the analysis pass.
+- Run one bounded full-library rebuild through the existing durable job/executor
+  infrastructure, defaulting to one worker. Recompute factual DSP and every enabled
+  voice/learned-feature stage from original audio for every indexed track. Checkpoints contain
+  only new-pipeline work; interruptions resume that rebuild without importing old results.
+  Missing/failed files remain explicit. Cancellation never marks partial work complete.
+  Model availability remains independent of boot/playback; release memory after the pass.
 - Run the selected EffNet encoder once per patch, then only retained heads. Start
   with the documented 62-frame hop. Stream the recording, including its ending;
   account for padding and valid duration. Avoid a single central excerpt that misses
@@ -252,7 +279,7 @@ For learned audio, depends on the successful parts of stages 2-5.
 **Gate:** reference parity, full/tail coverage, bounded long-file memory and payloads,
 interruption/resume, stale-file races, cache hits and storage failure handling. Measure
 seconds per audio minute, bytes per track and peak RSS. Test concurrent playback before
-backfilling; reduce batch scheduling or reject the stack if the product budget is exceeded.
+the full rebuild; reduce scheduling or reject the stack if the product budget is exceeded.
 
 ## 7. Improve the existing tagger using one shared evidence projection
 
@@ -268,9 +295,10 @@ to the current tagger and optional Jev.
 
 Adapt the current structured-output tagger to this evidence and a per-tag support/
 abstention result. Preserve its full-vocabulary route and eight-suggestion limit;
-new evidence must not become hidden local preselection of allowed tags. Version input,
-output, analyzer, disclosure, role fingerprint and quality fixtures together. Do not
-send additional catalog/learned evidence under the previous consent contract.
+new evidence must not become hidden local preselection of allowed tags. Replace superseded
+input/output parsers and fixtures. Version input, output, analyzer, disclosure, role
+fingerprint and quality fixtures together. Do not
+send evidence under the previous consent contract or register the old tagger as a fallback.
 
 Compare baseline A with the updated tagger on development recordings. Use bounded
 source-only, audio-only and combined ablations to establish which evidence helps.
@@ -351,12 +379,19 @@ Use pilot exports and a documented listening protocol first; a dedicated annotat
 screen needs repeated annotation work to justify it. Assisted corrections retain that
 status and do not silently become independent confirmation labels.
 
-**Gate:** stale-review races, bulk acceptance atomicity, partial-source disclosure,
-judgment isolation and focused frontend tests. Generate/validate changed HTTP contracts
-and browser guards. No playback wire change is planned; inspect/update Baton only if
-an actually consumed shared schema changes. No additional frontend state store.
+Land the reset migration together with current writers/readers, generated HTTP types,
+strict browser guards and new fixtures. Remove superseded analyzer registrations,
+legacy fields/parsers, compatibility branches and old pilot entrypoints. Old clients
+must refresh/update rather than receive an adapted old analysis response. Current
+provider alternatives such as Jev implement the same new contract.
 
-## 10. Confirm practical benefit, release gradually, and stop when sufficient
+**Gate:** stale-review races, bulk acceptance atomicity, partial-source disclosure,
+judgment isolation and focused frontend tests. Verify old payloads/jobs/review requests
+are rejected and no old analysis route remains reachable. Applied migration history stays
+intact; static research reports stay outside the runtime. No playback wire change is planned;
+inspect/update Baton only if a consumed schema changes. No additional frontend state store.
+
+## 10. Confirm benefit, cut over once, and rebuild the whole library
 
 Choose a primary configuration using development results; freeze its manifests,
 thresholds and comparison with baseline A before opening confirmation results. Jev
@@ -377,17 +412,31 @@ Report both kinds of outcome on the same recordings and requests:
 The pilot's 0.80 precision/0.60 coverage targets are starting thresholds. Seek a clear
 gain on adequately judged core labels: for example, five percentage points more coverage
 at matched precision, or equivalent quality with materially less review/cost. Confirm
-workflow benefit; inconclusive results do not justify broad rollout or claims about all
+workflow benefit; inconclusive results do not justify cutover or claims about all
 138 labels. Drop models that add no value and retain independently useful fixes.
 
-Release through explicit selection: pilot -> selected folders -> resumable backfill.
-No automatic paid tagging or silent retagging. Preserve manual tags and the previous
-engine; make clearing regenerable evidence independent of authored state. Verify source
-withdrawal, database restore and model rollback. Measure concurrent playback under the
-current resource budget before broad backfill. A cache or provider outage must leave
-ordinary library browsing, playback and authored playlists usable.
+Validate the new pipeline on the pilot and representative folders before cutover.
+Then stop old analysis workers, back up the database/authored files, deploy the contract/reset
+change and supersede old analysis jobs before recovery. Rebuild every indexed recording
+from original audio under the new contract, including previously successful tracks.
+Recreate metadata/catalog-derived proposals from retained permitted source facts and
+recompute local DSP plus every enabled voice, feature and interpretation stage. Refresh
+source observations where policy/freshness requires it. No old result may satisfy the rebuild.
 
-Each stage lands as a logical local commit after focused checks. Runtime changes use
+Use one resumable rebuild with visible pending/complete/failed counts; unavailable files
+stay failed until accessible. New checkpoints can resume completed new-pipeline work.
+Paid interpretation still requires the current disclosure and budget, with no automatic
+retry of uncertain past attempts. Analysis failure leaves results unavailable; there is
+no switch back to old analysis. Accepted tags change only through explicit review.
+
+Verify reset/restart/restore, source withdrawal and preservation of authored data.
+Measure concurrent playback under the container budget before the full rebuild. A model,
+cache or provider failure must leave browsing, playback and authored playlists usable.
+A later model/contract change invalidates affected generated results for reanalysis;
+it does not add a reader for their old format.
+
+Use logical local commits after focused checks; ship the destructive migration and
+its matching runtime/UI changes as one coherent cutover. Runtime changes use
 the applicable [validation matrix](VALIDATION.md): Rust and contract gates, frontend
 checks for visible changes, dependency locks/license checks for new crates, and container
 checks for inference packaging. Distinguish CI fixtures from paid-provider, licensed-model
