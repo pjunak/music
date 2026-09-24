@@ -83,7 +83,7 @@ function validatePilot(rows, vocabulary) {
     check(track.duplicate_group === null || text(track.duplicate_group), "Invalid duplicate group.");
     check(track.album === null || text(track.album), "Invalid album identity.");
     check(unique(track.composers) && track.composers.length <= 30 && track.composers.every((value) => text(value)), "Invalid composer identities.");
-    check(["whole_track", "excerpt"].includes(track.scope) && typeof track.blind === "boolean" && typeof track.reviewed === "boolean", "Record listening scope, blinding and review status.");
+    check(["whole_track", "excerpt"].includes(track.scope) && typeof track.reviewed === "boolean" && (typeof track.blind === "boolean" || (!track.reviewed && track.blind === null)), "Record listening scope and review status; reviewed tracks need an explicit blinding status.");
     check(Array.isArray(track.listened_intervals) && track.listened_intervals.length <= 100, "Invalid listened intervals.");
     let end = 0;
     for (const interval of track.listened_intervals) {
@@ -152,45 +152,73 @@ function counts(tracks, predictions, included) {
   }
   return result;
 }
+function rates(count) {
+  const judged = count.useful_tags + count.false_positive_tags;
+  return { precision: judged ? count.useful_tags / judged : null,
+    recall: count.positive_judgments ? count.useful_tags / count.positive_judgments : null,
+    useful_track_coverage: count.eligible_tracks ? count.covered_tracks / count.eligible_tracks : null };
+}
 function metrics(count) {
   const judged = count.useful_tags + count.false_positive_tags;
   const labels = count.positive_judgments + count.negative_judgments;
   const total = labels + count.uncertain_judgments + count.unjudged_judgments;
-  return { ...count, precision: judged ? count.useful_tags / judged : null,
+  return { ...count, missed_positive_tags: count.positive_judgments - count.useful_tags, ...rates(count),
     proposal_judgment_coverage: count.proposed_tags ? judged / count.proposed_tags : null,
-    judgment_coverage: total ? labels / total : null,
-    useful_track_coverage: count.eligible_tracks ? count.covered_tracks / count.eligible_tracks : null };
+    judgment_coverage: total ? labels / total : null };
 }
-function intervals(groups, predictions, included, seed) {
-  if (groups.length < 2) return { precision: null, useful_track_coverage: null, independent_groups: groups.length };
-  const aggregates = groups.map((group) => counts(group, predictions, included));
+const RATE_KEYS = ["precision", "recall", "useful_track_coverage"];
+const SUM_KEYS = ["useful_tags", "false_positive_tags", "positive_judgments", "eligible_tracks", "covered_tracks"];
+const difference = (before, after) => before === null || after === null ? null : after - before;
+function metricDelta(before, after) {
+  return Object.fromEntries(Object.entries(before)
+    .filter(([, value]) => value === null || typeof value === "number")
+    .map(([key, value]) => [key, difference(value, after[key])]));
+}
+function intervals(groups, runs, included, seed) {
+  const samples = Object.fromEntries(RATE_KEYS.map((key) => [key, []]));
+  const aggregates = groups.map((group) => runs.map((predictions) => counts(group, predictions, included)));
   let state = Number.parseInt(hash(seed).slice(0, 8), 16) || 1;
   const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296; };
-  const samples = { precision: [], useful_track_coverage: [] };
-  for (let iteration = 0; iteration < 1000; iteration++) {
-    let useful = 0, wrong = 0, eligible = 0, covered = 0;
-    for (let i = 0; i < groups.length; i++) { const row = aggregates[Math.floor(random() * groups.length)]; useful += row.useful_tags; wrong += row.false_positive_tags; eligible += row.eligible_tracks; covered += row.covered_tracks; }
-    if (useful + wrong) samples.precision.push(useful / (useful + wrong));
-    if (eligible) samples.useful_track_coverage.push(covered / eligible);
+  const replicates = groups.length >= 2 ? 1000 : 0;
+  for (let iteration = 0; iteration < replicates; iteration++) {
+    const totals = runs.map(() => Object.fromEntries(SUM_KEYS.map((key) => [key, 0])));
+    for (let i = 0; i < groups.length; i++) {
+      // Both candidates receive the same resampled groups, including missing results.
+      const paired = aggregates[Math.floor(random() * groups.length)];
+      paired.forEach((row, side) => { for (const key of SUM_KEYS) totals[side][key] += row[key]; });
+    }
+    const values = totals.map(rates);
+    for (const key of RATE_KEYS) {
+      const value = runs.length === 1 ? values[0][key] : difference(values[0][key], values[1][key]);
+      if (value !== null) samples[key].push(value);
+    }
   }
-  const percentile = (values) => { values.sort((a, b) => a - b); return values.length < 900 ? null : [values[Math.floor(values.length * 0.025)], values[Math.min(values.length - 1, Math.floor(values.length * 0.975))]]; };
-  return { precision: percentile(samples.precision), useful_track_coverage: percentile(samples.useful_track_coverage), independent_groups: groups.length };
+  const percentile = (values) => {
+    values.sort((a, b) => a - b);
+    return values.length < 900 ? null : [values[Math.floor(values.length * 0.025)], values[Math.min(values.length - 1, Math.floor(values.length * 0.975))]];
+  };
+  return { ...Object.fromEntries(RATE_KEYS.map((key) => [key, percentile(samples[key])])),
+    independent_groups: groups.length, replicates,
+    defined_replicates: Object.fromEntries(RATE_KEYS.map((key) => [key, samples[key].length])) };
 }
 
-export function scorePilot(rows, run, vocabulary, split = "development") {
-  const { manifest, tracks, tags, names } = validatePilot(rows, vocabulary);
+function prepareScoring(rows, vocabulary, split) {
+  const context = validatePilot(rows, vocabulary), { manifest, tracks } = context;
   check(["development", "confirmation"].includes(split), "Choose development or confirmation explicitly.");
   check(manifest.partition_fingerprint === partitionFingerprint(manifest, tracks), "Pilot partition or vocabulary changed after freezing.");
   const splits = partition(manifest, tracks);
   check(tracks.every((track) => track.split === splits.get(track.track_id)), "Pilot groups crossed their frozen split.");
-  const selected = tracks.filter((track) => track.split === split);
+  const selected = tracks.filter((track) => track.split === split).sort((a, b) => a.track_id - b.track_id);
   check(selected.every((track) => track.reviewed && track.listened_intervals.length > 0), "Finish independent listening judgments and intervals for the selected split.");
-  const predictions = runIndex(run, names);
-  const groups = groupedTracks(selected, manifest.separate_by);
+  return { ...context, split, selected, groups: groupedTracks(selected, manifest.separate_by) };
+}
+
+function scorePrepared(context, run, predictions) {
+  const { manifest, tracks, tags, split, selected, groups } = context;
   const report = (included) => metrics(counts(selected, predictions, included));
   const categories = Object.fromEntries(CATEGORIES.map((category) => {
     const included = manifest.core_tag_ids.filter((tag) => category === "all" || tags.get(tag).category === category);
-    return [category, { ...report(included), bootstrap_95: intervals(groups, predictions, included, [manifest.partition_fingerprint, split, category]) }];
+    return [category, { ...report(included), bootstrap_95: intervals(groups, [predictions], included, [manifest.partition_fingerprint, split, category]) }];
   }));
   const overlap = (values) => { const dev = new Set(tracks.filter((t) => t.split === "development").flatMap(values)); return [...new Set(tracks.filter((t) => t.split === "confirmation").flatMap(values))].filter((v) => dev.has(v)).sort(); };
   return { schema_version: "song-mood-score/v1", split, partition_fingerprint: manifest.partition_fingerprint,
@@ -200,7 +228,66 @@ export function scorePilot(rows, run, vocabulary, split = "development") {
     listening: { blind_tracks: selected.filter((t) => t.blind).length, assisted_tracks: selected.filter((t) => !t.blind).length, excerpt_tracks: selected.filter((t) => t.scope === "excerpt").length },
     residual_overlap: { albums: overlap((t) => t.album ? [t.album] : []), composers: overlap((t) => t.composers) },
     run_source_signatures: Object.fromEntries(selected.filter((t) => predictions.has(t.track_id)).map((t) => [t.track_id, predictions.get(t.track_id).source_signature])),
-    scope_note: "Only core tags with positive/negative judgments affect precision. Uncertain and unjudged labels are masked. Intervals resample whole independent groups, not tracks; small or biased samples do not establish general accuracy. Verify file references against the run before comparing. Usage covers the entire exported run.", usage: run.usage ?? null };
+    scope_note: "Only judged core tags are scored. Precision uses positive/negative proposals; recall uses known positive judgments, including misses from unavailable results. Uncertain and unjudged labels are masked. Intervals resample whole independent groups, not tracks; small or biased samples do not establish general accuracy. Verify file references against the run before comparing. Usage covers the entire exported run.", usage: run.usage ?? null };
+}
+
+export function scorePilot(rows, run, vocabulary, split = "development") {
+  const context = prepareScoring(rows, vocabulary, split);
+  return scorePrepared(context, run, runIndex(run, context.names));
+}
+
+function assessResult(result) {
+  return { availability: !result ? "missing" : result.tags.length ? "proposed" : "abstained", tags: [...(result?.tags ?? [])].sort() };
+}
+function compareTrack(track, before, after, coreTags) {
+  const baseline = assessResult(before), candidate = assessResult(after);
+  if (JSON.stringify(baseline) === JSON.stringify(candidate)) return null;
+  const added = candidate.tags.filter((tag) => !baseline.tags.includes(tag));
+  const removed = baseline.tags.filter((tag) => !candidate.tags.includes(tag));
+  const judgments = (ids) => ids.filter((tag) => coreTags.includes(tag))
+    .map((tag_id) => ({ tag_id, judgment: track.labels[tag_id] ?? "unjudged" }));
+  const addedCore = judgments(added), removedCore = judgments(removed);
+  const improvements = [], regressions = [];
+  if (!before && after) improvements.push("recovered_result");
+  if (before && !after) regressions.push("lost_result");
+  if (addedCore.some((tag) => tag.judgment === "positive")) improvements.push("gained_useful_tag");
+  if (removedCore.some((tag) => tag.judgment === "positive")) regressions.push("lost_useful_tag");
+  if (addedCore.some((tag) => tag.judgment === "negative")) regressions.push("added_false_positive");
+  // An unavailable candidate did not make a safer decision.
+  if (after && removedCore.some((tag) => tag.judgment === "negative")) improvements.push("avoided_false_positive");
+  return { track_id: track.track_id, baseline, candidate,
+    added_core_tags: addedCore, removed_core_tags: removedCore,
+    added_non_core_tags: added.filter((tag) => !coreTags.includes(tag)),
+    removed_non_core_tags: removed.filter((tag) => !coreTags.includes(tag)),
+    classification: improvements.length && regressions.length ? "mixed" : regressions.length ? "regression" : improvements.length ? "improvement" : "changed",
+    improvements, regressions };
+}
+
+export function comparePilot(rows, baselineRun, candidateRun, vocabulary, split = "development") {
+  const context = prepareScoring(rows, vocabulary, split);
+  const { manifest, selected, groups, tags, names } = context;
+  const before = runIndex(baselineRun, names), after = runIndex(candidateRun, names);
+  const baseline = scorePrepared(context, baselineRun, before), candidate = scorePrepared(context, candidateRun, after);
+  const categories = Object.fromEntries(CATEGORIES.map((category) => {
+    const included = manifest.core_tag_ids.filter((tag) => category === "all" || tags.get(tag).category === category);
+    return [category, { ...metricDelta(baseline.categories[category], candidate.categories[category]),
+      bootstrap_95: intervals(groups, [before, after], included, [manifest.partition_fingerprint, split, category]) }];
+  }));
+  const differences = selected.map((track) => compareTrack(track, before.get(track.track_id), after.get(track.track_id), manifest.core_tag_ids)).filter(Boolean);
+  return { schema_version: "song-mood-comparison/v1", split, partition_fingerprint: manifest.partition_fingerprint,
+    judgments_fingerprint: baseline.judgments_fingerprint, baseline_run_fingerprint: hash(baselineRun), candidate_run_fingerprint: hash(candidateRun),
+    baseline, candidate, delta: { categories,
+      per_tag: Object.fromEntries(manifest.core_tag_ids.map((tag) => [tag, metricDelta(baseline.per_tag[tag], candidate.per_tag[tag])])) },
+    result_availability: {
+      both_present: selected.filter((track) => before.has(track.track_id) && after.has(track.track_id)).length,
+      baseline_only: selected.filter((track) => before.has(track.track_id) && !after.has(track.track_id)).length,
+      candidate_only: selected.filter((track) => !before.has(track.track_id) && after.has(track.track_id)).length,
+      neither_present: selected.filter((track) => !before.has(track.track_id) && !after.has(track.track_id)).length },
+    unchanged_tracks: selected.length - differences.length,
+    tracks_with_improvements: differences.filter((track) => track.improvements.length).length,
+    tracks_with_regressions: differences.filter((track) => track.regressions.length).length,
+    differences,
+    scope_note: "Selected split only; candidate minus baseline on the same judgments. Rate deltas are fractions and remain null if either denominator is empty. Bootstrap intervals resample the same whole independent groups on both sides; missing results remain in the cohort. Availability and tag signals can overlap; mixed changes need review. Uncertain, unjudged and non-core changes establish no quality gain. Verify frozen file references and record candidate settings before comparing; run fingerprints are audit identities, not proof of matching audio or a controlled experiment. Usage covers entire exports, not just scored tracks. No automatic pass threshold." };
 }
 
 async function readBounded(path) {
@@ -218,7 +305,10 @@ export async function main(args) {
   } else if (args[0] === "score" && (args.length === 4 || (args.length === 5 && args[4] === "--confirmation"))) {
     const [content, run, vocabulary] = await Promise.all([readBounded(args[1]), readJson(args[2]), readJson(args[3])]);
     process.stdout.write(`${JSON.stringify(scorePilot(parsePilot(content), run, vocabulary, args[4] ? "confirmation" : "development"), null, 2)}\n`);
-  } else throw new Error("Usage: node tools/mood-pilot.mjs init run.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | score pilot.jsonl run.json vocabulary.json [--confirmation]");
+  } else if (args[0] === "compare" && (args.length === 5 || (args.length === 6 && args[5] === "--confirmation"))) {
+    const [content, baseline, candidate, vocabulary] = await Promise.all([readBounded(args[1]), ...args.slice(2, 5).map(readJson)]);
+    process.stdout.write(JSON.stringify(comparePilot(parsePilot(content), baseline, candidate, vocabulary, args[5] ? "confirmation" : "development"), null, 2) + "\n");
+  } else throw new Error("Usage: node tools/mood-pilot.mjs init run.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | score pilot.jsonl run.json vocabulary.json [--confirmation] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation]");
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });

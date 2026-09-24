@@ -24,8 +24,8 @@ remain the operator-facing acceptance procedure.
   use different connections, providers, models, and keys.
 - Playlist and EQ drafts go through Authoring import preview and explicit commit.
 - Model tag suggestions go through explicit generated-tag review.
-- Automatic playlists use only manual/accepted tags and optional current local
-  metadata analysis. They never consume unreviewed provider suggestions.
+- Automatic playlists use only manual/accepted tags. Generated suggestions must
+  be explicitly accepted before they can affect tag-based playlist rules.
 
 Specialized models that receive audio remain reserved. Library cleanup text AI is available
 as a gated candidate-review pilot; it does not author arbitrary tags or change files itself.

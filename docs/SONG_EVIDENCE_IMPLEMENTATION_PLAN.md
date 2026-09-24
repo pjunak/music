@@ -10,8 +10,10 @@ The status below identifies delivered contracts; conditional stages remain propo
 ## Implementation status — 24 September 2026
 
 - **Implemented:** grouped JSONL pilot tooling with frozen recording groups, four-state
-  labels, separate development/confirmation scoring, per-tag counts and group bootstrap
-  intervals. The owner confirmed there is no labeled dataset yet; listening remains open.
+  labels, separate development/confirmation scoring, per-tag counts, known-positive
+  recall and paired group-bootstrap comparisons. Freezing works before listening;
+  missing results cannot count as safer abstentions. The owner confirmed there is
+  no labeled dataset yet; listening remains open.
 - **Implemented:** context v3 with gain-invariant relative dynamics, explicit coverage,
   no whole-track context confidence, `voice_score`, and coarse local tempo withheld from
   the model projection. Existing bounded execution and source-audio decoding are reused.
@@ -38,7 +40,7 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Windows GNU validation passed: 491 Rust tests, 342 frontend tests and 37 pilot/policy
+Windows GNU validation passed: 491 Rust tests, 342 frontend tests and 48 pilot/policy
 checks; workspace and fuzz Clippy, formatting, architecture, generated contracts,
 doctor/migration coverage, frontend production build and the headless release build.
 The migration test starts with the old schema, verifies the backup/reset, parses a
@@ -50,6 +52,50 @@ could not initialize because the Codex browser helper failed with a local ACL er
 component interaction tests passed. Owner listening, production resource/concurrent-
 playback checks and the live rebuild remain separate acceptance work. No private
 library judgments were invented, and no provider calls, push or deployment occurred.
+
+### Batch progress and tool inventory
+
+**Latest batch:** added an offline paired comparison to the existing pilot CLI,
+including precision/recall/coverage deltas, per-recording gains and regressions,
+explicit missing-versus-abstained results, and protected confirmation scoring.
+Fixed pre-listening freezing and the operator guide's stale automatic-playlist claim.
+No runtime, provider, model or dependency was added. Twenty pilot regression tests
+and 48 total pilot/policy checks pass; independent listening and production acceptance
+remain open. Prior runtime gates cover unchanged Rust/frontend code in this batch.
+
+For every subsequent batch, update the delivered work, checks, remaining gate and
+this inventory. Importance reflects this product's needs, not model popularity.
+Conditional items are options requiring an observed failure and a measured benefit;
+they are not all scheduled for implementation. The original research is a dated
+options survey; this plan determines the narrower implementation scope.
+
+| Tool or approach | Old use | Current use | Planned decision | Importance and value; reason |
+|---|---|---|---|---|
+| Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
+| Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
+| FFmpeg / ffprobe | Decode and technical inspection | Reused | Keep | Core: existing bounded decoding avoids a second audio pipeline. |
+| RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
+| Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
+| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Optional voice score and coverage | Keep optional | Useful: audible vocals matter for quiet session beds; scores remain uncalibrated and do not produce mood tags. |
+| AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
+| MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
+| Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
+| Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
+| SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
+| JSONL listening pilot + grouped bootstrap | Fixed small pilot format | Frozen groups, four-state judgments, paired comparison and recall | Use for development, then confirmation | Essential validation: distinguishes useful improvements from more tags or missing results without building a dataset application. |
+| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Isolated zero-input graph probe only | Adopt only useful heads after parity, resource and listening gates | Conditional high value: richer learned audio evidence; native graph loading alone proves no benefit. |
+| tract-onnx / ort | Neither in production | Tract 0.23.7 isolated probe | Prefer Tract if qualified; ORT only if compatibility requires it | Conditional infrastructure: one selected native inference runtime; avoid parallel production stacks. |
+| TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |
+| LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
+| MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
+| Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |
+| L2 logistic heads (linfa-logistic), source combiner and calibration | Not used | No trained local model | Only with sufficient independent grouped labels and a quality/offline/cost need | Deferred: a small local alternative may help; do not train on generated tags or average unrelated scores. |
+| MTG-Jamendo / DEAM / OpenMIC datasets | Not imported | Reference datasets only | Narrow import for a specific label/domain question | Conditional: preserve partial labels, splits, licensing and version scope; not substitutes for owner judgments. |
+| MusicBrainz work relations / Discogs / Wikidata | No added analysis adapters | Research options beyond current projection | Add only a missing fact with a useful consumer | Conditional: extend attribution without collecting unused catalog fields. |
+| Content hashes / NPY artifacts (npyz) / embedding cache | File facts used for freshness | No new tensor store; pilot accepts private content references | Add only for measured invalidation, reuse or training needs | Deferred: cache maintenance and storage need a demonstrated saving or consumer. |
+| MuQ / MuQ-MuLan / Cyanite | Not used | Research challengers | Only if smaller choices fail an important use case | Low current priority: larger local resources or explicit external audio upload and recurring cost. |
+| All-In-One structure analysis | Not used | Research reference | Not in delivery scope | Low: pop-section semantics and source-separation cost have no demonstrated tabletop benefit. |
+| Annotation UI / active learning / vector database / large-model fine-tuning | Not used for this rework | No new platform | Excluded by default; reconsider only a concrete bottleneck | Avoid bloat: pilot files, existing review and SQLite cover current needs. |
 
 ### Native probe evidence
 

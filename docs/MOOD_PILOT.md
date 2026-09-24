@@ -33,7 +33,9 @@ judgments. There is one current format, with no old 30-track cohort parser. Edit
   if everything becomes one group, add independent recordings. Do not split related
   recordings just to obtain a larger apparent sample.
 
-Freeze the membership before tuning or inspecting confirmation predictions:
+Freeze the membership before tuning or inspecting confirmation predictions. Leave
+unlistened rows at `reviewed: false`, `blind: null` with empty intervals and labels;
+freezing does not require listening or invent whether it was blind:
 
 ```powershell
 node tools/mood-pilot.mjs freeze draft.jsonl vocabulary.json pilot.jsonl
@@ -78,12 +80,16 @@ them to be completed. Use the explicit confirmation switch only after freezing
 candidate settings. Repeated tuning against it makes it development data.
 
 Reports contain per-tag counts and separate mood, session-use, period and custom
-results. Precision uses judged positive/negative proposals only. Judgment coverage,
-uncertain/unjudged proposals and proposals outside the chosen core are reported
+results. Precision uses judged positive/negative proposals only. Recall measures
+recovered known positive judgments; `missed_positive_tags` includes known positives
+lost to empty or unavailable results. It cannot estimate undiscovered positives
+among unjudged labels. Judgment coverage, uncertain/unjudged proposals and proposals outside the chosen core are reported
 separately, so a high score with little judging is visible. Missing responses are
 not abstentions; an explicitly empty result is. Precision without judged proposals
 is unknown. Group bootstrap intervals resample whole independent groups 1,000 times;
-intervals with too few defined replicates remain unknown. Small samples and rare tags
+intervals with fewer than 900 defined replicates remain unknown. Reports include
+the number of independent groups, attempted replicates and defined replicates for
+precision, recall and useful-track coverage. Small samples and rare tags
 cannot establish general accuracy. Album/composer overlap and assisted/excerpt
 judgments are reported, including when those identities were not used for splitting.
 
@@ -98,6 +104,46 @@ old reader. Compare one change at a time with fixed vocabulary and listening gro
 An initial 80% precision / 60% useful-track coverage can guide investigation, but
 selection time, disruptive misses and actual review effort decide adoption. There
 is deliberately no automatic pass badge for incomplete listening data.
+
+## Compare candidates on the same judgments
+
+Save both current-contract retained run exports before another run replaces results.
+Use the frozen pilot and vocabulary for both sides:
+
+```powershell
+node tools/mood-pilot.mjs compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json > development-comparison.json
+node tools/mood-pilot.mjs compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json --confirmation > confirmation-comparison.json
+```
+
+The comparison contains both score reports, per-category and per-tag deltas, result
+availability, and changed recordings with added/removed tags and their judgments.
+All deltas mean **candidate minus baseline**; rate deltas are fractions, so `0.05`
+means five percentage points. Missing results remain in the selected cohort and
+cannot count as avoided false positives. Explicit abstention can avoid a false
+positive while losing useful tags; the report marks such a change as mixed.
+Unknown and non-core labels do not establish a gain. A reduction in proposals alone
+does not establish a better system; read recall, coverage and availability together.
+
+Category delta intervals use a **paired recording-group bootstrap**: each replicate
+draws the same whole groups on both sides. They are not differences between two
+independent confidence intervals. An undefined denominator on either side leaves
+that delta unknown; two unmeasured precisions do not become a zero difference.
+Per-tag deltas are point estimates, with counts for judging sparse evidence.
+There is no automatic winner, pass threshold, or correction for trying many candidates.
+
+For a source comparison, keep the interpreter, vocabulary and recordings fixed and
+change only the supplied evidence: catalog-only, audio-only, then combined where
+the candidate setup supports it. Record the exact candidate settings and normal
+consent/budget separately. This offline tool does not create those runs, call Jev,
+or prove that their files/settings match; full export fingerprints identify the
+snapshots and source signatures remain available for audit. Entire-run usage is
+reported without attributing it to the selected split. Keep any original pre-cutover
+baseline as a static report; do not adapt its retired analysis into current inputs.
+
+Choose settings on development results before opening confirmation. Use the same
+listening/session requests to record auditioning time, corrections and disruptive
+false positives alongside the numbers. Repeated confirmation-guided changes require
+new independent confirmation recordings.
 
 ## Native model gate
 
