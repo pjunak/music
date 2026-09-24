@@ -393,6 +393,9 @@ mod tests {
             .execute(&storage.pool)
             .await?;
         sqlx::raw_sql("ALTER TABLE tracks DROP COLUMN release_date; ALTER TABLE tracks DROP COLUMN original_release_date; ALTER TABLE tracks DROP COLUMN composer;").execute(&storage.pool).await?;
+        sqlx::query("DROP TABLE track_analyses")
+            .execute(&storage.pool)
+            .await?;
         sqlx::query("DROP TABLE track_contexts")
             .execute(&storage.pool)
             .await?;

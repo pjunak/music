@@ -102,7 +102,7 @@ source job ID, and the saved timestamp. Empty and fully rejected model outputs
 still count as processed. Strict inference/evidence/profile checks remain the
 authority for currentness; outdated suggestions stay unavailable for acceptance.
 `GET /api/assistant/library-tags` accepts `model_status` (processed/current/stale/missing),
-`model_job_id`, and `suggestion_source` (model/metadata/catalog). Model and run filters
+`model_job_id`, and `suggestion_source` (model/catalog). Model and run filters
 apply before the review summary and pagination; the source filter selects suggestions
 and therefore controls the meaning of the review-state filter and summary.
 Run links select currently retained profiles from that job, not lifetime history;
@@ -110,10 +110,11 @@ later inference can replace a profile. No migration or new inference is needed t
 expose existing job IDs. Missing means no readable saved model profile, not proof
 that no provider attempt ever occurred.
 
-`local-metadata/v1` suggestions are title/album/genre keyword guesses. The legacy
-stored prose "Mood metadata" is relabeled in the review UI, with its actual source
-explained separately from AI results. This presentation correction does not alter
-the inference contract, stored review signatures, or operator-owned tags.
+Generated suggestions use only current catalog observations or the current model tagger.
+The separate keyword and audio-signal analyzers, endpoints, saved axes, and readers are
+removed. Automatic playlists use accepted/manual tags only. The deterministic playlist
+planner retains ordinary metadata search and private ranking priors, but exposes no
+keyword guesses as analysis tags and sends no obsolete signal summaries to a model.
 
 Playlist model candidates supplement the original local pool through current
 vocabulary names, aliases and context cues matched to operator-owned tags. Preserve
@@ -121,11 +122,11 @@ all local defaults and their original ranks; additions have `local_rank: null` a
 start unselected. Recall uses at most a quarter of the pool (20 candidates maximum)
 and never exceeds the 100-candidate ceiling. The provider-free `evaluate-playlists
 --engine candidates` CLI reports retrieval separately from quality certification.
-Input v4 also explains the declared meanings behind request-matched vocabulary
+Input v5 explains the declared meanings behind request-matched vocabulary
 phrases: tag name, definition, exact matching phrases and manual labels actually
 present in the disclosed candidate pool. This uses the same phrase matcher as
 retrieval. Unrelated vocabulary and generated-only labels are omitted; the mappings
-remain untrusted data and do not force a ranking. Disclosure v3 covers this input.
+remain untrusted data and do not force a ranking. Disclosure v4 covers this input.
 See [ADR-023](ADR-023-bounded-playlist-vocabulary-recall.md).
 
 Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
@@ -142,7 +143,7 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Mood tagging input v23 uses batch-local slots, a stable vocabulary reference prefix and
+Mood tagging input v24 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
@@ -157,16 +158,17 @@ by live requests and quality fixtures. The per-track input is saved without its 
 `song-evidence/v1` also carries a bounded catalog projection from `song_evidence.rs`.
 Only current policy/metadata-matching observations participate: MusicBrainz recording
 genres, composer credits and first-release date, and up to twelve original Last.fm
-community labels/counts. Claims retain source, scope, recording identity and retrieval
-time. Community labels are explicitly weak evidence. Titles, paths, review state and
+community labels/counts. Claims retain source, scope and retrieval time. Recording identity remains local and
+binds freshness; it is removed from the provider projection. Community labels are explicitly weak evidence. Titles, paths, review state and
 generated tags stay excluded. Library reads, save transactions and review transactions
 share the projection; its content participates in result identity. Source-policy changes
 invalidate dependent proposals while preserving authored tags.
 
-Schema 15 takes a verified backup, clears generated analysis/context/failure and proposal
-review rows, removes the context confidence column, and supersedes active old analysis
-jobs before recovery. Provider attempts and remote batch identifiers remain audit history;
-old submissions are not replayed. Context jobs use schema 2 and new analyzer signatures.
+Schemas 15–16 take a verified backup before upgrade, clear generated analysis/context/failure
+and proposal-review rows, remove whole-track confidence and legacy mood axes, and supersede
+active old analysis jobs before recovery. Per-tag decisions replace those columns. Automatic
+rules retain their filters and materialized tracks while switching to accepted/manual tags. Provider attempts and remote batch identifiers remain audit history;
+old submissions are not replayed. Context, tagging and batch-collection jobs use schema 2 and new analyzer signatures.
 Restart preserves completed new analysis; all tracks require the initial source-audio
 rebuild. No old-context reader or model-ID prefix fallback is retained.
 
@@ -299,14 +301,14 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
-| Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v4+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v3` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v23+output/v4+local-context/v3` | `assistant-model-music-tagging-disclosure/v14` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v5+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v4` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v24+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v15` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 | Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1` | `assistant-library-cleanup-disclosure/v2` | `model-catalog-adjudication/v2` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |
 
 Full task output contracts are `assistant-playlist-planner-output/v1`,
-`assistant-music-tagger-output/v4`, `assistant-model-tag-cleanup-output/v2`,
+`assistant-music-tagger-output/v5`, `assistant-model-tag-cleanup-output/v2`,
 `assistant-eq-draft-output/v1`, and `assistant-library-cleanup-output/v1`.
 Only `audio_analyzer` remains reserved (`reserved-audio-analyzer/v1`).
 `library_cleanup` is configurable in **AI setup**, with independent conformance,
@@ -628,7 +630,7 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v24` uses 57 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v26` uses 57 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
 Each vocabulary group and the context-only subset (no descriptive metadata) must independently
@@ -638,12 +640,12 @@ weak tempo and missing measurements. These fixtures do not establish listening a
 Progress and the completed score both count 63 distinct scenarios; safety scenarios finish
 only after their rerun. Detailed progress reports the 76 individual checks separately from
 provider requests. Diagnostic retests label their selected subset explicitly.
-Suite v25 preserves the expected tags and quality gates while retiring the obsolete
-intensity/confidence input fields. Dedicated regressions check gain-invariant relative
-dynamics, later climaxes, withheld coarse tempo, and source-bound catalog projection.
-These changes require fresh matching conformance and quality evidence; they do not
-certify a model or establish listening accuracy. Quality output still uses the current
-v5 report; replacing model-level confidence with per-tag support remains planned.
+Suite v26 preserves the expected tags and quality gates while removing obsolete
+intensity/confidence input fields and requiring per-tag support and observation references.
+Dedicated regressions check gain-invariant relative dynamics, later climaxes, withheld
+coarse tempo, source-bound catalog projection, missing/cross-track references and explicit
+abstention. The evaluation report is v9. These changes require fresh matching conformance
+and quality evidence; they do not certify a model or establish listening accuracy.
 Playlist reports separately record labelled candidate recall before model ranking,
 including missing candidate IDs, even when the provider fails. These are synthetic
 diagnostics; they do not establish live-library recall or change retrieval policy.
@@ -772,7 +774,7 @@ version values and the tables locate the corresponding code and tests.
 ### Playlist planning
 
 - The optional model playlist planner may run only through the dedicated consent-bound durable job.
-  Keep `local-planner/v2` as the default, require the exact current `playlist-quality-v1` pass and
+  Keep `local-planner/v3` as the default, require the exact current `playlist-quality-v1` pass and
   disclosure version before enqueueing, and make model jobs non-restartable to avoid silently
   repeating provider cost. Locally enforce eligibility and exclusions, send a privacy-reduced pool
   of at most 100 candidates, and preserve the original local rank while unioning additional recall
@@ -839,7 +841,9 @@ progress through later uncertain attempts. The export reflects returned results,
 changed tracks that could not be saved, rather than claiming every row became a profile.
 
 `ModelAnalysisStatus` projects the latest saved model profile even if empty or outdated:
-count, evidence, model confidence, recorded context status and optional bounded input snapshot.
+count, an explanation, recorded context status and the bounded input snapshot. Each proposed
+tag carries its own supported/tentative assessment, reasons and supporting/conflicting
+observation IDs; these are not calibrated probabilities.
 Old results show missing information explicitly; current context is not reconstructed as
 historical input. The inspector separates acoustic facts, musical impressions and session
 uses. Filters `with_suggestions`/`without_suggestions` are independent of freshness/review.
@@ -877,8 +881,8 @@ Accepted/manual tags never change as part of inference or reconsideration.
   suggestions, playlists, review history, or credentials. Local context analysis must remain
   factual and may never propose setting, period, scene, mood, genre, or instrument tags.
   Context cues are global operator-managed vocabulary guidance, not per-track local tag
-  hypotheses. Broad mood impressions may use multiple consistent acoustic cues at restrained
-  confidence. Emotional nuances and setting/scene/period choices need semantic support.
+  hypotheses. Broad mood impressions may use multiple consistent acoustic cues with restrained
+  support claims. Emotional nuances and setting/scene/period choices need semantic support.
   Scene and setting suggestions describe editorial suitability, not a literal depicted event.
   Never force a tag, infer periods from recording technology, or turn loudness into combat.
   Keep each tag's ID, name, definition, aliases, and cues together in the provider input so the
@@ -891,12 +895,15 @@ Accepted/manual tags never change as part of inference or reconsideration.
   evidence, not release date or recording technology. It is a zero-or-one categorical group;
   `cross era` replaces rather than accompanies its component period tags. The model must choose
   zero through eight exact IDs from the full controlled vocabulary and
-  return confidence plus one to four bounded evidence strings. Do not ask it for signal axes and
-  do not generate a local tag-ID hypothesis before the call. Reject unknown/duplicate IDs,
-  missing track IDs, malformed confidence, extra fields, and truncated output; only incidental
-  evidence text may be bounded. Store output under `model-context-tagger/v7` in
-  `track_analyses` and bind its source signature to metadata, current context signature (or its
-  absence), vocabulary fingerprint, contract version, and role fingerprint.
+  return a decision for each proposed tag: supported/tentative assessment, one to four
+  bounded reasons, supporting observation IDs and any conflicting IDs. Every reference must
+  exist in that track's disclosed input; duplicates and support/contradiction overlap are
+  invalid. Empty decisions require an explicit abstention reason. Omitted tags are unjudged.
+  Reject unknown/duplicate tags, missing tracks/reasons, extra fields, overlong evidence and
+  truncated output without repairing it. Store current decisions under `model-context-tagger/v8`
+  in `track_analyses`. Bind identity to metadata, context (or absence), permitted catalog
+  observations, vocabulary, inference contract and model settings. Save and review both
+  recheck current evidence transactionally. Do not ask for signal axes or preselect tag IDs.
   Before a live run, report full, partial, missing/stale, and failed context coverage. Let the
   operator either include incomplete tracks using metadata alone or skip every track without
   full current context. The model may never write `track_user_tags`; accepted suggestions become
@@ -952,7 +959,7 @@ Accepted/manual tags never change as part of inference or reconsideration.
 - Generated tag profiles remain keyed by `(track_id, analyzer_id)` in `track_analyses`.
   Comprehensive factual audio context is keyed the same way in `track_contexts` and stores its
   summary, condensed timeline, major sections, technical facts, and stage status separately from
-  semantic tag suggestions. Preserve source signatures, confidence, and analyzer versioning.
+  semantic tag suggestions. Preserve source signatures, per-tag support, and analyzer versioning.
   Consumers may use only current, well-formed context/profiles and must fall back safely when data
   is absent, partial, stale, failed, or malformed.
 

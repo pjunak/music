@@ -12,7 +12,7 @@ const yieldResult = { processed_tracks: 20, tracks_with_suggestions: 0, tracks_w
 
 describe("tagging outcomes", () => {
   it("explains a no-tag stop without describing empty results as suggestions", () => {
-    render(<TaggingRunOutcome job={job({ ...legacy, schema_version: "assistant-model-music-tagging-job-result/v7", analyzer_id: "model-context-tagger/v7", ...yieldResult, deferred_tracks: 15, remaining_tracks: 15, stopped_empty_batch: true })} />);
+    render(<TaggingRunOutcome job={job({ ...legacy, schema_version: "assistant-model-music-tagging-job-result/v7", analyzer_id: "model-context-tagger/v8", ...yieldResult, deferred_tracks: 15, remaining_tracks: 15, stopped_empty_batch: true })} />);
     expect(screen.getByText("Stopped after a request returned no tags")).toBeInTheDocument();
     expect(screen.getByText(/20 tracks analysed: 0 with suggestions, 20 with no supported tags/)).toBeInTheDocument();
     expect(screen.getByText(/20 profiles saved; 0 already current; 15 deferred/)).toBeInTheDocument();

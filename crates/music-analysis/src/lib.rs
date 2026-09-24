@@ -11,7 +11,6 @@
 
 mod context;
 mod executor;
-mod signal;
 mod voice;
 
 pub use context::{
@@ -19,10 +18,6 @@ pub use context::{
     FfmpegContextAnalyzer, VoiceContextPreparation,
 };
 pub use executor::{AnalysisExecutor, AnalysisExecutorError};
-pub use signal::{
-    AudioSignalAnalyzer, AudioSignalError, AudioSignalMeasurements, AudioSignalProfile,
-    FfmpegSignalAnalyzer,
-};
 pub use voice::{
     VoiceAnalysisDocument, VoiceAnalysisError, VoiceBackend, VoiceWorker, VoiceWorkerFactory,
 };

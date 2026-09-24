@@ -322,17 +322,13 @@ impl ModelFeatureJobHandler {
                     let mut profile = template.clone();
                     profile.moods = model.tags.clone();
                     profile.evidence = model.evidence.clone();
-                    profile.confidence = match model.confidence {
-                        TagConfidence::High => Confidence::High,
-                        TagConfidence::Medium => Confidence::Medium,
-                        TagConfidence::Low => Confidence::Low,
-                    };
+                    profile.decisions = model.decisions.clone();
                     processed += 1;
                     with_suggestions += usize::from(!profile.moods.is_empty());
                     suggested_tags += profile.moods.len();
                     track_results.push(json!({
                         "track_id": profile.track_id.get(), "source_signature": profile.source_signature,
-                        "tags": profile.moods, "evidence": profile.evidence, "confidence": profile.confidence,
+                        "tags": profile.moods, "evidence": profile.evidence, "decisions": profile.decisions,
                     }));
                     writes.push(ModelAnalysisWrite { profile });
                 }

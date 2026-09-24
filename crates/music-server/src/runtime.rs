@@ -10,14 +10,10 @@ use axum::Router;
 #[cfg(test)]
 #[path = "runtime_cleanup_rejection_tests.rs"]
 mod cleanup_rejection_tests;
-use music_analysis::{
-    AnalysisExecutor, AudioContextAnalyzer, AudioSignalAnalyzer, FfmpegContextAnalyzer,
-    FfmpegSignalAnalyzer, VoiceBackend,
-};
+use music_analysis::{AnalysisExecutor, AudioContextAnalyzer, FfmpegContextAnalyzer, VoiceBackend};
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    MetadataAnalysisJobHandler, ModelEvaluationRepository, ProviderCredentialSource,
-    ProviderRepository,
+    ModelEvaluationRepository, ProviderCredentialSource, ProviderRepository,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -59,7 +55,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
 
 use crate::admin::{BackupService, MaintenanceGate, pending_restore_journal};
-use crate::analysis::{AudioAnalysisJobHandler, ContextAnalysisJobHandler};
+use crate::analysis::ContextAnalysisJobHandler;
 use crate::auth::RuntimeAuth;
 use crate::blocking::BlockingMediaExecutor;
 use crate::cleanup::MusicBrainzNameLookup;
@@ -337,8 +333,6 @@ impl AppRuntime {
                     io::Error::other(source),
                 )
             })?;
-        let signal_analyzer: Arc<dyn AudioSignalAnalyzer> =
-            Arc::new(FfmpegSignalAnalyzer::new(ffmpeg.clone()));
         let context_analyzer: Arc<dyn AudioContextAnalyzer> =
             Arc::new(FfmpegContextAnalyzer::new(ffmpeg, ffprobe_executable()));
         let mut job_handlers: Vec<Arc<dyn JobHandler>> = vec![
@@ -362,15 +356,6 @@ impl AppRuntime {
                     )
                 })?,
             ),
-            Arc::new(MetadataAnalysisJobHandler::new(Arc::clone(
-                &local_analysis_repository,
-            ))),
-            Arc::new(AudioAnalysisJobHandler::new(
-                Arc::clone(&local_analysis_repository),
-                library_root.clone(),
-                analysis_executor.clone(),
-                signal_analyzer,
-            )),
             Arc::new(ContextAnalysisJobHandler::new(
                 Arc::clone(&local_analysis_repository),
                 library_root.clone(),
@@ -4346,7 +4331,7 @@ mod tests {
             serde_json::from_slice(&to_bytes(status.into_body(), 1024 * 1024).await?)?;
         assert_eq!(
             status["disclosure"]["version"],
-            "assistant-playlist-model-disclosure/v3"
+            "assistant-playlist-model-disclosure/v4"
         );
         assert!(
             status["disclosure"]["shared_with_provider"]
@@ -4359,7 +4344,7 @@ mod tests {
         );
         for (version, consent) in [
             ("assistant-playlist-model-disclosure/v2", true),
-            ("assistant-playlist-model-disclosure/v3", false),
+            ("assistant-playlist-model-disclosure/v4", false),
         ] {
             let rejected = router
                 .clone()
@@ -4446,98 +4431,20 @@ mod tests {
             serde_json::from_slice(&to_bytes(tagged.into_body(), 1024 * 1024).await?)?;
         assert_eq!(tagged_json["manual_tags"], json!(["inn"]));
 
-        let analysis_job = router
-            .clone()
-            .oneshot(
-                Request::post("/api/assistant/library-analysis/jobs")
-                    .header("cookie", &cookie)
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"force":false}"#))?,
-            )
-            .await?;
-        assert_eq!(analysis_job.status(), StatusCode::ACCEPTED);
-        let analysis_job_json: Value =
-            serde_json::from_slice(&to_bytes(analysis_job.into_body(), 1024 * 1024).await?)?;
-        let analysis_job_id = analysis_job_json["id"]
-            .as_str()
-            .ok_or("metadata analysis job id missing")?
-            .to_owned();
-        tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                let status = runtime
-                    .jobs
-                    .get(&analysis_job_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|job| job.status.as_str());
-                if status == Some("succeeded") {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await?;
-        let analysis_summary = router
-            .clone()
-            .oneshot(
-                Request::get("/api/assistant/library-analysis/summary")
-                    .header("cookie", &cookie)
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(analysis_summary.status(), StatusCode::OK);
-        let analysis_summary_json: Value =
-            serde_json::from_slice(&to_bytes(analysis_summary.into_body(), 1024 * 1024).await?)?;
-        assert_eq!(analysis_summary_json["analyzer"], "local-metadata/v1");
-        assert_eq!(analysis_summary_json["analyzed_tracks"], 1);
-
-        let audio_job = router
-            .clone()
-            .oneshot(
-                Request::post("/api/assistant/library-audio-analysis/jobs")
-                    .header("cookie", &cookie)
-                    .header("content-type", "application/json")
-                    .body(Body::from(r#"{"force":false}"#))?,
-            )
-            .await?;
-        assert_eq!(audio_job.status(), StatusCode::ACCEPTED);
-        let audio_job_json: Value =
-            serde_json::from_slice(&to_bytes(audio_job.into_body(), 1024 * 1024).await?)?;
-        let audio_job_id = audio_job_json["id"]
-            .as_str()
-            .ok_or("audio analysis job id missing")?
-            .to_owned();
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let status = runtime
-                    .jobs
-                    .get(&audio_job_id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .map(|job| job.status.as_str());
-                if status == Some("succeeded") {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await?;
-        let audio_summary = router
-            .clone()
-            .oneshot(
-                Request::get("/api/assistant/library-audio-analysis/summary")
-                    .header("cookie", &cookie)
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(audio_summary.status(), StatusCode::OK);
-        let audio_summary_json: Value =
-            serde_json::from_slice(&to_bytes(audio_summary.into_body(), 1024 * 1024).await?)?;
-        assert_eq!(audio_summary_json["analyzer"], "local-audio/v1");
-        assert_eq!(audio_summary_json["analyzed_tracks"], 1);
-        assert_eq!(audio_summary_json["failed_tracks"], 0);
+        for route in [
+            "/api/assistant/library-analysis/jobs",
+            "/api/assistant/library-audio-analysis/jobs",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post(route)
+                        .header("cookie", &cookie)
+                        .body(Body::empty())?,
+                )
+                .await?;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
 
         let context_job = router
             .clone()
@@ -4647,13 +4554,10 @@ mod tests {
             json!(["inn"])
         );
         assert_eq!(
-            analyzed_tags_json["items"][0]["analysis_analyzer"],
-            "local-metadata/v1"
+            analyzed_tags_json["items"][0]["analysis_suggestions"],
+            json!([])
         );
-        assert_eq!(
-            analyzed_tags_json["items"][0]["audio_signal"]["analyzer_id"],
-            "local-audio/v1"
-        );
+        assert!(analyzed_tags_json["items"][0].get("audio_signal").is_none());
 
         let suggestion = router
             .clone()
@@ -4669,7 +4573,7 @@ mod tests {
         assert_eq!(suggestion.status(), StatusCode::OK);
         let suggestion_json: Value =
             serde_json::from_slice(&to_bytes(suggestion.into_body(), 1024 * 1024).await?)?;
-        assert_eq!(suggestion_json["engine"], "local-planner/v2");
+        assert_eq!(suggestion_json["engine"], "local-planner/v3");
         assert_eq!(suggestion_json["candidates"][0]["track_id"], track_id);
         assert_eq!(
             suggestion_json["candidates"][0]["manual_tags"],

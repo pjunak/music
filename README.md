@@ -112,7 +112,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   this diagnostic does not certify model quality.
   Mood tagging sends bounded artist, album, origin, and genre metadata in
   batches of at most 20, may choose only stable IDs from the revisioned operator vocabulary, and
-  stores suggestions under `model-context-tagger/v7` for explicit per-tag review.
+  stores suggestions under `model-context-tagger/v8` for explicit per-tag review.
   Pilots default to 20 tracks and stop after an empty request. Saved explanations,
   outcome filters and selected-track reconsideration make results reviewable without
   another whole-library pass. Cleanup is optional legacy tag-name maintenance.
@@ -122,8 +122,8 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   exact alias, and bounded semantic context cue for manual editing. The provider receives those
   global cues to interpret soundtrack phrases, but no per-track local tag hypothesis. When current
   comprehensive local context exists, tagging may also send bounded
-  whole-track trajectories, tempo development, major acoustic sections and transitions,
-  repetition, analyzer confidence, and optional local voice/instrumental classifier evidence (or an
+  whole-track trajectories, major acoustic sections and transitions,
+  repetition, decoded coverage, measurement reliability, permitted catalog observations, and optional local voice/instrumental classifier evidence (or an
   explicit unknown/unavailable status). It does not send locally
   generated tag hypotheses or ask the provider to recreate energy/brightness/tension axes. Audio
   files, waveforms, full timelines, spectrograms, track titles, display titles, file and folder
@@ -153,12 +153,12 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   contract, privacy, test, and change map, and
   [`docs/assistant-ux-philosophy.md`](docs/assistant-ux-philosophy.md) for the shared drafting,
   review, creation, and manual-tuning interaction contract.
-- **Durable library context analysis** — one restartable `local-context/v2` job runs two sequential
+- **Durable library context analysis** — one restartable `local-context/v3` job runs two sequential
   library passes. The first decodes every new or changed track into factual whole-track context;
   only after those rows are checkpointed does a capacity-one, job-scoped model-owning thread perform
   optional voice detection. The thread and compiled graph are dropped when the voice pass completes or
   is cancelled, so the several-gigabyte inference working set is not retained while the service is idle.
-  The factual context includes signal-level and intensity development, rhythmic
+  The factual context includes gain-invariant relative-level development, rhythmic
   drive, perceptual brightness, spectral fullness, spectral change, local tempo behavior, major acoustic sections,
   repetition, technical details, explicit analysis-stage status, and bounded performance timings.
   Native RustFFT frame/spectrum math uses gain-invariant Mel spectral profiles, logarithmic brightness,
@@ -185,9 +185,8 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   and finds only unambiguous spelling or plural matches to the controlled vocabulary; it changes
   nothing until individual suggestions are selected, rejects stale previews, and applies the chosen
   renames in one transaction. Generated
-  tags expose their analyzer, confidence, and evidence for per-tag review; accepting copies one into
-  manual tags, while rejection remains a separate durable decision, removes that label from current
-  playlist evidence, and never mutates authored data.
+  tags expose their analyzer, per-tag support, reasons and observation references for review; accepting copies one into
+  manual tags, while rejection remains a separate durable decision, keeps that suggestion out of authored playlist evidence, and never mutates authored data.
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
   stale or invalid suggestions are reported individually instead of blocking valid selections.
   The Mood Library's expandable review summary counts pending, accepted, and rejected current
@@ -198,7 +197,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   explicitly selected tracks. Its Library dialog previews counts, provider calls, and full/partial/
   missing context coverage; the operator may run with metadata-only fallback or skip tracks without
   full current context. It restores durable progress, lets the operator audition each song, and
-  preselects only high/medium-confidence suggestions for explicit acceptance. It never receives
+  preselects only suggestions marked supported for explicit acceptance. It never receives
   track titles, display titles, library paths, audio, existing database mood tags, or review decisions; it skips unchanged
   model profiles and cannot promote its output without acceptance.
   Optional AI cleanup shares the mood-tagging model settings but has its own quality check.

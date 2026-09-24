@@ -8,23 +8,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use super::planner::metadata_profile;
-use super::tags::{
-    AssistantFuture, Confidence, LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID,
-    audio_source_signature, metadata_source_signature,
-};
-use crate::jobs::{
-    JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
-    JobHandlerFuture, JobLane, JobProgress,
-};
+use super::tags::AssistantFuture;
 use crate::library::LibraryRepository;
 
-pub const METADATA_ANALYSIS_JOB_KIND: &str = "assistant.library-analysis";
-pub const AUDIO_ANALYSIS_JOB_KIND: &str = "assistant.library-audio-analysis";
 pub const LIBRARY_CONTEXT_JOB_KIND: &str = "assistant.library-context-analysis";
 pub const LOCAL_CONTEXT_ANALYZER_ID: &str = "local-context/v3";
 pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v3+rustfft/v2";
-const METADATA_ANALYSIS_BATCH_SIZE: usize = 50;
 pub const VOICE_ANALYZER_ID: &str = "essentia-musicnn-voice/v2";
 pub const VOICE_MODEL_FILENAME: &str = "voice_instrumental-musicnn-msd-2.pb";
 pub const VOICE_MODEL_SHA256: &str =
@@ -35,7 +24,6 @@ pub struct AnalysisState {
     pub track_id: TrackId,
     pub source_signature: String,
     pub job_id: String,
-    pub confidence: String,
     pub updated_at_unix_seconds: i64,
 }
 
@@ -49,6 +37,7 @@ pub struct AnalysisFailureState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AnalysisWrite {
     #[serde(
         serialize_with = "super::model_batch::serialize_track_id",
@@ -56,13 +45,10 @@ pub struct AnalysisWrite {
     )]
     pub track_id: TrackId,
     pub source_signature: String,
-    pub energy: f64,
-    pub brightness: f64,
-    pub tension: f64,
     pub moods: Vec<String>,
     pub evidence: Vec<String>,
     pub metrics: Map<String, Value>,
-    pub confidence: Confidence,
+    pub decisions: Vec<super::TagDecision>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -276,18 +262,12 @@ pub trait LocalAnalysisRepository: LibraryRepository {
     /// Store a batch only while each indexed track still has the signature the
     /// analyzer consumed. This prevents a concurrent reconciliation from
     /// publishing stale analysis as current.
-    fn store_metadata_analysis<'a>(
+    fn store_catalog_analysis<'a>(
         &'a self,
         analyzer_id: &'a str,
         job_id: &'a str,
         profiles: &'a [AnalysisWrite],
     ) -> AssistantFuture<'a, usize>;
-    fn store_audio_analysis<'a>(
-        &'a self,
-        analyzer_id: &'a str,
-        job_id: &'a str,
-        profile: &'a AnalysisWrite,
-    ) -> AssistantFuture<'a, bool>;
     /// Store generated model profiles only while their complete source
     /// signatures still match the current metadata, local context, provider
     /// role, and vocabulary. Implementations must perform the comparison and
@@ -301,12 +281,6 @@ pub trait LocalAnalysisRepository: LibraryRepository {
         voice_signature: Option<&'a str>,
         profiles: &'a [ModelAnalysisWrite],
     ) -> AssistantFuture<'a, usize>;
-    fn store_analysis_failure<'a>(
-        &'a self,
-        analyzer_id: &'a str,
-        job_id: &'a str,
-        failure: &'a AnalysisFailureWrite,
-    ) -> AssistantFuture<'a, bool>;
     fn context_states<'a>(&'a self, analyzer_id: &'a str)
     -> AssistantFuture<'a, Vec<ContextState>>;
     fn store_context<'a>(
@@ -325,19 +299,6 @@ pub trait LocalAnalysisRepository: LibraryRepository {
         job_id: &'a str,
         failure: &'a AnalysisFailureWrite,
     ) -> AssistantFuture<'a, bool>;
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct LibraryAnalysisSummary {
-    pub analyzer: String,
-    pub library_tracks: usize,
-    pub analyzed_tracks: usize,
-    pub failed_tracks: usize,
-    pub stale_tracks: usize,
-    pub high_confidence: usize,
-    pub medium_confidence: usize,
-    pub low_confidence: usize,
-    pub last_updated_at_unix_seconds: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -390,39 +351,6 @@ impl LocalAnalysisService {
             repository,
             voice_analyzer,
         }
-    }
-
-    pub async fn metadata_summary(&self) -> Result<LibraryAnalysisSummary, LocalAnalysisError> {
-        let tracks = self
-            .repository
-            .all_tracks()
-            .await
-            .map_err(LocalAnalysisError::Dependency)?;
-        let states = self
-            .repository
-            .analysis_states(LOCAL_METADATA_ANALYZER_ID)
-            .await
-            .map_err(LocalAnalysisError::Dependency)?;
-        summarize_analysis(&tracks, &states, LOCAL_METADATA_ANALYZER_ID)
-    }
-
-    pub async fn audio_summary(&self) -> Result<LibraryAnalysisSummary, LocalAnalysisError> {
-        let tracks = self
-            .repository
-            .all_tracks()
-            .await
-            .map_err(LocalAnalysisError::Dependency)?;
-        let states = self
-            .repository
-            .analysis_states(LOCAL_AUDIO_ANALYZER_ID)
-            .await
-            .map_err(LocalAnalysisError::Dependency)?;
-        let failures = self
-            .repository
-            .analysis_failures(LOCAL_AUDIO_ANALYZER_ID)
-            .await
-            .map_err(LocalAnalysisError::Dependency)?;
-        summarize_audio_analysis(&tracks, &states, &failures)
     }
 
     pub async fn context_summary(&self) -> Result<LibraryContextSummary, LocalAnalysisError> {
@@ -495,327 +423,6 @@ impl LocalAnalysisService {
     pub fn voice_analyzer(&self) -> &VoiceAnalyzerStatus {
         &self.voice_analyzer
     }
-}
-
-#[derive(Debug)]
-pub struct MetadataAnalysisJobHandler {
-    repository: Arc<dyn LocalAnalysisRepository>,
-}
-
-impl MetadataAnalysisJobHandler {
-    #[must_use]
-    pub fn new(repository: Arc<dyn LocalAnalysisRepository>) -> Self {
-        Self { repository }
-    }
-}
-
-impl JobHandler for MetadataAnalysisJobHandler {
-    fn definition(&self) -> JobDefinition {
-        JobDefinition {
-            kind: METADATA_ANALYSIS_JOB_KIND,
-            schema_version: 1,
-            lane: JobLane::Local,
-            restartable: true,
-            checkpoint_policy: JobCheckpointPolicy::Replace,
-        }
-    }
-
-    fn execute<'a>(
-        &'a self,
-        context: &'a JobExecutionContext,
-        parameters: Map<String, Value>,
-    ) -> JobHandlerFuture<'a> {
-        Box::pin(async move {
-            let parameters =
-                serde_json::from_value::<MetadataAnalysisParameters>(Value::Object(parameters))
-                    .map_err(|_| JobHandlerError::new("invalid metadata analysis parameters"))?;
-            let tracks = self
-                .repository
-                .all_tracks()
-                .await
-                .map_err(|_| JobHandlerError::new("metadata analysis storage failed"))?;
-            let states = self
-                .repository
-                .analysis_states(LOCAL_METADATA_ANALYZER_ID)
-                .await
-                .map_err(|_| JobHandlerError::new("metadata analysis storage failed"))?;
-            let existing = states
-                .iter()
-                .map(|state| (state.track_id, state))
-                .collect::<BTreeMap<_, _>>();
-            let mut work = Vec::new();
-            for track in &tracks {
-                let signature = metadata_source_signature(track)
-                    .map_err(|_| JobHandlerError::new("track metadata fingerprint failed"))?;
-                let current = existing.get(&track.id).is_some_and(|state| {
-                    if parameters.force {
-                        state.job_id == context.job_id()
-                    } else {
-                        state.source_signature == signature
-                    }
-                });
-                if !current {
-                    work.push((track, signature));
-                }
-            }
-
-            let starting = context.progress_current();
-            let work_count = u64::try_from(work.len())
-                .map_err(|_| JobHandlerError::new("metadata analysis is too large"))?;
-            let total = context
-                .progress_total()
-                .unwrap_or(0)
-                .max(starting.saturating_add(work_count));
-            context
-                .update_progress(
-                    JobProgress::new(
-                        starting,
-                        Some(total),
-                        "Profiling library",
-                        format!("{} track profiles need updating", work.len()),
-                    )
-                    .map_err(|_| JobHandlerError::new("invalid metadata analysis progress"))?,
-                )
-                .await
-                .map_err(JobHandlerError::from_execution)?;
-
-            let mut processed = 0_u64;
-            for chunk in work.chunks(METADATA_ANALYSIS_BATCH_SIZE) {
-                context
-                    .check_cancelled()
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-                let profiles = chunk
-                    .iter()
-                    .map(|(track, signature)| analyze_metadata(track, signature.clone()))
-                    .collect::<Vec<_>>();
-                let _stored = self
-                    .repository
-                    .store_metadata_analysis(
-                        LOCAL_METADATA_ANALYZER_ID,
-                        context.job_id(),
-                        &profiles,
-                    )
-                    .await
-                    .map_err(|_| JobHandlerError::new("metadata analysis storage failed"))?;
-                processed = processed.saturating_add(
-                    u64::try_from(chunk.len())
-                        .map_err(|_| JobHandlerError::new("metadata analysis is too large"))?,
-                );
-                let current = total.min(starting.saturating_add(processed));
-                context
-                    .update_progress(
-                        JobProgress::new(
-                            current,
-                            Some(total),
-                            "Profiling library",
-                            format!("Processed {current} of {total} tracks"),
-                        )
-                        .map_err(|_| JobHandlerError::new("invalid metadata analysis progress"))?,
-                    )
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-            }
-            if starting.saturating_add(processed) < total {
-                context
-                    .update_progress(
-                        JobProgress::new(
-                            total,
-                            Some(total),
-                            "Profiling library",
-                            format!("Processed {total} of {total} tracks"),
-                        )
-                        .map_err(|_| JobHandlerError::new("invalid metadata analysis progress"))?,
-                    )
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-            }
-
-            let final_states = self
-                .repository
-                .analysis_states(LOCAL_METADATA_ANALYZER_ID)
-                .await
-                .map_err(|_| JobHandlerError::new("metadata analysis storage failed"))?;
-            let updated = final_states
-                .iter()
-                .filter(|state| state.job_id == context.job_id())
-                .count();
-            Ok(json!({
-                "tracks": tracks.len(),
-                "updated": updated,
-                "unchanged": tracks.len().saturating_sub(updated),
-                "current_profiles": final_states.len(),
-                "analyzer": LOCAL_METADATA_ANALYZER_ID,
-            }))
-        })
-    }
-}
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
-struct MetadataAnalysisParameters {
-    force: bool,
-}
-
-fn analyze_metadata(track: &IndexedTrack, source_signature: String) -> AnalysisWrite {
-    let profile = metadata_profile(track);
-    let mut evidence = Vec::new();
-    if !profile.moods.is_empty() {
-        evidence.push(format!(
-            "Mood metadata: {}",
-            profile
-                .moods
-                .iter()
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if let Some(bpm) = track.metadata.bpm {
-        evidence.push(format!("Tempo metadata: {bpm} BPM"));
-    }
-    if !track.metadata.genre.is_empty() {
-        evidence.push(format!("Genre metadata: {}", track.metadata.genre));
-    }
-    if evidence.is_empty() {
-        evidence.push("No explicit mood, genre, or tempo metadata".to_owned());
-    }
-    AnalysisWrite {
-        track_id: track.id,
-        source_signature,
-        energy: profile.energy,
-        brightness: profile.brightness,
-        tension: profile.tension,
-        moods: profile.moods,
-        evidence,
-        metrics: Map::new(),
-        confidence: profile.confidence,
-    }
-}
-
-fn summarize_analysis(
-    tracks: &[IndexedTrack],
-    states: &[AnalysisState],
-    analyzer: &str,
-) -> Result<LibraryAnalysisSummary, LocalAnalysisError> {
-    let by_track = states
-        .iter()
-        .map(|state| (state.track_id, state))
-        .collect::<BTreeMap<_, _>>();
-    let mut current = Vec::new();
-    let mut stale_tracks = 0_usize;
-    for track in tracks {
-        let Some(state) = by_track.get(&track.id) else {
-            continue;
-        };
-        let signature = metadata_source_signature(track)
-            .map_err(|_| LocalAnalysisError::InvalidSourceSignature)?;
-        if state.source_signature == signature {
-            current.push(*state);
-        } else {
-            stale_tracks = stale_tracks.saturating_add(1);
-        }
-    }
-    let valid_confidences = current
-        .iter()
-        .filter_map(|state| Confidence::parse(&state.confidence).map(|value| (state, value)))
-        .collect::<Vec<_>>();
-    if valid_confidences.len() != current.len() {
-        return Err(LocalAnalysisError::InvalidStoredState);
-    }
-    Ok(LibraryAnalysisSummary {
-        analyzer: analyzer.to_owned(),
-        library_tracks: tracks.len(),
-        analyzed_tracks: current.len(),
-        failed_tracks: 0,
-        stale_tracks,
-        high_confidence: valid_confidences
-            .iter()
-            .filter(|(_, value)| *value == Confidence::High)
-            .count(),
-        medium_confidence: valid_confidences
-            .iter()
-            .filter(|(_, value)| *value == Confidence::Medium)
-            .count(),
-        low_confidence: valid_confidences
-            .iter()
-            .filter(|(_, value)| *value == Confidence::Low)
-            .count(),
-        last_updated_at_unix_seconds: current
-            .iter()
-            .map(|state| state.updated_at_unix_seconds)
-            .max(),
-    })
-}
-
-fn summarize_audio_analysis(
-    tracks: &[IndexedTrack],
-    states: &[AnalysisState],
-    failures: &[AnalysisFailureState],
-) -> Result<LibraryAnalysisSummary, LocalAnalysisError> {
-    let by_track = states
-        .iter()
-        .map(|state| (state.track_id, state))
-        .collect::<BTreeMap<_, _>>();
-    let failures_by_track = failures
-        .iter()
-        .map(|state| (state.track_id, state))
-        .collect::<BTreeMap<_, _>>();
-    let mut current = Vec::new();
-    let mut current_failures = Vec::new();
-    let mut stale_tracks = 0_usize;
-    for track in tracks {
-        let signature = audio_source_signature(track)
-            .map_err(|_| LocalAnalysisError::InvalidSourceSignature)?;
-        if let Some(state) = by_track.get(&track.id) {
-            if state.source_signature == signature {
-                current.push(*state);
-            } else {
-                stale_tracks = stale_tracks.saturating_add(1);
-            }
-        }
-        if let Some(failure) = failures_by_track.get(&track.id)
-            && failure.source_signature == signature
-        {
-            current_failures.push(*failure);
-        }
-    }
-    let valid_confidences = current
-        .iter()
-        .filter_map(|state| Confidence::parse(&state.confidence).map(|value| (state, value)))
-        .collect::<Vec<_>>();
-    if valid_confidences.len() != current.len() {
-        return Err(LocalAnalysisError::InvalidStoredState);
-    }
-    Ok(LibraryAnalysisSummary {
-        analyzer: LOCAL_AUDIO_ANALYZER_ID.to_owned(),
-        library_tracks: tracks.len(),
-        analyzed_tracks: current.len(),
-        failed_tracks: current_failures.len(),
-        stale_tracks,
-        high_confidence: valid_confidences
-            .iter()
-            .filter(|(_, value)| *value == Confidence::High)
-            .count(),
-        medium_confidence: valid_confidences
-            .iter()
-            .filter(|(_, value)| *value == Confidence::Medium)
-            .count(),
-        low_confidence: valid_confidences
-            .iter()
-            .filter(|(_, value)| *value == Confidence::Low)
-            .count(),
-        last_updated_at_unix_seconds: current
-            .iter()
-            .map(|state| state.updated_at_unix_seconds)
-            .chain(
-                current_failures
-                    .iter()
-                    .map(|state| state.updated_at_unix_seconds),
-            )
-            .max(),
-    })
 }
 
 pub fn context_source_signature(
@@ -1061,10 +668,9 @@ mod tests {
 
     use music_domain::{IndexedTrack, LibraryPath, TrackId, TrackMetadata};
 
-    use super::{ContextScope, ContextState, analyze_metadata, parse_context_state};
+    use super::{ContextScope, ContextState, parse_context_state};
     use crate::assistant::{
-        Confidence, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
-        context_source_signature, metadata_source_signature,
+        LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, context_source_signature,
     };
 
     fn track() -> Result<IndexedTrack, Box<dyn std::error::Error>> {
@@ -1092,24 +698,6 @@ mod tests {
             mtime_unix_seconds: 100,
             added_at_unix_seconds: 100,
         })
-    }
-
-    #[test]
-    fn metadata_profiles_are_deterministic_and_review_only()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let track = track()?;
-        let signature = metadata_source_signature(&track)?;
-        let profile = analyze_metadata(&track, signature.clone());
-        assert_eq!(profile.source_signature, signature);
-        assert_eq!(profile.confidence, Confidence::High);
-        assert!(profile.moods.iter().any(|mood| mood == "combat"));
-        assert!(
-            profile
-                .evidence
-                .iter()
-                .any(|item| item == "Tempo metadata: 180 BPM")
-        );
-        Ok(())
     }
 
     #[test]

@@ -304,7 +304,7 @@ Use a small, representative sample before running across the whole library.
    quality is uncertain.
 3. If the selected scope contains partial, stale, failed, or unanalyzed tracks, choose explicitly
    between running them with metadata-only context or skipping every track without full context.
-4. Confirm model output appears as generated `model-context-tagger/v7` suggestions,
+4. Confirm model output appears as generated `model-context-tagger/v8` suggestions,
    separate from local analysis and database mood tags.
 5. Inspect the disclosure: the model receives artist, album, origin, and genre metadata, the current full canonical
    ID/name/definition/alias list, and—when available—a bounded projection of locally measured
@@ -342,19 +342,16 @@ track outcomes in job history; **Export retained run results** preserves that re
 offline comparison, including output that could not be saved because evidence changed.
 Existing profiles need no new provider call just to appear in these filters.
 
-Empty profiles now expose the model explanation, or say that no reason was recorded.
-New results also retain the exact disclosed per-track input. **Track evidence sent to the
-model** summarizes metadata, pulse, voice and development; exact fields are expandable.
-Old results cannot recover an input snapshot that was never saved. Complete local analysis
-is coverage, not proof that a music mood classifier ran. Scene/setting suggestions are
-possible session uses, while mood tags describe a musical impression.
+An empty result includes an explicit abstention reason. Current results retain the exact
+per-track evidence sent to the model. **Track evidence sent to the model** summarizes
+metadata, voice, development and permitted catalog claims; exact fields are expandable.
+Each tag has its own supported/tentative assessment, explanation, and supporting or
+conflicting observation IDs. Support is the model's assessment, not measured accuracy.
+Complete local analysis describes coverage. Scene/setting suggestions are possible
+session uses, while mood tags describe a musical impression. Listen before accepting.
 
-**Metadata keyword guesses** is the corrected label for the older local suggestions
-previously shown as "Mood metadata". Those guesses match words in the title, album
-and genre; they are neither embedded mood fields nor AI detection. Misleading names
-can produce wrong guesses. Select **Suggestion source: AI suggestions** to exclude
-them from review, or reject individual guesses. Existing accepted/manual tags are
-preserved. The model does not receive these guesses or the track title.
+The separate metadata-keyword and audio-signal suggestions have been removed. Existing
+accepted/manual tags are preserved; automatic playlists use those tags only.
 
 The default plan selects at most **20 tracks**, allows **10 model requests** including
 contract recovery, and reserves at most **1,000,000 units**. Adjust these limits before
@@ -396,17 +393,17 @@ recertification, timeout and credential changes do not alone invalidate saved su
 Changes to the actual inference contract, model/Thinking/output allowance, vocabulary or
 input evidence do. New inference always requires current conformance and quality passes.
 The September 24 context cutover requires fresh analysis of every indexed source file.
-On upgrade, schema 15 creates a verified database backup and clears generated contexts,
+On upgrade, schemas 15–16 create a verified database backup and clear generated contexts,
 suggestions and proposal-bound reviews. Accepted/manual tags and playlists are preserved.
 Old active analysis jobs are superseded; paid-attempt history is preserved without replay.
 Start the whole-library audio-context job to rebuild, then rerun the tagging checks and
-review disclosure v14 before any provider work. Playback remains available during rebuild.
+review disclosure v15 before any provider work. Playback remains available during rebuild.
 
 Model input now separates recording loudness from within-track dynamics, reports coverage
 without a whole-track confidence label, and withholds the coarse local tempo estimate.
 Current enabled MusicBrainz/Last.fm observations can accompany it with source, recording
 scope and retrieval time; community labels are weak claims, not verified moods. The voice
-field is a score, not a probability. Generated suggestions still require review.
+field is a score, not a probability. Generated suggestions carry per-tag reasons and observation references and still require review.
 
 No new music classifier has been adopted. Prepare independent judgments with the
 [grouped offline pilot](docs/MOOD_PILOT.md); development and confirmation recordings stay

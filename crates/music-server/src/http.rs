@@ -105,8 +105,6 @@ impl CorrelationId {
     crate::modes::SoundboardManifest,
     crate::modes::CueSpec,
     crate::assistant::ModelTaggingScopeWire,
-    crate::assistant::PlaylistAudioSignalResponse,
-    crate::assistant::AudioSignalProfileResponse
 )))]
 struct MusicApi;
 

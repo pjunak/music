@@ -156,7 +156,7 @@ export interface AutomaticPlaylistRule {
   include_tags: string[];
   match: "any" | "all";
   exclude_tags: string[];
-  tag_sources: "manual" | "manual_and_local";
+  tag_sources: "manual";
   min_bpm: number | null;
   max_bpm: number | null;
   include_unknown_bpm: boolean;

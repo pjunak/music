@@ -23,9 +23,7 @@ use super::vocabulary::{
 
 pub const MAX_TAGS_PER_TRACK: usize = 32;
 pub const MAX_TAG_LENGTH: usize = 64;
-pub const LOCAL_METADATA_ANALYZER_ID: &str = "local-metadata/v1";
-pub const LOCAL_AUDIO_ANALYZER_ID: &str = "local-audio/v1";
-pub const MODEL_TAG_ANALYZER_ID: &str = "model-context-tagger/v7";
+pub const MODEL_TAG_ANALYZER_ID: &str = "model-context-tagger/v8";
 pub const CATALOG_TAG_ANALYZER_ID: &str = "catalog-tags/v1";
 
 pub type AssistantDependencyError = Box<dyn Error + Send + Sync>;
@@ -75,13 +73,10 @@ pub struct StoredAnalysis {
     pub updated_at_unix_seconds: Option<i64>,
     pub analyzer_id: String,
     pub source_signature: String,
-    pub energy: f64,
-    pub brightness: f64,
-    pub tension: f64,
     pub moods: Vec<String>,
     pub evidence: Vec<String>,
     pub metrics: Map<String, Value>,
-    pub confidence: String,
+    pub decisions: Vec<super::TagDecision>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -101,25 +96,15 @@ pub struct AssistantTrackEvidence {
     pub reviews: Vec<StoredAnalysisReview>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct AudioSignalProfile {
-    pub analyzer_id: String,
-    pub energy: f64,
-    pub brightness: f64,
-    pub tension: f64,
-    pub tempo_bpm: Option<f64>,
-    pub confidence: Confidence,
-    pub evidence: Vec<String>,
-    pub metrics: Map<String, Value>,
-}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AnalysisSuggestion {
     pub tag: String,
     pub analyzer_id: String,
     pub source_signature: String,
-    pub confidence: Confidence,
+    pub support: super::TagSupport,
     pub evidence: Vec<String>,
+    pub evidence_ids: Vec<String>,
+    pub contradiction_ids: Vec<String>,
     pub status: AnalysisReviewDecision,
 }
 
@@ -127,11 +112,8 @@ pub struct AnalysisSuggestion {
 pub struct AssistantTrackView {
     pub track: IndexedTrack,
     pub manual_tags: Vec<String>,
-    pub analysis_analyzer: Option<String>,
     pub analysis_tags: Vec<String>,
-    pub analysis_confidence: Option<Confidence>,
     pub analysis_suggestions: Vec<AnalysisSuggestion>,
-    pub audio_signal: Option<AudioSignalProfile>,
     pub model_analysis: ModelAnalysisStatus,
 }
 
@@ -166,7 +148,6 @@ pub struct ModelAnalysisStatus {
     pub updated_at_unix_seconds: Option<i64>,
     pub suggested_tag_count: Option<usize>,
     pub evidence: Vec<String>,
-    pub confidence: Option<String>,
     pub context_status: Option<String>,
     pub input_snapshot: Option<Value>,
 }
@@ -1013,14 +994,6 @@ pub fn metadata_source_signature(track: &IndexedTrack) -> Result<String, String>
     ]))
 }
 
-pub fn audio_source_signature(track: &IndexedTrack) -> Result<String, String> {
-    source_signature(&serde_json::json!([
-        track.path.as_str(),
-        track.size_bytes,
-        track.mtime_unix_seconds,
-    ]))
-}
-
 pub fn catalog_tag_source_signature(
     track: &IndexedTrack,
     evidence_revision: i64,
@@ -1037,61 +1010,6 @@ fn source_signature(value: &Value) -> Result<String, String> {
     serde_json::to_vec(value)
         .map(|encoded| format!("{:x}", Sha256::digest(encoded)))
         .map_err(|_| "track source signature could not be encoded".to_owned())
-}
-
-pub(super) fn current_metadata_analysis(
-    track: &AssistantTrackEvidence,
-) -> Option<(&StoredAnalysis, Confidence)> {
-    let signature = metadata_source_signature(&track.track).ok()?;
-    track
-        .analyses
-        .iter()
-        .find(|analysis| {
-            analysis.analyzer_id == LOCAL_METADATA_ANALYZER_ID
-                && analysis.source_signature == signature
-                && axes_valid(analysis)
-        })
-        .and_then(|analysis| {
-            Confidence::parse(&analysis.confidence).map(|confidence| (analysis, confidence))
-        })
-}
-
-pub(super) fn current_audio_analysis(track: &AssistantTrackEvidence) -> Option<AudioSignalProfile> {
-    let signature = audio_source_signature(&track.track).ok()?;
-    let analysis = track.analyses.iter().find(|analysis| {
-        analysis.analyzer_id == LOCAL_AUDIO_ANALYZER_ID
-            && analysis.source_signature == signature
-            && axes_valid(analysis)
-    })?;
-    if analysis.metrics.get("schema").and_then(Value::as_str) != Some(LOCAL_AUDIO_ANALYZER_ID)
-        || analysis
-            .metrics
-            .values()
-            .any(|value| !matches!(value, Value::Null | Value::String(_) | Value::Number(_)))
-    {
-        return None;
-    }
-    let tempo_bpm = analysis
-        .metrics
-        .get("tempo_bpm")
-        .and_then(Value::as_f64)
-        .filter(|tempo| tempo.is_finite() && *tempo > 0.0 && *tempo <= 999.0);
-    Some(AudioSignalProfile {
-        analyzer_id: analysis.analyzer_id.clone(),
-        energy: analysis.energy,
-        brightness: analysis.brightness,
-        tension: analysis.tension,
-        tempo_bpm,
-        confidence: Confidence::parse(&analysis.confidence)?,
-        evidence: analysis.evidence.clone(),
-        metrics: analysis.metrics.clone(),
-    })
-}
-
-fn axes_valid(analysis: &StoredAnalysis) -> bool {
-    [analysis.energy, analysis.brightness, analysis.tension]
-        .iter()
-        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
 }
 
 pub(super) fn view_for_track(
@@ -1138,8 +1056,6 @@ fn view_for_track_with_model(
                 .take(4)
                 .map(|value| value.chars().take(512).collect())
                 .collect(),
-            confidence: Confidence::parse(&analysis.confidence)
-                .map(|_| analysis.confidence.clone()),
             context_status: analysis
                 .metrics
                 .get("context_status")
@@ -1153,7 +1069,6 @@ fn view_for_track_with_model(
                 .cloned(),
         }
     });
-    let current = current_metadata_analysis(track);
     let mut suggestions = Vec::new();
     for analysis in &track.analyses {
         let expected_signature = if analysis.analyzer_id == MODEL_TAG_ANALYZER_ID {
@@ -1165,13 +1080,12 @@ fn view_for_track_with_model(
                 .and_then(Value::as_i64)
                 .and_then(|revision| catalog_tag_source_signature(&track.track, revision).ok())
         } else {
-            metadata_source_signature(&track.track).ok()
+            None
         };
         if !matches!(
             analysis.analyzer_id.as_str(),
-            LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID | MODEL_TAG_ANALYZER_ID
+            CATALOG_TAG_ANALYZER_ID | MODEL_TAG_ANALYZER_ID
         ) || expected_signature.as_deref() != Some(analysis.source_signature.as_str())
-            || !axes_valid(analysis)
             || analyzer_ids.is_some_and(|ids| !ids.iter().any(|id| id == &analysis.analyzer_id))
         {
             continue;
@@ -1182,12 +1096,9 @@ fn view_for_track_with_model(
         {
             continue;
         }
-        let Some(confidence) = Confidence::parse(&analysis.confidence) else {
-            continue;
-        };
         let mut seen = BTreeSet::new();
-        for raw_tag in &analysis.moods {
-            let Ok(tag) = normalize_manual_tag(raw_tag) else {
+        for decision in &analysis.decisions {
+            let Ok(tag) = normalize_manual_tag(&decision.tag) else {
                 continue;
             };
             if !seen.insert(tag.clone()) {
@@ -1206,8 +1117,10 @@ fn view_for_track_with_model(
                 tag,
                 analyzer_id: analysis.analyzer_id.clone(),
                 source_signature: analysis.source_signature.clone(),
-                confidence,
-                evidence: analysis.evidence.clone(),
+                support: decision.support,
+                evidence: decision.evidence.clone(),
+                evidence_ids: decision.evidence_ids.clone(),
+                contradiction_ids: decision.contradiction_ids.clone(),
                 status,
             });
         }
@@ -1224,11 +1137,8 @@ fn view_for_track_with_model(
     AssistantTrackView {
         track: track.track.clone(),
         manual_tags,
-        analysis_analyzer: current.map(|(analysis, _)| analysis.analyzer_id.clone()),
         analysis_tags,
-        analysis_confidence: current.map(|(_, confidence)| confidence),
         analysis_suggestions: suggestions,
-        audio_signal: current_audio_analysis(track),
         model_analysis,
     }
 }
@@ -1269,6 +1179,19 @@ fn view_matches_search(view: &AssistantTrackView, search: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    fn fixture_decisions(tags: &[&str]) -> Vec<crate::assistant::TagDecision> {
+        tags.iter()
+            .map(|tag| crate::assistant::TagDecision {
+                tag: (*tag).to_owned(),
+                support: crate::assistant::TagSupport::Tentative,
+                evidence: vec!["Synthetic evidence".to_owned()],
+                evidence_ids: vec!["metadata.genre".to_owned()],
+                contradiction_ids: Vec::new(),
+            })
+            .collect()
+    }
+
     use std::time::Duration;
 
     use music_domain::{LibraryPath, TrackMetadata};
@@ -1315,38 +1238,27 @@ mod tests {
     fn review_counts_use_current_deduplicated_suggestions_per_source() -> Result<(), Box<dyn Error>>
     {
         let track = track()?;
-        let local_signature = metadata_source_signature(&track)?;
+        let local_signature = catalog_tag_source_signature(&track, 1)?;
         let profile = StoredAnalysis {
             job_id: String::new(),
             updated_at_unix_seconds: None,
-            analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
+            analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
             source_signature: local_signature.clone(),
-            energy: 0.2,
-            brightness: 0.5,
-            tension: 0.1,
+            decisions: fixture_decisions(&["calm", " CALM ", "festive"]),
             moods: vec!["calm".to_owned(), " CALM ".to_owned(), "festive".to_owned()],
             evidence: Vec::new(),
-            metrics: Map::new(),
-            confidence: "high".to_owned(),
-        };
-        let catalog = StoredAnalysis {
-            job_id: String::new(),
-            updated_at_unix_seconds: None,
-            analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
-            source_signature: catalog_tag_source_signature(&track, 1)?,
-            metrics: serde_json::json!({"evidence_revision": 1})
+            metrics: serde_json::json!({"evidence_revision":1})
                 .as_object()
                 .cloned()
                 .ok_or("metrics")?,
-            ..profile.clone()
         };
         let mut evidence = AssistantTrackEvidence {
             catalog_evidence: None,
             track,
             manual_tags: vec!["calm".to_owned()],
-            analyses: vec![profile, catalog],
+            analyses: vec![profile],
             reviews: vec![StoredAnalysisReview {
-                analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
+                analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
                 source_signature: local_signature,
                 tag: "festive".to_owned(),
                 decision: AnalysisReviewDecision::Rejected,
@@ -1358,16 +1270,14 @@ mod tests {
         let summary = summarize(&evidence);
         assert_eq!(summary.matching_tracks, 1);
         assert_eq!(
-            summary.sources[LOCAL_METADATA_ANALYZER_ID],
+            summary.sources[CATALOG_TAG_ANALYZER_ID],
             TagReviewCounts {
                 pending: 1,
                 rejected: 1,
                 accepted: 0
             }
         );
-        assert_eq!(summary.sources[CATALOG_TAG_ANALYZER_ID].pending, 2);
         evidence.analyses[0].source_signature = "stale".to_owned();
-        evidence.analyses[1].confidence = "invalid".to_owned();
         assert!(summarize(&evidence).sources.is_empty());
         Ok(())
     }
@@ -1386,13 +1296,10 @@ mod tests {
                 updated_at_unix_seconds: Some(123),
                 analyzer_id: MODEL_TAG_ANALYZER_ID.to_owned(),
                 source_signature: signature.to_owned(),
-                energy: 0.5,
-                brightness: 0.5,
-                tension: 0.5,
+                decisions: Vec::new(),
                 moods: Vec::new(),
                 evidence: vec!["Insufficient evidence".to_owned()],
-                confidence: "low".to_owned(),
-                metrics: serde_json::json!({"contract": "assistant-music-tagger-output/v4"})
+                metrics: serde_json::json!({"contract": "assistant-music-tagger-output/v5", "input_snapshot":{"genre":"ambient"}})
                     .as_object()
                     .cloned()
                     .ok_or("metrics")?,
@@ -1412,6 +1319,7 @@ mod tests {
         assert!(!view.model_analysis.matches(ModelTagFilter::WithSuggestions));
         assert!(view.model_analysis.matches(ModelTagFilter::Processed));
         evidence.analyses[0].moods = vec!["calm".to_owned()];
+        evidence.analyses[0].decisions = fixture_decisions(&["calm"]);
         evidence.reviews.push(StoredAnalysisReview {
             analyzer_id: MODEL_TAG_ANALYZER_ID.to_owned(),
             source_signature: signature.to_owned(),
@@ -1428,7 +1336,7 @@ mod tests {
             assert!(view.analysis_suggestions.is_empty());
             assert_eq!(view.manual_tags, vec!["authored"]);
         }
-        evidence.analyses[0].confidence = "invalid".to_owned();
+        evidence.analyses[0].decisions[0].evidence_ids = vec!["missing.source".to_owned()];
         assert_eq!(
             view_for_track_with_model(&evidence, None, Some(signature))
                 .model_analysis
@@ -1451,15 +1359,12 @@ mod tests {
             analyses: vec![StoredAnalysis {
                 job_id: String::new(),
                 updated_at_unix_seconds: None,
-                analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
+                analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
                 source_signature: "stale".to_owned(),
-                energy: 0.2,
-                brightness: 0.5,
-                tension: 0.1,
+                decisions: fixture_decisions(&["calm"]),
                 moods: vec!["calm".to_owned()],
                 evidence: vec!["metadata".to_owned()],
                 metrics: Map::new(),
-                confidence: "high".to_owned(),
             }],
             reviews: Vec::new(),
         };

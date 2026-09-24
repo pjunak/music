@@ -4,11 +4,10 @@ use music_application::assistant::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,
     AnalysisReviewOutcome, AnalysisReviewTarget, AssistantFuture, AssistantRepository,
     AssistantTrackEvidence, BulkTagFailure, BulkTagOutcome, CATALOG_TAG_ANALYZER_ID,
-    CleanupApplyOutcome, CleanupMutation, CleanupSelection, LOCAL_METADATA_ANALYZER_ID,
-    MAX_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ModelTagReviewGuard, RenameTagOutcome,
-    StoredAnalysis, StoredAnalysisReview, TagUsage, TagVocabularyDocument, TagVocabularyRecord,
-    TagVocabularySnapshot, build_cleanup_preview, catalog_signature, metadata_source_signature,
-    vocabulary_fingerprint,
+    CleanupApplyOutcome, CleanupMutation, CleanupSelection, MAX_TAGS_PER_TRACK,
+    MODEL_TAG_ANALYZER_ID, ModelTagReviewGuard, RenameTagOutcome, StoredAnalysis,
+    StoredAnalysisReview, TagUsage, TagVocabularyDocument, TagVocabularyRecord,
+    TagVocabularySnapshot, build_cleanup_preview, catalog_signature, vocabulary_fingerprint,
 };
 use music_domain::TrackId;
 use serde_json::{Map, Value};
@@ -47,8 +46,8 @@ impl AssistantRepository for SqliteStorage {
             }
             let mut analyses = BTreeMap::<i64, Vec<StoredAnalysis>>::new();
             for row in sqlx::query(
-                "SELECT track_id, analyzer_id, source_signature, energy, brightness, tension, \
-                 moods_json, evidence_json, metrics_json, confidence, job_id, \
+                "SELECT track_id, analyzer_id, source_signature, decisions_json, \
+                 moods_json, evidence_json, metrics_json, job_id, \
                  CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds FROM track_analyses \
                  ORDER BY track_id, analyzer_id",
             )
@@ -467,13 +466,10 @@ fn analysis_from_row(row: &sqlx::sqlite::SqliteRow) -> Option<StoredAnalysis> {
         updated_at_unix_seconds: row.try_get("updated_at_unix_seconds").ok()?,
         analyzer_id: row.try_get("analyzer_id").ok()?,
         source_signature: row.try_get("source_signature").ok()?,
-        energy: row.try_get("energy").ok()?,
-        brightness: row.try_get("brightness").ok()?,
-        tension: row.try_get("tension").ok()?,
         moods,
         evidence,
         metrics,
-        confidence: row.try_get("confidence").ok()?,
+        decisions: serde_json::from_str(row.try_get("decisions_json").ok()?).ok()?,
     })
 }
 

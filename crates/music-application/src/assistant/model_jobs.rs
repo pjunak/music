@@ -9,19 +9,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::assistant::{
-    AnalysisWrite, AssistantService, Confidence, ContextScope, EQ_DRAFT_ENGINE_ID,
-    EQ_QUALITY_EVALUATION_ID, EnergyCurve, EqDraftTask, EqQualityEvaluationResult,
-    LocalAnalysisRepository, LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS,
-    MODEL_PLAYLIST_ENGINE_ID, MODEL_TAG_ANALYZER_ID, MODEL_TAG_CLEANUP_ENGINE_ID,
-    MODEL_TAGGER_INPUT_CONTRACT, MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ModelAnalysisWrite,
-    ModelEvaluationExecution, ModelPlaylistTask, ModelQualityService, ModelTagCleanupTask,
-    ModelTaskError, PLAYLIST_QUALITY_EVALUATION_ID, PlaylistQualityEvaluationResult,
-    PlaylistSuggestionRequest, ProviderUsageAccumulator, ResolvedRoleExecution,
-    StructuredModelRequest, StructuredModelResult, TAG_CLEANUP_QUALITY_EVALUATION_ID,
-    TAGGING_QUALITY_EVALUATION_ID, TagCleanupQualityEvaluationResult, TagConfidence,
-    TagQualityCase, TagQualityCaseResult, TagQualityEvaluationResult, TagQualityGate,
-    TagQualitySuite, build_cleanup_preview, catalog_signature, eq_quality_suite,
-    local_context_axes, merge_safety_repeats, model_tag_cleanup_suggestion_id,
+    AnalysisWrite, AssistantService, ContextScope, EQ_DRAFT_ENGINE_ID, EQ_QUALITY_EVALUATION_ID,
+    EnergyCurve, EqDraftTask, EqQualityEvaluationResult, LocalAnalysisRepository,
+    LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS, MODEL_PLAYLIST_ENGINE_ID, MODEL_TAG_ANALYZER_ID,
+    MODEL_TAG_CLEANUP_ENGINE_ID, MODEL_TAGGER_INPUT_CONTRACT,
+    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ModelAnalysisWrite, ModelEvaluationExecution,
+    ModelPlaylistTask, ModelQualityService, ModelTagCleanupTask, ModelTaskError,
+    PLAYLIST_QUALITY_EVALUATION_ID, PlaylistQualityEvaluationResult, PlaylistSuggestionRequest,
+    ProviderUsageAccumulator, ResolvedRoleExecution, StructuredModelRequest, StructuredModelResult,
+    TAG_CLEANUP_QUALITY_EVALUATION_ID, TAGGING_QUALITY_EVALUATION_ID,
+    TagCleanupQualityEvaluationResult, TagQualityCase, TagQualityCaseResult,
+    TagQualityEvaluationResult, TagQualityGate, TagQualitySuite, build_cleanup_preview,
+    catalog_signature, eq_quality_suite, merge_safety_repeats, model_tag_cleanup_suggestion_id,
     model_tag_source_signature, model_tag_track_input, playlist_quality_suite,
     retryable_tagger_error, tag_cleanup_quality_suite, tag_quality_suite,
 };
@@ -485,7 +484,14 @@ fn feature_job_definition(kind: FeatureKind) -> JobDefinition {
             FeatureKind::Tagging => MODEL_TAGGING_JOB_KIND,
             FeatureKind::TaggingBatchCollect => MODEL_TAGGING_BATCH_COLLECT_JOB_KIND,
         },
-        schema_version: 1,
+        schema_version: if matches!(
+            kind,
+            FeatureKind::Tagging | FeatureKind::TaggingBatchCollect
+        ) {
+            2
+        } else {
+            1
+        },
         lane: JobLane::Provider,
         restartable: matches!(kind, FeatureKind::TaggingBatchCollect),
         checkpoint_policy: JobCheckpointPolicy::Replace,

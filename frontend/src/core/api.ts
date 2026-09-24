@@ -1,3 +1,5 @@
+import { requireCurrentTagPage, requireCurrentTagTrack } from "./analysisResponse";
+
 import type {
   AutomaticPlaylistApplyResult,
   AutomaticPlaylistPreview,
@@ -269,20 +271,10 @@ export interface PlaylistSuggestionIntent {
 
 export type PlaylistEnergyCurve = "steady" | "rising" | "falling" | "arc";
 
-export interface PlaylistSuggestionAudioSignal {
-  analyzer_id: string;
-  energy: number;
-  brightness: number;
-  tension: number;
-  tempo_bpm: number | null;
-  confidence: "high" | "medium" | "low";
-}
-
 export interface PlaylistSuggestionPlan {
   energy_curve: PlaylistEnergyCurve;
   selected_tracks: number;
   selected_duration_s: number;
-  audio_profile_tracks: number;
 }
 
 export interface PlaylistSuggestionCandidate {
@@ -295,7 +287,6 @@ export interface PlaylistSuggestionCandidate {
   origin: string;
   genre: string;
   manual_tags: string[];
-  analysis_tags: string[];
   length_s: number;
   bpm: number | null;
   match_score: number;
@@ -304,7 +295,6 @@ export interface PlaylistSuggestionCandidate {
   default_selected: boolean;
   sequence_position: number | null;
   planning_energy: number;
-  audio_signal: PlaylistSuggestionAudioSignal | null;
 }
 
 export interface PlaylistSuggestion {
@@ -328,7 +318,7 @@ export interface PlaylistSuggestionRequest {
 }
 
 export const MODEL_PLAYLIST_DISCLOSURE_VERSION =
-  "assistant-playlist-model-disclosure/v3" as const;
+  "assistant-playlist-model-disclosure/v4" as const;
 
 export interface ModelPlaylistDisclosure {
   version: typeof MODEL_PLAYLIST_DISCLOSURE_VERSION;
@@ -379,7 +369,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v14" as const;
+  "assistant-model-music-tagging-disclosure/v15" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }
@@ -468,19 +458,12 @@ export interface BackgroundJob {
   finished_at: string | null;
 }
 
-export interface LibraryAnalysisSummary {
-  analyzer: string;
+export interface LibraryContextSummary {
   library_tracks: number;
   analyzed_tracks: number;
   failed_tracks: number;
   stale_tracks: number;
-  high_confidence: number;
-  medium_confidence: number;
-  low_confidence: number;
   last_updated_at: string | null;
-}
-
-export interface LibraryContextSummary extends Omit<LibraryAnalysisSummary, "high_confidence" | "medium_confidence" | "low_confidence"> {
   analyzer: "local-context/v3";
   voice_analyzer: {
     analyzer_id: "essentia-musicnn-voice/v2";
@@ -591,7 +574,9 @@ export interface AnalysisTagSuggestion {
   tag: string;
   analyzer_id: string;
   source_signature: string;
-  confidence: "high" | "medium" | "low";
+  support: "supported" | "tentative";
+  evidence_ids: string[];
+  contradiction_ids: string[];
   evidence: string[];
   status: AnalysisTagReviewDecision;
 }
@@ -632,13 +617,6 @@ export interface BulkAnalysisTagReviewResult {
   failures: BulkAnalysisTagReviewFailure[];
 }
 
-export interface AudioSignalProfile {
-  analyzer_id: string;
-  confidence: "high" | "medium" | "low";
-  evidence: string[];
-  metrics: Record<string, string | number | null>;
-}
-
 export interface LibraryTagTrack {
   track_id: number;
   path: string;
@@ -647,25 +625,21 @@ export interface LibraryTagTrack {
   artist: string;
   album: string;
   manual_tags: string[];
-  analysis_analyzer: string | null;
   analysis_tags: string[];
-  analysis_confidence: "high" | "medium" | "low" | null;
   analysis_suggestions: AnalysisTagSuggestion[];
-  audio_signal: AudioSignalProfile | null;
   model_analysis?: {
     status: "current" | "stale" | "missing";
     job_id: string | null;
     updated_at_unix_seconds: number | null;
     suggested_tag_count?: number | null;
     evidence?: string[];
-    confidence?: "high" | "medium" | "low" | null;
     context_status?: "full" | "partial" | "missing" | null;
     input_snapshot?: Record<string, unknown> | null;
   };
 }
 
 export type ModelTagFilter = "processed" | "current" | "stale" | "missing" | "with_suggestions" | "without_suggestions";
-export type TagSuggestionSource = "model" | "metadata" | "catalog";
+export type TagSuggestionSource = "model" | "catalog";
 
 export interface TagReviewSummary {
   matching_tracks: number;
@@ -816,7 +790,7 @@ export const assistantApi = {
     if (params.offset !== undefined) query.set("offset", String(params.offset));
     if (params.limit !== undefined) query.set("limit", String(params.limit));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
-    return api.get<LibraryTagPage>(`/api/assistant/library-tags${suffix}`);
+    return api.get<LibraryTagPage>(`/api/assistant/library-tags${suffix}`).then(requireCurrentTagPage);
   },
   queryModelLibraryTags: (
     scope: ModelTaggingScope,
@@ -829,12 +803,12 @@ export const assistantApi = {
       review,
       offset,
       limit,
-    }),
+    }).then(requireCurrentTagPage),
   patchManualTags: (trackId: number, add: string[], remove: string[]) =>
     api.patch<LibraryTagTrack>(
       `/api/assistant/library-tags/${encodeURIComponent(trackId)}`,
       { add, remove },
-    ),
+    ).then(requireCurrentTagTrack),
   patchManualTagsBulk: (trackIds: number[], add: string[], remove: string[]) =>
     api.post<BulkManualTagResult>("/api/assistant/library-tags/bulk", {
       track_ids: trackIds,

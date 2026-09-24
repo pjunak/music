@@ -27,6 +27,13 @@ access only, and its legacy `verified_capability_ids` array is empty. See
 [Assistant setup](../ASSISTANT.md) and the [generated OpenAPI](../contracts/generated/rust/openapi.json).
 The bundled output client and Baton do not consume these Assistant settings.
 
+The September 24 song-analysis cutover removes the old metadata/audio-analysis jobs and
+summary routes. Current tag suggestions expose per-tag `support`, reasons, `evidence_ids`
+and `contradiction_ids`; old whole-track confidence and signal-axis fields are removed.
+Automatic playlist rules accept `tag_sources: "manual"` only. Assistant clients must refresh
+the generated schemas rather than adapt old analysis payloads. Accepted tags and ordinary
+playback/output messages keep their existing ownership and behavior.
+
 Library cleanup also exposes authenticated rejection-pool endpoints under
 `/api/library/cleanup/rejections`: list/search, save, match, restore-to-review and delete.
 Restoration returns a proposal for the ordinary cleanup apply/journal workflow; it never applies

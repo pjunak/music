@@ -1698,7 +1698,7 @@ mod tests {
             role_fingerprint: runtime_fingerprint,
             status: "passed".to_owned(),
             suite_id: "controlled-vocabulary-tagging-baseline-v20".to_owned(),
-            engine_id: "model-context-tagger/v7".to_owned(),
+            engine_id: "model-context-tagger/v8".to_owned(),
             passed_cases: 4,
             total_cases: 4,
             job_id: "evaluation-job".to_owned(),

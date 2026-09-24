@@ -110,7 +110,7 @@ impl ModelFeatureJobHandler {
             &parameters.quality_evaluation_id,
             PLAYLIST_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-playlist-model-disclosure/v3",
+            "assistant-playlist-model-disclosure/v4",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;

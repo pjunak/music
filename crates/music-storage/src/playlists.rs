@@ -7,8 +7,6 @@ use music_application::playlists::{
     PlaylistPatch, PlaylistRecord, PlaylistRepository, resolve_automatic_playlist,
 };
 use music_domain::{IndexedTrack, TrackId};
-use serde_json::Value;
-use sha2::{Digest, Sha256};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 
@@ -20,7 +18,6 @@ const PLAYLIST_COLUMNS: &str = "id, name, mode_id, category, automatic_rule_json
     AS automatic_refreshed_at_unix_seconds, \
     CAST(strftime('%s', created_at) AS INTEGER) AS created_at_unix_seconds, \
     CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds";
-const LOCAL_METADATA_ANALYZER_ID: &str = "local-metadata/v1";
 
 impl PlaylistRepository for SqliteStorage {
     fn create<'a>(&'a self, request: &'a PlaylistCreate) -> PlaylistFuture<'a, PlaylistRecord> {
@@ -711,7 +708,7 @@ async fn load_track(
 
 async fn load_automatic_source(
     transaction: &mut Transaction<'_, Sqlite>,
-    tag_sources: AutomaticTagSources,
+    _tag_sources: AutomaticTagSources,
 ) -> Result<AutomaticPlaylistSource, StorageError> {
     let mut query =
         QueryBuilder::<Sqlite>::new(format!("SELECT {TRACK_COLUMNS} FROM tracks ORDER BY id"));
@@ -730,9 +727,6 @@ async fn load_automatic_source(
             .or_default()
             .insert(row.try_get("tag")?);
     }
-    if tag_sources == AutomaticTagSources::ManualAndLocal {
-        add_current_local_tags(transaction, &tracks, &mut tags).await?;
-    }
     Ok(AutomaticPlaylistSource {
         tracks: tracks
             .into_iter()
@@ -745,91 +739,6 @@ async fn load_automatic_source(
             })
             .collect(),
     })
-}
-
-async fn add_current_local_tags(
-    transaction: &mut Transaction<'_, Sqlite>,
-    tracks: &[IndexedTrack],
-    tags: &mut BTreeMap<i64, BTreeSet<String>>,
-) -> Result<(), StorageError> {
-    let analysis_rows = sqlx::query(
-        "SELECT track_id, source_signature, moods_json, evidence_json, confidence \
-         FROM track_analyses WHERE analyzer_id = ? ORDER BY track_id",
-    )
-    .bind(LOCAL_METADATA_ANALYZER_ID)
-    .fetch_all(&mut **transaction)
-    .await?;
-    let review_rows = sqlx::query(
-        "SELECT track_id, source_signature, tag FROM track_analysis_tag_reviews \
-         WHERE analyzer_id = ? AND decision = 'rejected'",
-    )
-    .bind(LOCAL_METADATA_ANALYZER_ID)
-    .fetch_all(&mut **transaction)
-    .await?;
-    let rejected = review_rows
-        .iter()
-        .map(|row| {
-            Ok((
-                row.try_get::<i64, _>("track_id")?,
-                row.try_get::<String, _>("source_signature")?,
-                row.try_get::<String, _>("tag")?,
-            ))
-        })
-        .collect::<Result<BTreeSet<_>, sqlx::Error>>()?;
-    let by_id = tracks
-        .iter()
-        .map(|track| (track.id.get(), track))
-        .collect::<BTreeMap<_, _>>();
-    for row in analysis_rows {
-        let track_id: i64 = row.try_get("track_id")?;
-        let Some(track) = by_id.get(&track_id) else {
-            continue;
-        };
-        let signature: String = row.try_get("source_signature")?;
-        if signature != metadata_source_signature(track)? {
-            continue;
-        }
-        let confidence: String = row.try_get("confidence")?;
-        if !matches!(confidence.as_str(), "high" | "medium" | "low") {
-            continue;
-        }
-        let moods = string_array(row.try_get("moods_json")?);
-        let evidence = string_array(row.try_get("evidence_json")?);
-        let (Some(moods), Some(_)) = (moods, evidence) else {
-            continue;
-        };
-        let effective = tags.entry(track_id).or_default();
-        for mood in moods {
-            if !rejected.contains(&(track_id, signature.clone(), mood.clone())) {
-                effective.insert(mood);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn string_array(encoded: String) -> Option<Vec<String>> {
-    let value = serde_json::from_str::<Value>(&encoded).ok()?;
-    value
-        .as_array()?
-        .iter()
-        .map(|item| item.as_str().map(ToOwned::to_owned))
-        .collect()
-}
-
-fn metadata_source_signature(track: &IndexedTrack) -> Result<String, StorageError> {
-    let payload = serde_json::json!([
-        track.path.as_str(),
-        track.metadata.title,
-        track.display_title,
-        track.metadata.artist,
-        track.metadata.album,
-        track.origin,
-        track.metadata.genre,
-        track.metadata.bpm,
-    ]);
-    let encoded = serde_json::to_vec(&payload).map_err(StorageError::ManifestSerialization)?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
 fn box_storage(source: StorageError) -> PlaylistDependencyError {
@@ -1010,68 +919,6 @@ mod tests {
                 .await?,
             PlaylistMutation::AutomaticItemsManaged
         );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn local_analysis_tags_require_current_metadata_and_respect_rejections()
-    -> Result<(), Box<dyn Error + Send + Sync>> {
-        let (_directory, storage) = storage().await?;
-        let manual = storage
-            .automatic_source(AutomaticTagSources::Manual)
-            .await?;
-        let track = &manual
-            .tracks
-            .iter()
-            .find(|candidate| candidate.track.id.get() == 1)
-            .ok_or("track missing")?
-            .track;
-        let signature = metadata_source_signature(track)?;
-        sqlx::query(
-            "INSERT INTO track_analyses (track_id, analyzer_id, source_signature, job_id, energy, brightness, tension, moods_json, evidence_json, metrics_json, confidence, updated_at) \
-             VALUES (?, ?, ?, 'playlist-test', 0.4, 0.3, 0.2, '[\"dreamy\"]', '[\"synthetic fixture\"]', '{}', 'high', CURRENT_TIMESTAMP)",
-        )
-        .bind(1_i64)
-        .bind(LOCAL_METADATA_ANALYZER_ID)
-        .bind(&signature)
-        .execute(&storage.pool)
-        .await?;
-
-        let manual = storage
-            .automatic_source(AutomaticTagSources::Manual)
-            .await?;
-        assert!(manual.tracks[0].tags.is_empty());
-        let local = storage
-            .automatic_source(AutomaticTagSources::ManualAndLocal)
-            .await?;
-        assert!(local.tracks[0].tags.contains("dreamy"));
-
-        sqlx::query(
-            "INSERT INTO track_analysis_tag_reviews (track_id, analyzer_id, tag, source_signature, decision, reviewed_at) \
-             VALUES (?, ?, 'dreamy', ?, 'rejected', CURRENT_TIMESTAMP)",
-        )
-        .bind(1_i64)
-        .bind(LOCAL_METADATA_ANALYZER_ID)
-        .bind(&signature)
-        .execute(&storage.pool)
-        .await?;
-        let rejected = storage
-            .automatic_source(AutomaticTagSources::ManualAndLocal)
-            .await?;
-        assert!(!rejected.tracks[0].tags.contains("dreamy"));
-
-        sqlx::query(
-            "UPDATE track_analysis_tag_reviews SET decision = 'accepted' WHERE track_id = 1",
-        )
-        .execute(&storage.pool)
-        .await?;
-        sqlx::query("UPDATE tracks SET title = 'Changed' WHERE id = 1")
-            .execute(&storage.pool)
-            .await?;
-        let stale = storage
-            .automatic_source(AutomaticTagSources::ManualAndLocal)
-            .await?;
-        assert!(!stale.tracks[0].tags.contains("dreamy"));
         Ok(())
     }
 

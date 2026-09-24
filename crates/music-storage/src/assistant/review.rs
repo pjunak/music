@@ -31,7 +31,7 @@ pub(super) async fn review_in_transaction(
         };
         if !matches!(
             target.analyzer_id.as_str(),
-            LOCAL_METADATA_ANALYZER_ID | CATALOG_TAG_ANALYZER_ID | MODEL_TAG_ANALYZER_ID
+            CATALOG_TAG_ANALYZER_ID | MODEL_TAG_ANALYZER_ID
         ) {
             failures.push(review_failure(
                 target,
@@ -42,7 +42,7 @@ pub(super) async fn review_in_transaction(
         }
         let row = sqlx::query(
             "SELECT analyzer_id, source_signature, moods_json, evidence_json, metrics_json, \
-             energy, brightness, tension, confidence, job_id, \
+             decisions_json, job_id, \
              CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds FROM track_analyses \
              WHERE track_id = ? AND analyzer_id = ?",
         )
@@ -106,15 +106,13 @@ pub(super) async fn review_in_transaction(
                 context.as_ref(),
                 catalog.as_ref(),
             )
-        } else if target.analyzer_id == CATALOG_TAG_ANALYZER_ID {
+        } else {
             music_application::assistant::catalog_tag_source_signature(
                 &track,
                 crate::catalog_evidence::revision(transaction)
                     .await
                     .map_err(box_storage)?,
             )
-        } else {
-            metadata_source_signature(&track)
         }
         .map_err(|_| {
             box_storage(StorageError::InvalidAssistantRecord(

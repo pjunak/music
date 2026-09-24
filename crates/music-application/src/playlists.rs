@@ -114,7 +114,6 @@ pub enum AutomaticMatch {
 pub enum AutomaticTagSources {
     #[default]
     Manual,
-    ManualAndLocal,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]

@@ -13,11 +13,24 @@ export function ModelInputEvidence({ input }: { input: Record<string, unknown> }
   const voice = object(context.voice);
   const structure = object(context.structure);
   const reliability = object(context.measurement_reliability);
+  const catalog = object(input.catalog_evidence);
+  const claims = Array.isArray(catalog.claims) ? catalog.claims.map(object) : [];
+  const claimValue = (value: unknown) => Array.isArray(value)
+    ? value.map((item) => typeof item === "string" ? item : String(object(item).name ?? "unknown")).join(", ")
+    : typeof value === "string" ? value : "unknown";
   const metadata = ["artist", "album", "origin", "genre"].filter((key) => typeof input[key] === "string" && input[key] !== "");
   return <details>
     <summary>Track evidence sent to the model</summary>
     <p>Saved with this result. Track identifiers and the shared vocabulary are omitted here.</p>
     {metadata.length ? <ul>{metadata.map((key) => <li key={key}>{key}: {String(input[key])}</li>)}</ul> : <p>No descriptive metadata was supplied.</p>}
+    {claims.length > 0 ? <section>
+      <strong>Catalog observations</strong>
+      <p>Source claims are separate from listening judgments. Community labels provide weak support.</p>
+      <ul>{claims.map((claim, index) => <li key={index}>
+        {claim.source === "lastfm" ? "Last.fm" : claim.source === "musicbrainz" ? "MusicBrainz" : label(claim.source)} · {label(claim.kind)}: {claimValue(claim.value)}
+        <span> ({label(claim.scope)}{typeof claim.retrieved_at === "number" && Number.isFinite(claim.retrieved_at) ? "; retrieved " + new Date(claim.retrieved_at * 1000).toLocaleDateString() : ""})</span>
+      </li>)}</ul>
+    </section> : null}
     {input.context_evidence ? <>
       <p>Local tempo: {label(tempo.status)}. Development: {label(structure.development)} across {number(structure.section_count)} sections.</p>
       <p>Voice: {label(voice.status)}{voice.status === "classified" ? `; score ${number(voice.voice_score)}, coverage ${number(voice.vocal_coverage)}` : ""}. Voice presence does not identify mood or lyrics.</p>

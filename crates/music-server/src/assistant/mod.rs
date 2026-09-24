@@ -5,17 +5,16 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use music_application::assistant::{
-    AUDIO_ANALYSIS_JOB_KIND, AnalysisReviewDecision, AnalysisReviewTarget, AssistantService,
-    AssistantServiceError, AssistantTrackView, CATALOG_TAG_ANALYZER_ID, CleanupSelection,
-    Confidence, EnergyCurve, LIBRARY_CONTEXT_JOB_KIND, LOCAL_METADATA_ANALYZER_ID,
-    LibraryAnalysisSummary, LibraryContextPassSummary, LibraryContextSummary, LocalAnalysisError,
-    LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS, METADATA_ANALYSIS_JOB_KIND,
-    MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE, MODEL_TAG_CLEANUP_BATCH_SIZE,
-    MODEL_TAG_CLEANUP_ENGINE_ID, MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ManualTagQuery,
-    ModelAnalysisStatus, ModelTagCleanupTask, ModelTagFilter, PlaylistSuggestion,
-    PlaylistSuggestionRequest, TagReviewSummary, TagVocabularyDocument, TagVocabularyEntry,
-    TagVocabularyGroup, TagVocabularySnapshot, TrackContextDetail, VoiceAnalyzerStatus,
-    catalog_signature, model_tag_source_signature,
+    AnalysisReviewDecision, AnalysisReviewTarget, AssistantService, AssistantServiceError,
+    AssistantTrackView, CATALOG_TAG_ANALYZER_ID, CleanupSelection, Confidence, EnergyCurve,
+    LIBRARY_CONTEXT_JOB_KIND, LibraryContextPassSummary, LibraryContextSummary, LocalAnalysisError,
+    LocalAnalysisService, MAX_MODEL_CLEANUP_TAGS, MODEL_TAG_ANALYZER_ID, MODEL_TAG_BATCH_SIZE,
+    MODEL_TAG_CLEANUP_BATCH_SIZE, MODEL_TAG_CLEANUP_ENGINE_ID,
+    MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT, ManualTagQuery, ModelAnalysisStatus,
+    ModelTagCleanupTask, ModelTagFilter, PlaylistSuggestion, PlaylistSuggestionRequest,
+    TagReviewSummary, TagVocabularyDocument, TagVocabularyEntry, TagVocabularyGroup,
+    TagVocabularySnapshot, TrackContextDetail, VoiceAnalyzerStatus, catalog_signature,
+    model_tag_source_signature,
 };
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::jobs::JobStatus;
@@ -265,24 +264,6 @@ struct PlaylistIntentResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-#[schema(as = PlaylistAudioSignal)]
-pub(crate) struct PlaylistAudioSignalResponse {
-    analyzer_id: String,
-    #[schema(schema_with = unit_number_schema)]
-    energy: f64,
-    #[schema(schema_with = unit_number_schema)]
-    brightness: f64,
-    #[schema(schema_with = unit_number_schema)]
-    tension: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(required = false, schema_with = nullable_positive_bpm_number_schema)]
-    tempo_bpm: Option<f64>,
-    #[schema(schema_with = confidence_schema)]
-    confidence: ConfidenceWire,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
 #[schema(as = PlaylistPlan)]
 struct PlaylistPlanResponse {
     #[schema(schema_with = energy_curve_schema)]
@@ -291,8 +272,6 @@ struct PlaylistPlanResponse {
     selected_tracks: usize,
     #[schema(schema_with = nonnegative_number_schema)]
     selected_duration_s: f64,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    audio_profile_tracks: usize,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -309,7 +288,6 @@ struct PlaylistCandidateResponse {
     origin: String,
     genre: String,
     manual_tags: Vec<String>,
-    analysis_tags: Vec<String>,
     #[schema(schema_with = nonnegative_number_schema)]
     length_s: f64,
     #[schema(required = true, schema_with = nullable_integer_schema)]
@@ -325,8 +303,6 @@ struct PlaylistCandidateResponse {
     sequence_position: Option<usize>,
     #[schema(schema_with = unit_number_schema)]
     planning_energy: f64,
-    #[schema(required = true, schema_with = nullable_playlist_audio_signal_schema)]
-    audio_signal: Option<PlaylistAudioSignalResponse>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -663,23 +639,13 @@ struct AnalysisTagSuggestionResponse {
     tag: String,
     analyzer_id: String,
     source_signature: String,
-    #[schema(schema_with = confidence_schema)]
-    confidence: ConfidenceWire,
+    #[schema(schema_with = support_schema)]
+    support: String,
+    evidence_ids: Vec<String>,
+    contradiction_ids: Vec<String>,
     evidence: Vec<String>,
     #[schema(schema_with = review_status_schema)]
     status: ReviewStatusWire,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-#[schema(as = AudioSignalProfileOut)]
-pub(crate) struct AudioSignalProfileResponse {
-    analyzer_id: String,
-    #[schema(schema_with = confidence_schema)]
-    confidence: ConfidenceWire,
-    evidence: Vec<String>,
-    #[schema(schema_with = audio_metrics_schema)]
-    metrics: Map<String, Value>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -694,14 +660,8 @@ struct LibraryTagTrackResponse {
     artist: String,
     album: String,
     manual_tags: Vec<String>,
-    #[schema(required = true, schema_with = nullable_string_schema)]
-    analysis_analyzer: Option<String>,
     analysis_tags: Vec<String>,
-    #[schema(required = true, schema_with = nullable_confidence_schema)]
-    analysis_confidence: Option<ConfidenceWire>,
     analysis_suggestions: Vec<AnalysisTagSuggestionResponse>,
-    #[schema(required = true, schema_with = nullable_audio_profile_schema)]
-    audio_signal: Option<AudioSignalProfileResponse>,
     #[schema(required = false, schema_with = model_analysis_status_schema)]
     model_analysis: ModelAnalysisStatus,
 }
@@ -906,37 +866,6 @@ struct BulkAnalysisTagReviewResponse {
     requested_items: usize,
     applied: Vec<BulkAnalysisTagReviewAppliedResponse>,
     failures: Vec<BulkAnalysisTagReviewFailureResponse>,
-}
-
-#[derive(Debug, Default, Deserialize, ToSchema)]
-#[serde(default, deny_unknown_fields)]
-#[schema(as = LibraryAnalysisStartRequest)]
-struct LibraryAnalysisStartRequest {
-    #[schema(required = false, default = false)]
-    force: bool,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-#[schema(as = LibraryAnalysisSummary)]
-struct LibraryAnalysisSummaryResponse {
-    analyzer: String,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    library_tracks: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    analyzed_tracks: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    failed_tracks: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    stale_tracks: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    high_confidence: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    medium_confidence: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    low_confidence: usize,
-    #[schema(required = true, schema_with = openapi_nullable_datetime)]
-    last_updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
@@ -1350,10 +1279,6 @@ struct TrackContextDetailResponse {
 
 pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
-        .routes(routes!(start_library_analysis))
-        .routes(routes!(library_analysis_summary))
-        .routes(routes!(start_library_audio_analysis))
-        .routes(routes!(library_audio_analysis_summary))
         .routes(routes!(start_library_context_analysis))
         .routes(routes!(library_context_summary))
         .routes(routes!(library_track_context))
@@ -1382,100 +1307,6 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(list_library_tags))
         .routes(routes!(patch_track_tags))
         .routes(routes!(review_analysis_tag))
-}
-
-#[utoipa::path(
-    post,
-    path = "/assistant/library-analysis/jobs",
-    operation_id = "start_library_analysis_api_assistant_library_analysis_jobs_post",
-    request_body = LibraryAnalysisStartRequest,
-    responses(
-        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
-        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
-    ),
-    tag = "assistant"
-)]
-async fn start_library_analysis(
-    State(state): State<HttpState>,
-    headers: HeaderMap,
-    payload: Result<Json<LibraryAnalysisStartRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
-    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    let (job, _created) = state
-        .jobs
-        .as_deref()
-        .ok_or_else(ApiError::service_unavailable)?
-        .enqueue_unique_active(METADATA_ANALYSIS_JOB_KIND, json!({"force": payload.force}))
-        .await
-        .map_err(map_job_error)?;
-    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
-}
-
-#[utoipa::path(
-    get,
-    path = "/assistant/library-analysis/summary",
-    operation_id = "library_analysis_summary_api_assistant_library_analysis_summary_get",
-    responses((status = 200, description = "Successful Response", body = LibraryAnalysisSummaryResponse)),
-    tag = "assistant"
-)]
-async fn library_analysis_summary(
-    State(state): State<HttpState>,
-    headers: HeaderMap,
-) -> Result<Json<LibraryAnalysisSummaryResponse>, ApiError> {
-    authorize(&state, &headers).await?;
-    let summary = analysis_service(&state)?
-        .metadata_summary()
-        .await
-        .map_err(map_local_analysis_error)?;
-    Ok(Json(library_analysis_summary_response(summary)?))
-}
-
-#[utoipa::path(
-    post,
-    path = "/assistant/library-audio-analysis/jobs",
-    operation_id = "start_library_audio_analysis_api_assistant_library_audio_analysis_jobs_post",
-    request_body = LibraryAnalysisStartRequest,
-    responses(
-        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
-        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
-    ),
-    tag = "assistant"
-)]
-async fn start_library_audio_analysis(
-    State(state): State<HttpState>,
-    headers: HeaderMap,
-    payload: Result<Json<LibraryAnalysisStartRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
-    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    let (job, _created) = state
-        .jobs
-        .as_deref()
-        .ok_or_else(ApiError::service_unavailable)?
-        .enqueue_unique_active(AUDIO_ANALYSIS_JOB_KIND, json!({"force": payload.force}))
-        .await
-        .map_err(map_job_error)?;
-    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
-}
-
-#[utoipa::path(
-    get,
-    path = "/assistant/library-audio-analysis/summary",
-    operation_id = "library_audio_analysis_summary_api_assistant_library_audio_analysis_summary_get",
-    responses((status = 200, description = "Successful Response", body = LibraryAnalysisSummaryResponse)),
-    tag = "assistant"
-)]
-async fn library_audio_analysis_summary(
-    State(state): State<HttpState>,
-    headers: HeaderMap,
-) -> Result<Json<LibraryAnalysisSummaryResponse>, ApiError> {
-    authorize(&state, &headers).await?;
-    let summary = analysis_service(&state)?
-        .audio_summary()
-        .await
-        .map_err(map_local_analysis_error)?;
-    Ok(Json(library_analysis_summary_response(summary)?))
 }
 
 #[utoipa::path(
@@ -1634,7 +1465,7 @@ async fn start_model_playlist_suggestion(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-playlist-model-disclosure/v3" || !payload.consent {
+    if payload.disclosure_version != "assistant-playlist-model-disclosure/v4" || !payload.consent {
         return Err(ApiError::validation());
     }
     let request_value =
@@ -1839,12 +1670,12 @@ async fn enqueue_model_feature(
 
 fn playlist_disclosure() -> ModelPlaylistDisclosureResponse {
     ModelPlaylistDisclosureResponse {
-        version: "assistant-playlist-model-disclosure/v3",
+        version: "assistant-playlist-model-disclosure/v4",
         shared_with_provider: vec![
             "Your mood prompt, duration, tempo filters, and requested energy flow",
             "Up to 100 locally prefiltered candidate IDs and descriptive metadata",
             "Candidate titles, artists, albums, origins, genres, durations, and BPM values",
-            "Your database mood tags, generated analysis tags, and numeric audio-signal summaries",
+            "Your database mood tags and local search ranking hints (not audio measurements)",
             "Vocabulary names and definitions linking matched prompt aliases or context cues to candidate database mood tags",
             "The deterministic local ranking, default selection, sequence, and duration plan",
         ],
@@ -1950,7 +1781,7 @@ async fn start_model_tagging(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v14"
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v15"
         || !payload.consent
     {
         return Err(ApiError::validation());
@@ -2207,7 +2038,7 @@ async fn model_tagging_availability(
 
 fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
     ModelTaggingDisclosureResponse {
-        version: "assistant-model-music-tagging-disclosure/v14",
+        version: "assistant-model-music-tagging-disclosure/v15",
         shared_with_provider: vec![
             "Indexed artist, album, origin, and genre metadata",
             "Track durations and BPM values when available",
@@ -2880,7 +2711,6 @@ async fn list_library_tags(
                 .as_deref()
                 .map(|value| match value {
                     "model" => Ok(vec![MODEL_TAG_ANALYZER_ID.to_owned()]),
-                    "metadata" => Ok(vec![LOCAL_METADATA_ANALYZER_ID.to_owned()]),
                     "catalog" => Ok(vec![CATALOG_TAG_ANALYZER_ID.to_owned()]),
                     _ => Err(ApiError::validation()),
                 })
@@ -3053,7 +2883,6 @@ fn playlist_response(value: PlaylistSuggestion) -> PlaylistSuggestionResponse {
             energy_curve: value.plan.energy_curve.into(),
             selected_tracks: value.plan.selected_tracks,
             selected_duration_s: value.plan.selected_duration_s,
-            audio_profile_tracks: value.plan.audio_profile_tracks,
         },
         candidates: value
             .candidates
@@ -3068,7 +2897,6 @@ fn playlist_response(value: PlaylistSuggestion) -> PlaylistSuggestionResponse {
                 origin: item.origin,
                 genre: item.genre,
                 manual_tags: item.manual_tags,
-                analysis_tags: item.analysis_tags,
                 length_s: item.length_s,
                 bpm: item.bpm,
                 match_score: item.match_score,
@@ -3077,14 +2905,6 @@ fn playlist_response(value: PlaylistSuggestion) -> PlaylistSuggestionResponse {
                 default_selected: item.default_selected,
                 sequence_position: item.sequence_position,
                 planning_energy: item.planning_energy,
-                audio_signal: item.audio_signal.map(|signal| PlaylistAudioSignalResponse {
-                    analyzer_id: signal.analyzer_id,
-                    energy: signal.energy,
-                    brightness: signal.brightness,
-                    tension: signal.tension,
-                    tempo_bpm: signal.tempo_bpm,
-                    confidence: signal.confidence.into(),
-                }),
             })
             .collect(),
     }
@@ -3180,9 +3000,7 @@ fn track_response(value: AssistantTrackView) -> LibraryTagTrackResponse {
         album: value.track.metadata.album,
         manual_tags: value.manual_tags,
         model_analysis: value.model_analysis,
-        analysis_analyzer: value.analysis_analyzer,
         analysis_tags: value.analysis_tags,
-        analysis_confidence: value.analysis_confidence.map(Into::into),
         analysis_suggestions: value
             .analysis_suggestions
             .into_iter()
@@ -3190,17 +3008,13 @@ fn track_response(value: AssistantTrackView) -> LibraryTagTrackResponse {
                 tag: item.tag,
                 analyzer_id: item.analyzer_id,
                 source_signature: item.source_signature,
-                confidence: item.confidence.into(),
+                support: item.support.as_str().to_owned(),
+                evidence_ids: item.evidence_ids,
+                contradiction_ids: item.contradiction_ids,
                 evidence: item.evidence,
                 status: item.status.into(),
             })
             .collect(),
-        audio_signal: value.audio_signal.map(|signal| AudioSignalProfileResponse {
-            analyzer_id: signal.analyzer_id,
-            confidence: signal.confidence.into(),
-            evidence: signal.evidence,
-            metrics: signal.metrics,
-        }),
     }
 }
 
@@ -3234,26 +3048,6 @@ fn analysis_service(state: &HttpState) -> Result<&LocalAnalysisService, ApiError
         .local_analysis
         .as_deref()
         .ok_or_else(ApiError::service_unavailable)
-}
-
-fn library_analysis_summary_response(
-    summary: LibraryAnalysisSummary,
-) -> Result<LibraryAnalysisSummaryResponse, ApiError> {
-    Ok(LibraryAnalysisSummaryResponse {
-        analyzer: summary.analyzer,
-        library_tracks: summary.library_tracks,
-        analyzed_tracks: summary.analyzed_tracks,
-        failed_tracks: summary.failed_tracks,
-        stale_tracks: summary.stale_tracks,
-        high_confidence: summary.high_confidence,
-        medium_confidence: summary.medium_confidence,
-        low_confidence: summary.low_confidence,
-        last_updated_at: summary
-            .last_updated_at_unix_seconds
-            .map(UnixSeconds::new)
-            .map(format_rfc3339)
-            .transpose()?,
-    })
 }
 
 fn library_context_summary_response(
@@ -3435,21 +3229,6 @@ fn nullable_bpm_schema() -> RefOr<Schema> {
     .into()
 }
 
-fn nullable_positive_bpm_number_schema() -> RefOr<Schema> {
-    Schema::AnyOf(
-        AnyOfBuilder::new()
-            .item(
-                ObjectBuilder::new()
-                    .schema_type(Type::Number)
-                    .exclusive_minimum(Some(0))
-                    .maximum(Some(999)),
-            )
-            .item(ObjectBuilder::new().schema_type(Type::Null))
-            .build(),
-    )
-    .into()
-}
-
 fn excluded_track_ids_schema() -> RefOr<Schema> {
     ArrayBuilder::new()
         .items(openapi_integer())
@@ -3558,7 +3337,6 @@ fn model_analysis_status_schema() -> RefOr<Schema> {
             "evidence",
             ArrayBuilder::new().items(ObjectBuilder::new().schema_type(Type::String)),
         )
-        .property("confidence", nullable_confidence_schema())
         .property("context_status", nullable_string_schema())
         .property(
             "input_snapshot",
@@ -3582,21 +3360,18 @@ fn model_analysis_status_schema() -> RefOr<Schema> {
         .into()
 }
 
+fn support_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["supported", "tentative"]))
+        .into()
+}
+
 fn confidence_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
         .enum_values(Some(["high", "medium", "low"]))
         .into()
-}
-
-fn nullable_confidence_schema() -> RefOr<Schema> {
-    Schema::AnyOf(
-        AnyOfBuilder::new()
-            .item(confidence_schema())
-            .item(ObjectBuilder::new().schema_type(Type::Null))
-            .build(),
-    )
-    .into()
 }
 
 fn review_status_schema() -> RefOr<Schema> {
@@ -3688,7 +3463,7 @@ fn cleanup_apply_version_schema() -> RefOr<Schema> {
     const_string_schema(TAG_CLEANUP_APPLY_SCHEMA)
 }
 fn playlist_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-playlist-model-disclosure/v3")
+    const_string_schema("assistant-playlist-model-disclosure/v4")
 }
 fn playlist_role_id_schema() -> RefOr<Schema> {
     const_string_schema("playlist_planner")
@@ -3727,7 +3502,7 @@ fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
         .into()
 }
 fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-model-music-tagging-disclosure/v14")
+    const_string_schema("assistant-model-music-tagging-disclosure/v15")
 }
 fn model_tagging_role_schema() -> RefOr<Schema> {
     const_string_schema("music_tagger")
@@ -3785,47 +3560,6 @@ fn valid_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn nullable_playlist_audio_signal_schema() -> RefOr<Schema> {
-    Schema::AnyOf(
-        AnyOfBuilder::new()
-            .item(RefOr::Ref(utoipa::openapi::Ref::from_schema_name(
-                "PlaylistAudioSignal",
-            )))
-            .item(ObjectBuilder::new().schema_type(Type::Null))
-            .build(),
-    )
-    .into()
-}
-
-fn nullable_audio_profile_schema() -> RefOr<Schema> {
-    Schema::AnyOf(
-        AnyOfBuilder::new()
-            .item(RefOr::Ref(utoipa::openapi::Ref::from_schema_name(
-                "AudioSignalProfileOut",
-            )))
-            .item(ObjectBuilder::new().schema_type(Type::Null))
-            .build(),
-    )
-    .into()
-}
-
-fn audio_metrics_schema() -> RefOr<Schema> {
-    ObjectBuilder::new()
-        .schema_type(Type::Object)
-        .additional_properties(Some(AdditionalProperties::RefOr(
-            Schema::AnyOf(
-                AnyOfBuilder::new()
-                    .item(string_schema())
-                    .item(openapi_integer())
-                    .item(openapi_number())
-                    .item(ObjectBuilder::new().schema_type(Type::Null))
-                    .build(),
-            )
-            .into(),
-        )))
-        .into()
 }
 
 fn context_scope_kind_schema() -> RefOr<Schema> {

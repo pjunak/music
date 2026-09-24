@@ -516,7 +516,7 @@ export function PlaylistBuilderView({
             </p>
           </div>
           <span className="assistant-algorithm">
-            {suggestion?.engine ?? "local-planner/v2"}
+            {suggestion?.engine ?? "local-planner/v3"}
           </span>
         </header>
       ) : null}

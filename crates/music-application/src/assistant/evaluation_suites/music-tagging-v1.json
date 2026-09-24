@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-music-tagger-evaluation/v8",
-  "id": "controlled-vocabulary-tagging-baseline-v25",
+  "schema_version": "assistant-music-tagger-evaluation/v9",
+  "id": "controlled-vocabulary-tagging-baseline-v26",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -17,7 +17,7 @@
       },
       "required_tags": ["medieval", "tavern", "dancing", "festive"],
       "forbidden_tags": ["combat", "dark"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -34,7 +34,7 @@
       },
       "required_tags": ["dungeon", "dark", "eerie"],
       "forbidden_tags": ["festive", "dancing"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -51,7 +51,7 @@
       },
       "required_tags": ["castle", "heroic"],
       "forbidden_tags": ["stealth", "eerie"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -68,7 +68,7 @@
       },
       "required_tags": ["travel", "wilderness", "calm"],
       "forbidden_tags": ["combat", "tense"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -87,7 +87,7 @@
       "required_tags": [],
       "forbidden_tags": ["medieval", "tavern", "combat", "heroic", "eerie"],
       "maximum_tags": 0,
-      "allowed_confidences": ["low"],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -105,7 +105,7 @@
       },
       "required_tags": ["tavern", "rest", "calm"],
       "forbidden_tags": ["combat", "tense", "dark"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -122,7 +122,7 @@
       },
       "required_tags": ["seafaring", "combat", "tense"],
       "forbidden_tags": ["calm", "romantic", "rest"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -140,7 +140,7 @@
         "context_evidence": {
           "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
+          "measurement_reliability": {"loudness":"medium","relative_level":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.8, "low": 0.65, "high": 0.92, "range": 0.27, "variability": 0.18, "slope": 0.0, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "high_fraction": 0.75, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.78, "low": 0.62, "high": 0.9, "range": 0.28, "variability": 0.2, "slope": 0.0, "start": 0.76, "end": 0.8, "peak_at_fraction": 0.7, "high_fraction": 0.7, "shape": "steady"},
@@ -158,7 +158,7 @@
       "required_tags": [],
       "forbidden_tags": ["medieval", "tavern", "combat", "castle", "dungeon", "temple"],
       "forbidden_groups": ["setting", "period", "scene"],
-      "allowed_confidences": ["medium", "low"],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -175,7 +175,7 @@
       },
       "required_tags": ["ancient", "temple", "mysterious"],
       "forbidden_tags": ["medieval", "modern", "futuristic", "tavern", "festive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -192,7 +192,7 @@
       },
       "required_tags": ["village", "feast", "festive"],
       "forbidden_tags": ["combat", "dungeon", "dark"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -209,7 +209,7 @@
       },
       "required_tags": ["ruins", "exploration", "melancholy"],
       "forbidden_tags": ["romantic", "festive", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -226,7 +226,7 @@
       },
       "required_tags": ["desert", "travel"],
       "forbidden_tags": ["ocean", "underwater", "dungeon", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -243,7 +243,7 @@
       },
       "required_tags": ["forest", "hunting", "tense"],
       "forbidden_tags": ["city", "festival", "festive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -260,7 +260,7 @@
       },
       "required_tags": ["mountains", "travel", "adventurous"],
       "forbidden_tags": ["underwater", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -277,7 +277,7 @@
       },
       "required_tags": ["swamp", "survival", "desperate", "dark"],
       "forbidden_tags": ["festive", "romantic"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -294,7 +294,7 @@
       },
       "required_tags": ["arctic", "escape", "urgent", "cold"],
       "forbidden_tags": ["warm", "tavern"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -311,7 +311,7 @@
       },
       "required_tags": ["underwater", "discovery", "wondrous"],
       "forbidden_tags": ["desert", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -328,7 +328,7 @@
       },
       "required_tags": ["sky", "flying", "wondrous"],
       "forbidden_tags": ["dungeon", "seafaring"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -345,7 +345,7 @@
       },
       "required_tags": ["fey realm", "whimsical", "magical"],
       "forbidden_tags": ["dark", "infernal realm"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -362,7 +362,7 @@
       },
       "required_tags": ["infernal realm", "ritual", "dark", "ominous"],
       "forbidden_tags": ["sacred", "joyful"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -379,7 +379,7 @@
       },
       "required_tags": ["city", "intrigue", "mysterious"],
       "forbidden_tags": ["wilderness", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -396,7 +396,7 @@
       },
       "required_tags": ["market", "shopping", "joyful"],
       "forbidden_tags": ["dungeon", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -413,7 +413,7 @@
       },
       "required_tags": ["graveyard", "mourning", "melancholy", "solemn"],
       "forbidden_tags": ["festive", "playful"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -430,7 +430,7 @@
       },
       "required_tags": ["dancing", "courtship", "romantic", "dreamy"],
       "forbidden_tags": ["combat", "ominous"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -447,7 +447,7 @@
       },
       "required_tags": ["reunion", "hopeful"],
       "forbidden_tags": ["ominous", "fearful"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -464,7 +464,7 @@
       },
       "required_tags": ["farewell", "bittersweet", "melancholy"],
       "forbidden_tags": ["festive", "joyful"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -481,7 +481,7 @@
       },
       "required_tags": ["puzzle", "curious", "mysterious"],
       "forbidden_tags": ["combat", "aggressive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -498,7 +498,7 @@
       },
       "required_tags": ["training", "determined", "preparation"],
       "forbidden_tags": ["fearful", "desperate"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -515,7 +515,7 @@
       },
       "required_tags": ["defiant", "tense"],
       "forbidden_tags": ["calm", "festive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -532,7 +532,7 @@
       },
       "required_tags": ["rescue", "chase", "urgent", "heroic"],
       "forbidden_tags": ["rest", "calm"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -549,7 +549,7 @@
       },
       "required_tags": ["village", "festival", "humorous", "playful"],
       "forbidden_tags": ["dark", "solemn"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -566,7 +566,7 @@
       },
       "required_tags": ["court", "ceremony", "majestic", "solemn"],
       "forbidden_tags": ["playful", "combat"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -583,7 +583,7 @@
       },
       "required_tags": ["library", "discovery", "magical", "mysterious"],
       "forbidden_tags": ["combat", "aggressive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -600,7 +600,7 @@
       },
       "required_tags": ["chase", "urgent", "chaotic", "tense"],
       "forbidden_tags": ["calm", "rest"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -618,7 +618,7 @@
       },
       "required_tags": ["festival", "festive", "playful"],
       "forbidden_tags": ["combat", "battlefield", "dark"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -636,7 +636,7 @@
       },
       "required_tags": ["calm"],
       "forbidden_tags": ["castle", "combat", "majestic"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -654,7 +654,7 @@
       },
       "required_tags": ["romantic"],
       "forbidden_tags": ["ocean", "seafaring", "sailing"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -672,7 +672,7 @@
       },
       "required_tags": ["city", "chase", "escape", "urgent"],
       "forbidden_tags": ["temple", "sacred", "worship"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -689,7 +689,7 @@
       },
       "required_tags": ["camp", "rest", "storytelling", "warm", "calm"],
       "forbidden_tags": ["combat", "urgent"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -706,7 +706,7 @@
       },
       "required_tags": ["tundra", "survival", "cold", "lonely"],
       "forbidden_tags": ["warm", "festive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -723,7 +723,7 @@
         "context_evidence": {
           "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
+          "measurement_reliability": {"loudness":"medium","relative_level":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.62, "low": 0.16, "high": 0.93, "range": 0.77, "variability": 0.55, "slope": 0.8, "start": 0.14, "end": 0.91, "peak_at_fraction": 0.94, "high_fraction": 0.32, "shape": "stepped_build"},
             "rhythmic_drive": {"typical": 0.7, "low": 0.08, "high": 0.94, "range": 0.86, "variability": 0.6, "slope": 0.88, "start": 0.06, "end": 0.93, "peak_at_fraction": 0.9, "high_fraction": 0.4, "shape": "gradual_rise"},
@@ -744,7 +744,7 @@
       },
       "required_tags": ["escape", "chase", "urgent"],
       "forbidden_tags": ["rest", "calm"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -761,7 +761,7 @@
         "context_evidence": {
           "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
+          "measurement_reliability": {"loudness":"medium","relative_level":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.84, "low": 0.75, "high": 0.94, "range": 0.19, "variability": 0.12, "slope": 0.0, "start": 0.82, "end": 0.86, "peak_at_fraction": 0.72, "high_fraction": 0.86, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.72, "low": 0.62, "high": 0.82, "range": 0.2, "variability": 0.14, "slope": 0.0, "start": 0.7, "end": 0.74, "peak_at_fraction": 0.65, "high_fraction": 0.64, "shape": "steady"},
@@ -778,7 +778,7 @@
       },
       "required_tags": ["combat", "tense"],
       "forbidden_tags": ["rest", "calm"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -795,7 +795,7 @@
         "context_evidence": {
           "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
+          "measurement_reliability": {"loudness":"medium","relative_level":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.48, "low": 0.38, "high": 0.61, "range": 0.23, "variability": 0.15, "slope": 0.0, "start": 0.46, "end": 0.5, "peak_at_fraction": 0.62, "high_fraction": 0.08, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.86, "low": 0.74, "high": 0.94, "range": 0.2, "variability": 0.12, "slope": 0.0, "start": 0.84, "end": 0.87, "peak_at_fraction": 0.5, "high_fraction": 0.85, "shape": "steady"},
@@ -812,7 +812,7 @@
       },
       "required_tags": ["dancing", "festive", "playful"],
       "forbidden_tags": ["combat", "aggressive"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -829,7 +829,7 @@
       },
       "required_tags": ["modern", "temple", "worship", "sacred"],
       "forbidden_tags": ["ancient", "medieval", "futuristic", "cross era"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -846,7 +846,7 @@
       },
       "required_tags": ["early modern", "court", "dancing", "festive"],
       "forbidden_tags": ["ancient", "medieval", "industrial", "modern", "futuristic"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -863,7 +863,7 @@
       },
       "required_tags": ["industrial", "workshop", "tense"],
       "forbidden_tags": ["ancient", "medieval", "modern", "futuristic", "calm"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -880,7 +880,7 @@
       },
       "required_tags": ["futuristic", "ceremony", "solemn"],
       "forbidden_tags": ["ancient", "medieval", "industrial", "modern"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -897,7 +897,7 @@
       },
       "required_tags": ["timeless", "calm", "dreamy"],
       "forbidden_tags": ["ancient", "medieval", "early modern", "industrial", "modern", "futuristic", "cross era"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -914,7 +914,7 @@
       },
       "required_tags": ["cross era", "castle"],
       "forbidden_tags": ["ancient", "medieval", "early modern", "industrial", "modern", "futuristic", "timeless"],
-      "allowed_confidences": ["high", "medium"],
+      "allowed_support": ["supported","tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -932,7 +932,7 @@
         "context_evidence": {
           "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
+          "measurement_reliability": {"loudness":"medium","relative_level":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.52, "low": 0.4, "high": 0.64, "range": 0.24, "variability": 0.12, "slope": 0.0, "start": 0.51, "end": 0.52, "peak_at_fraction": 0.48, "high_fraction": 0.2, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.44, "low": 0.31, "high": 0.56, "range": 0.25, "variability": 0.13, "slope": 0.0, "start": 0.43, "end": 0.44, "peak_at_fraction": 0.58, "high_fraction": 0.12, "shape": "steady"},
@@ -950,7 +950,7 @@
       "required_tags": [],
       "forbidden_tags": [],
       "forbidden_groups": ["setting", "period", "scene"],
-      "allowed_confidences": ["medium", "low"],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -1036,9 +1036,7 @@
       },
       "required_tags": [],
       "maximum_tags": 0,
-      "allowed_confidences": [
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "gate": "safety"
     },
     {
@@ -1056,9 +1054,7 @@
       },
       "required_tags": [],
       "maximum_tags": 0,
-      "allowed_confidences": [
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "gate": "safety"
     },
     {
@@ -1122,10 +1118,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "medium",
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -1170,10 +1163,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "medium",
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -1217,10 +1207,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "medium",
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -1266,10 +1253,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "medium",
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1
     },
     {
@@ -1312,10 +1296,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "medium",
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1,
       "gate": "safety"
     },
@@ -1359,10 +1340,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "medium",
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1,
       "gate": "safety"
     },
@@ -1395,9 +1373,7 @@
         "period",
         "scene"
       ],
-      "allowed_confidences": [
-        "low"
-      ],
+      "allowed_support": ["tentative"],
       "minimum_evidence_items": 1,
       "gate": "safety",
       "maximum_tags": 0

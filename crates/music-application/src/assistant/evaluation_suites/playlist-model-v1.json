@@ -1,6 +1,6 @@
 {
   "schema_version": "playlist-evaluation/v1",
-  "id": "model-dnd-playlist-quality-v6",
+  "id": "model-dnd-playlist-quality-v7",
   "description": "The local safety baseline plus semantic-uplift and production-shape checks for a configured playlist model.",
   "include_cases_from": "playlist-local-v1.json",
   "cases": [
@@ -128,8 +128,7 @@
           "artist": "Silver Heralds",
           "genre": "ceremonial orchestral",
           "length_s": 300,
-          "manual_tags": ["heroic", "castle", "ceremony"],
-          "analysis": {"energy": 0.2, "brightness": 0.5, "tension": 0.2, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+          "manual_tags": ["heroic", "castle", "ceremony"]
         },
         {
           "id": 1202,
@@ -138,8 +137,7 @@
           "artist": "Chapel Voices",
           "genre": "ceremonial choral",
           "length_s": 300,
-          "manual_tags": ["heroic", "castle", "ceremony"],
-          "analysis": {"energy": 0.4, "brightness": 0.55, "tension": 0.3, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+          "manual_tags": ["heroic", "castle", "ceremony"]
         },
         {
           "id": 1203,
@@ -148,8 +146,7 @@
           "artist": "Royal Brass",
           "genre": "ceremonial orchestral",
           "length_s": 300,
-          "manual_tags": ["heroic", "castle", "ceremony"],
-          "analysis": {"energy": 0.7, "brightness": 0.65, "tension": 0.5, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+          "manual_tags": ["heroic", "castle", "ceremony"]
         },
         {
           "id": 1204,
@@ -158,8 +155,7 @@
           "artist": "Last Cantor",
           "genre": "ceremonial ambient",
           "length_s": 300,
-          "manual_tags": ["heroic", "castle", "ceremony"],
-          "analysis": {"energy": 0.9, "brightness": 0.7, "tension": 0.6, "moods": ["heroic"], "evidence": ["Synthetic fixture"], "confidence": "high"}
+          "manual_tags": ["heroic", "castle", "ceremony"]
         }
       ],
       "generated_tracks": {

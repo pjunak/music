@@ -64,42 +64,26 @@ const track: LibraryTagTrack = {
   artist: "Minstrel",
   album: "Campaign Music",
   manual_tags: ["medieval"],
-  analysis_analyzer: "local-metadata/v1",
   analysis_tags: ["tavern", "festive"],
-  analysis_confidence: "medium",
   analysis_suggestions: [
     {
       tag: "tavern",
-      analyzer_id: "local-metadata/v1",
+      analyzer_id: "catalog-tags/v1",
       source_signature: "a".repeat(64),
-      confidence: "medium",
-      evidence: ["Mood metadata: tavern, festive"],
+      support: "tentative", evidence_ids: ["metadata.genre"], contradiction_ids: [],
+      evidence: ["Community label: tavern, festive"],
       status: "pending",
     },
     {
       tag: "festive",
-      analyzer_id: "local-metadata/v1",
+      analyzer_id: "catalog-tags/v1",
       source_signature: "a".repeat(64),
-      confidence: "medium",
-      evidence: ["Mood metadata: tavern, festive"],
+      support: "tentative", evidence_ids: ["metadata.genre"], contradiction_ids: [],
+      evidence: ["Community label: tavern, festive"],
       status: "rejected",
     },
   ],
-  audio_signal: {
-    analyzer_id: "local-audio/v1",
-    confidence: "medium",
-    evidence: [
-      "Signal level: -18.0 dBFS RMS, -2.0 dBFS peak",
-      "Signal proxies do not identify instruments, genre, setting, period, scene, or mood.",
-    ],
-    metrics: {
-      schema: "local-audio/v1",
-      rms_dbfs: -18,
-      level_spread_db: 7.5,
-      high_frequency_ratio: 0.21,
-      tempo_bpm: 120,
-    },
-  },
+
 };
 
 const page: LibraryTagPage = {
@@ -158,23 +142,22 @@ describe("LibraryTagEditor", () => {
     const expected = status === "missing" ? "No saved AI result" : `AI processed · ${status === "current" ? "current" : "outdated"}`;
     expect(screen.getByText(expected, { selector: ".assistant-track-model-status" })).toBeInTheDocument();
     expect(screen.getByText(expected, { selector: ".assistant-model-review-status > strong" })).toBeInTheDocument();
-    if (status === "current") expect(screen.getByText(/exact input was not retained/)).toBeInTheDocument();
+    expect(screen.queryByText(/older result/)).not.toBeInTheDocument();
     if (status === "stale") expect(screen.getByText(/old suggestions cannot be accepted/)).toBeInTheDocument();
   });
 
-  it("explains the legacy keyword guesses without claiming mood metadata was detected", async () => {
+  it("shows tentative catalog support separately from accepted tags", async () => {
     render(<LibraryTagEditor />);
-    const group = await screen.findByRole("region", { name: "Metadata keyword guesses" });
-    expect(within(group).getByText(/not embedded mood tags or AI detection/)).toBeInTheDocument();
-    expect(within(group).queryByText(/^Mood metadata:/)).not.toBeInTheDocument();
-    expect(within(group).getAllByText("Keyword match: tavern, festive")).toHaveLength(2);
+    const group = await screen.findByRole("region", { name: "Catalog suggestions" });
+    expect(within(group).getAllByText(/Tentative support/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Metadata keyword guesses")).not.toBeInTheDocument();
   });
 
   it("exposes an empty result's reason and saved context without inventing tags", async () => {
     vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({ ...page, items: [{ ...track,
       analysis_suggestions: [], model_analysis: { status: "current", job_id: "run-empty", updated_at_unix_seconds: 1788700000,
-        suggested_tag_count: 0, evidence: ["Audio context cannot establish an emotional character."], confidence: "low", context_status: "full",
-        input_snapshot: { genre: "", context_evidence: { completeness: "full" } },
+        suggested_tag_count: 0, evidence: ["Audio context cannot establish an emotional character."], context_status: "full",
+        input_snapshot: { genre: "", context_evidence: { completeness: "full" }, catalog_evidence: { claims: [{ id: "catalog.lastfm.community_tags", source: "lastfm", scope: "recording", kind: "weak_community_labels", value: [{ name: "ambient", count: 20 }] }] } },
       },
     }] });
     const user = userEvent.setup();
@@ -182,13 +165,15 @@ describe("LibraryTagEditor", () => {
     expect(await screen.findByText("No supported tags returned")).toBeInTheDocument();
     expect(screen.getByText("Audio context cannot establish an emotional character.")).toBeInTheDocument();
     expect(screen.getByText(/Context used: complete local analysis/)).toBeInTheDocument();
+    await user.click(screen.getByText("Track evidence sent to the model"));
+    expect(screen.getByText(/Last.fm · weak community labels: ambient/)).toBeInTheDocument();
     await user.selectOptions(screen.getByRole("combobox", { name: "Filter AI processing" }), "without_suggestions");
     await waitFor(() => expect(assistantApi.listLibraryTags).toHaveBeenLastCalledWith(expect.objectContaining({ model_status: "without_suggestions" })));
     expect(assistantApi.reviewAnalysisTag).not.toHaveBeenCalled();
   });
 
   const summary = { matching_tracks: 100, sources: [
-    { analyzer_id: "local-metadata/v1", pending: 10, accepted: 4, rejected: 2 },
+    { analyzer_id: "catalog-tags/v1", pending: 10, accepted: 4, rejected: 2 },
   ] };
 
   it.each(["accept", "reopen", "bulk"] as const)("refreshes the full summary after %s", async (action) => {
@@ -200,7 +185,7 @@ describe("LibraryTagEditor", () => {
     } satisfies LibraryTagTrack;
     vi.mocked(assistantApi.listLibraryTags).mockResolvedValueOnce({ ...page, review_summary: summary }).mockResolvedValue({
       ...page, items: [updated], review_summary: { ...summary, sources: [
-        { analyzer_id: "local-metadata/v1", pending: reopening ? 11 : 9, accepted: reopening ? 4 : 5, rejected: reopening ? 1 : 2 },
+        { analyzer_id: "catalog-tags/v1", pending: reopening ? 11 : 9, accepted: reopening ? 4 : 5, rejected: reopening ? 1 : 2 },
       ] },
     });
     vi.mocked(assistantApi.reviewAnalysisTag).mockResolvedValue({ ...suggestion, track_id: 7, decision, manual_tags: updated.manual_tags });
@@ -237,8 +222,8 @@ describe("LibraryTagEditor", () => {
     expect(screen.queryByText(/Review summary/)).not.toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
     expect(screen.getByText("Generated suggestions")).toBeInTheDocument();
-    expect(screen.getByText("Audio signal evidence")).toBeInTheDocument();
-    expect(screen.getByText("120.0 BPM")).toBeInTheDocument();
+    expect(screen.queryByText("Audio signal evidence")).not.toBeInTheDocument();
+    expect(screen.queryByText("120.0 BPM")).not.toBeInTheDocument();
     expect(screen.getByText("festive")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Accept tavern into mood library" }),
@@ -259,7 +244,7 @@ describe("LibraryTagEditor", () => {
             {
               ...track.analysis_suggestions[0],
               tag: "dancing",
-              analyzer_id: "model-context-tagger/v7",
+              analyzer_id: "model-context-tagger/v8",
               evidence: ["Title and genre support a dancing scene."],
             },
           ],
@@ -359,7 +344,7 @@ describe("LibraryTagEditor", () => {
     vi.mocked(assistantApi.reviewAnalysisTag).mockResolvedValue({
       track_id: 7,
       tag: "tavern",
-      analyzer_id: "local-metadata/v1",
+      analyzer_id: "catalog-tags/v1",
       source_signature: "a".repeat(64),
       decision: "accepted",
       manual_tags: ["medieval", "tavern"],
@@ -393,7 +378,7 @@ describe("LibraryTagEditor", () => {
     vi.mocked(assistantApi.reviewAnalysisTag).mockResolvedValue({
       track_id: 7,
       tag: "festive",
-      analyzer_id: "local-metadata/v1",
+      analyzer_id: "catalog-tags/v1",
       source_signature: "a".repeat(64),
       decision: "pending",
       manual_tags: ["medieval"],
@@ -464,7 +449,7 @@ describe("LibraryTagEditor", () => {
         {
           track_id: 7,
           tag: "tavern",
-          analyzer_id: "local-metadata/v1",
+          analyzer_id: "catalog-tags/v1",
           source_signature: "a".repeat(64),
           decision: "accepted",
         },
@@ -500,7 +485,7 @@ describe("LibraryTagEditor", () => {
           {
             track_id: 7,
             tag: "tavern",
-            analyzer_id: "local-metadata/v1",
+            analyzer_id: "catalog-tags/v1",
             source_signature: "a".repeat(64),
           },
         ],
@@ -531,7 +516,7 @@ describe("LibraryTagEditor", () => {
         {
           track_id: 7,
           tag: "tavern",
-          analyzer_id: "local-metadata/v1",
+          analyzer_id: "catalog-tags/v1",
           source_signature: "a".repeat(64),
           decision: "rejected",
         },
@@ -540,7 +525,7 @@ describe("LibraryTagEditor", () => {
         {
           track_id: 7,
           tag: "festive",
-          analyzer_id: "local-metadata/v1",
+          analyzer_id: "catalog-tags/v1",
           source_signature: "a".repeat(64),
           code: "stale",
           error: "Analysis changed",

@@ -23,7 +23,6 @@ import { toast } from "@/core/toast";
 
 import { AnalysisTagReview } from "./AnalysisTagReview";
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
-import { AudioSignalEvidence } from "./AudioSignalEvidence";
 import { TagReviewSummary } from "./TagReviewSummary";
 import { modelStatusLabel, suggestionSource } from "./tagProvenance";
 
@@ -619,7 +618,6 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                   }}>
                   <option value="">All sources</option>
                   <option value="model">AI suggestions</option>
-                  <option value="metadata">Metadata keyword guesses</option>
                   <option value="catalog">Catalog suggestions</option>
                 </select>
               </label>
@@ -976,10 +974,6 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                   }
                 />
 
-                <details className="assistant-tag-audio-details">
-                  <summary>Legacy signal measurements (not the saved AI input)</summary>
-                  <AudioSignalEvidence profile={selected.audio_signal} />
-                </details>
               </div>
             )}
           </div>

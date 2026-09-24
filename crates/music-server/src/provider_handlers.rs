@@ -1084,11 +1084,11 @@ mod tests {
             Some(&json!(20))
         );
         assert_eq!(
-            schema.pointer("/properties/tracks/items/properties/tag_ids/maxItems"),
+            schema.pointer("/properties/tracks/items/properties/decisions/maxItems"),
             Some(&json!(8))
         );
         assert_eq!(
-            schema.pointer("/properties/tracks/items/properties/evidence/items/minLength"),
+            schema.pointer("/properties/tracks/items/properties/decisions/items/properties/evidence/items/minLength"),
             Some(&json!(1))
         );
         Ok(())

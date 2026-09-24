@@ -261,15 +261,19 @@
           "analyzer_id": {
             "type": "string"
           },
-          "confidence": {
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ],
-            "type": "string"
+          "contradiction_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "evidence_ids": {
             "items": {
               "type": "string"
             },
@@ -286,6 +290,13 @@
             ],
             "type": "string"
           },
+          "support": {
+            "enum": [
+              "supported",
+              "tentative"
+            ],
+            "type": "string"
+          },
           "tag": {
             "type": "string"
           }
@@ -294,7 +305,9 @@
           "tag",
           "analyzer_id",
           "source_signature",
-          "confidence",
+          "support",
+          "evidence_ids",
+          "contradiction_ids",
           "evidence",
           "status"
         ],
@@ -428,54 +441,6 @@
           "batch_id",
           "applied",
           "skipped"
-        ],
-        "type": "object"
-      },
-      "AudioSignalProfileOut": {
-        "additionalProperties": false,
-        "properties": {
-          "analyzer_id": {
-            "type": "string"
-          },
-          "confidence": {
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ],
-            "type": "string"
-          },
-          "evidence": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "metrics": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "type": "object"
-          }
-        },
-        "required": [
-          "analyzer_id",
-          "confidence",
-          "evidence",
-          "metrics"
         ],
         "type": "object"
       },
@@ -1016,8 +981,7 @@
           "tag_sources": {
             "default": "manual",
             "enum": [
-              "manual",
-              "manual_and_local"
+              "manual"
             ],
             "type": "string"
           }
@@ -3646,75 +3610,6 @@
         },
         "type": "object"
       },
-      "LibraryAnalysisStartRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "force": {
-            "default": false,
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "LibraryAnalysisSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "analyzed_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "analyzer": {
-            "type": "string"
-          },
-          "failed_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "high_confidence": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "last_updated_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "library_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "low_confidence": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "medium_confidence": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "stale_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "analyzer",
-          "library_tracks",
-          "analyzed_tracks",
-          "failed_tracks",
-          "stale_tracks",
-          "high_confidence",
-          "medium_confidence",
-          "low_confidence",
-          "last_updated_at"
-        ],
-        "type": "object"
-      },
       "LibraryContextPassSummary": {
         "additionalProperties": false,
         "properties": {
@@ -3883,31 +3778,6 @@
           "album": {
             "type": "string"
           },
-          "analysis_analyzer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "analysis_confidence": {
-            "anyOf": [
-              {
-                "enum": [
-                  "high",
-                  "medium",
-                  "low"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "analysis_suggestions": {
             "items": {
               "$ref": "#/components/schemas/AnalysisTagSuggestionOut"
@@ -3923,16 +3793,6 @@
           "artist": {
             "type": "string"
           },
-          "audio_signal": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AudioSignalProfileOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "display_title": {
             "type": "string"
           },
@@ -3945,21 +3805,6 @@
           "model_analysis": {
             "additionalProperties": false,
             "properties": {
-              "confidence": {
-                "anyOf": [
-                  {
-                    "enum": [
-                      "high",
-                      "medium",
-                      "low"
-                    ],
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
               "context_status": {
                 "anyOf": [
                   {
@@ -4051,11 +3896,8 @@
           "artist",
           "album",
           "manual_tags",
-          "analysis_analyzer",
           "analysis_tags",
-          "analysis_confidence",
-          "analysis_suggestions",
-          "audio_signal"
+          "analysis_suggestions"
         ],
         "type": "object"
       },
@@ -4729,7 +4571,7 @@
             "type": "array"
           },
           "version": {
-            "const": "assistant-playlist-model-disclosure/v3",
+            "const": "assistant-playlist-model-disclosure/v4",
             "type": "string"
           }
         },
@@ -4750,7 +4592,7 @@
             "type": "boolean"
           },
           "disclosure_version": {
-            "const": "assistant-playlist-model-disclosure/v3",
+            "const": "assistant-playlist-model-disclosure/v4",
             "type": "string"
           },
           "request": {
@@ -5501,7 +5343,7 @@
             "type": "integer"
           },
           "version": {
-            "const": "assistant-model-music-tagging-disclosure/v14",
+            "const": "assistant-model-music-tagging-disclosure/v15",
             "type": "string"
           }
         },
@@ -5670,7 +5512,7 @@
             "type": "string"
           },
           "disclosure_version": {
-            "const": "assistant-model-music-tagging-disclosure/v14",
+            "const": "assistant-model-music-tagging-disclosure/v15",
             "type": "string"
           },
           "execution_mode": {
@@ -5808,81 +5650,14 @@
         },
         "type": "object"
       },
-      "PlaylistAudioSignal": {
-        "additionalProperties": false,
-        "properties": {
-          "analyzer_id": {
-            "type": "string"
-          },
-          "brightness": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "confidence": {
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ],
-            "type": "string"
-          },
-          "energy": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "tempo_bpm": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0,
-                "maximum": 999,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "tension": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          }
-        },
-        "required": [
-          "analyzer_id",
-          "energy",
-          "brightness",
-          "tension",
-          "confidence"
-        ],
-        "type": "object"
-      },
       "PlaylistCandidate": {
         "additionalProperties": false,
         "properties": {
           "album": {
             "type": "string"
           },
-          "analysis_tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
           "artist": {
             "type": "string"
-          },
-          "audio_signal": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PlaylistAudioSignal"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "bpm": {
             "anyOf": [
@@ -5971,15 +5746,13 @@
           "origin",
           "genre",
           "manual_tags",
-          "analysis_tags",
           "length_s",
           "bpm",
           "match_score",
           "confidence",
           "reasons",
           "default_selected",
-          "planning_energy",
-          "audio_signal"
+          "planning_energy"
         ],
         "type": "object"
       },
@@ -6145,10 +5918,6 @@
       "PlaylistPlan": {
         "additionalProperties": false,
         "properties": {
-          "audio_profile_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          },
           "energy_curve": {
             "enum": [
               "steady",
@@ -6170,8 +5939,7 @@
         "required": [
           "energy_curve",
           "selected_tracks",
-          "selected_duration_s",
-          "audio_profile_tracks"
+          "selected_duration_s"
         ],
         "type": "object"
       },
@@ -8531,126 +8299,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ModelEqAvailability"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "tags": [
-          "assistant"
-        ]
-      }
-    },
-    "/api/assistant/library-analysis/jobs": {
-      "post": {
-        "operationId": "start_library_analysis_api_assistant_library_analysis_jobs_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LibraryAnalysisStartRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackgroundJobOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "tags": [
-          "assistant"
-        ]
-      }
-    },
-    "/api/assistant/library-analysis/summary": {
-      "get": {
-        "operationId": "library_analysis_summary_api_assistant_library_analysis_summary_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LibraryAnalysisSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "tags": [
-          "assistant"
-        ]
-      }
-    },
-    "/api/assistant/library-audio-analysis/jobs": {
-      "post": {
-        "operationId": "start_library_audio_analysis_api_assistant_library_audio_analysis_jobs_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LibraryAnalysisStartRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackgroundJobOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "tags": [
-          "assistant"
-        ]
-      }
-    },
-    "/api/assistant/library-audio-analysis/summary": {
-      "get": {
-        "operationId": "library_audio_analysis_summary_api_assistant_library_audio_analysis_summary_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LibraryAnalysisSummary"
                 }
               }
             },

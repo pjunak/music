@@ -1,11 +1,11 @@
 # Song evidence and mood tagging implementation plan
 
 Prepared 23 September 2026; clean-cutover scope reviewed against `music` commit `046f67e`.
-Status: implementation in progress; the foundation below is implemented. No model is certified.
+Status: core implementation complete; independent listening and production acceptance remain open. No model is certified.
 This turns the [research](SONG_EVIDENCE_RESEARCH.md) into dependency-ordered work.
 Public model specifications and current source were inspected; native compatibility,
 listening accuracy, licensing suitability, and production cost still need the gates below.
-All new module names, schemas, commands, and limits below are proposals.
+The status below identifies delivered contracts; conditional stages remain proposals.
 
 ## Implementation status — 24 September 2026
 
@@ -16,20 +16,40 @@ All new module names, schemas, commands, and limits below are proposals.
   no whole-track context confidence, `voice_score`, and coarse local tempo withheld from
   the model projection. Existing bounded execution and source-audio decoding are reused.
 - **Implemented:** bounded original Last.fm observations, current-policy MusicBrainz/
-  Last.fm projection in tagger input v23 (`song-evidence/v1`), source-aware result identity,
-  transactional save/review guards, updated disclosure v14 and runtime fingerprints.
-- **Implemented:** forward schema-15 reset of generated analysis and proposal reviews,
+  Last.fm projection in tagger input v24 (`song-evidence/v1`), source-aware result identity,
+  transactional save/review guards, updated disclosure v15 and runtime fingerprints.
+- **Implemented:** forward schema-15/16 reset of generated analysis and proposal reviews,
   old-job supersession and audit preservation, current-only context parsing, updated
   existing review/inspector UI. Accepted/manual tags and authored playlists survive.
 - **Native probe:** exact published ONNX encoder and both heads run with Tract 0.23.7
   at batch size one. Full preprocessing/output parity, cancellation, production resource
   bounds and listening usefulness remain unproven; no new model runtime/weights are bundled.
-- **Still required:** the per-tag decision/support contract and corresponding storage/UI
-  replacement, retirement of the separate metadata/audio heuristic paths, final acceptance
-  and an operator-started production rebuild. The current model output remains v4;
-  context confidence removal is not removal of model-level confidence.
+- **Implemented:** tagger output v5 / analyzer v8 with per-tag support, reasons,
+  validated supporting/conflicting observation IDs and explicit abstention. Current-only
+  save/review contracts, strict fixtures, disclosure and existing review UI are updated.
+- **Implemented:** retired metadata/audio heuristic jobs, routes, schemas and UI; removed
+  their saved axes and readers. Automatic playlists use accepted/manual tags. Playlist
+  ranking retains metadata search but no longer presents keyword guesses as analysis tags.
+- **Still required before production acceptance:** independent owner judgments, bounded
+  real-library/listening comparison, resource/concurrent-playback checks, and an
+  operator-started production rebuild. No paid calls or production changes were made.
 - **Conditional:** learned audio integration follows its parity/usefulness gates. Jev,
   training, extra encoders/datasets and a new annotation UI are not release dependencies.
+
+### Local validation and release boundary
+
+Windows GNU validation passed: 491 Rust tests, 342 frontend tests and 37 pilot/policy
+checks; workspace and fuzz Clippy, formatting, architecture, generated contracts,
+doctor/migration coverage, frontend production build and the headless release build.
+The migration test starts with the old schema, verifies the backup/reset, parses a
+preserved automatic rule with its new tag source, and confirms fresh results survive
+reopening. Browser guards reject the retired result shape.
+
+No Docker host was available for the production-image smoke test. Visual inspection
+could not initialize because the Codex browser helper failed with a local ACL error;
+component interaction tests passed. Owner listening, production resource/concurrent-
+playback checks and the live rebuild remain separate acceptance work. No private
+library judgments were invented, and no provider calls, push or deployment occurred.
 
 ### Native probe evidence
 
@@ -210,8 +230,8 @@ Raw scores differ from optional demonstrated calibrated probabilities. Remove le
 track-level confidence from analysis storage, DTOs and UI; do not carry a compatibility
 summary or placeholder. Validate finite values, dimensions, references and payload limits.
 
-Specify one forward SQLx migration that resets derived records and removes obsolete
-schema objects. Keep applied migration history intact; register the cutover migration
+Use forward SQLx migrations that resets derived records and removes obsolete
+schema objects. Keep applied migration history intact; register the cutover migrations
 with the matching writers/readers and old-path deletion in stage 9. It must preserve
 source/authored data without translating old analysis payloads. Supersede old queued
 analysis work before job recovery; completed/uncertain paid attempts remain audit-only

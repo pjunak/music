@@ -201,28 +201,6 @@ export function PlaylistSuggestionResults({
                           ) : null}
                         </span>
                       ) : null}
-                      {candidate.analysis_tags.length > 0 ? (
-                        <span className="assistant-candidate-tag-row is-analysis">
-                          <span>Analysis</span>
-                          {candidate.analysis_tags.map((tag) => (
-                            <span key={tag}>{tag}</span>
-                          ))}
-                        </span>
-                      ) : null}
-                      {candidate.audio_signal !== null ? (
-                        <span className="assistant-candidate-tag-row is-signal">
-                          <span>Audio signal</span>
-                          <span>
-                            {Math.round(candidate.audio_signal.energy * 100)}% energy
-                          </span>
-                          {candidate.audio_signal.tempo_bpm !== null ? (
-                            <span>
-                              ≈{Math.round(candidate.audio_signal.tempo_bpm)} BPM
-                            </span>
-                          ) : null}
-                          <span>{candidate.audio_signal.confidence} confidence</span>
-                        </span>
-                      ) : null}
                     </span>
                     <span className="assistant-match">
                       <strong>{Math.round(candidate.match_score * 100)}%</strong>

@@ -1,11 +1,11 @@
 {
   "GET /api/assistant/playlists/model-status#responses": {
-    "sha256": "714cc661641bef1e52aea7664848a4f7e46bd6b395efaedf83756f13b4fcae83",
-    "reason": "ADR-023 input v4 discloses request-matched vocabulary meanings for candidate manual tags. The disclosure version advances to v3; shape, candidate limit and output/playback contracts remain unchanged. The web Assistant consumes this endpoint; Baton does not."
+    "sha256": "564c05630a45fcf26a3623a8e8565781076297e71a3f74af72dfc51481aae1ae",
+    "reason": "Playlist input v5 and disclosure v4 remove heuristic analysis tags and retired audio-signal summaries. Candidates retain metadata, accepted/manual tags and deterministic search ranking hints. Local planner v3 and model suite v7 require fresh matching quality evidence; no playback wire or Baton model changes."
   },
   "POST /api/assistant/playlists/model-suggestions/jobs#request_body": {
-    "sha256": "85f087cc040a4b649beacee78b0f12da2a0462207816d85f01d49ca6da283387",
-    "reason": "Live playlist model jobs now require disclosure v3 and explicit consent for the additional vocabulary context. Old v2 consent is deliberately rejected before enqueueing. The browser advances with the server; no native client or playback wire change is required."
+    "sha256": "e5bbbb6cb58090ea921e2809401534313ef1aa34182f98a59b084affb35f3bff",
+    "reason": "Playlist input v5 and disclosure v4 remove heuristic analysis tags and retired audio-signal summaries. Candidates retain metadata, accepted/manual tags and deterministic search ranking hints. Local planner v3 and model suite v7 require fresh matching quality evidence; no playback wire or Baton model changes."
   },
   "GET /api/auth/sessions#responses": {
     "sha256": "e3c35a44aa35fc6961bbe2a2979f7ab34332482d3ae19b619149c8c24b715754",
@@ -16,20 +16,20 @@
     "reason": "Catalog credential removal is an authenticated extension added after the frozen v1 reference."
   },
   "GET /api/assistant/library-tags/model-status#responses": {
-    "sha256": "befc94244672bcaa4a294fc5ed63325b524fa81bef4df4c3d9dedde179e4de71",
-    "reason": "September 8 mood rework returns the 20-track pilot default, optional empty-request stop and disclosure v13. Existing counts and execution fields remain. Multi-request Batch plans with the stop enabled are unavailable before upload. Web Assistant consumes these fields; no native client change."
+    "sha256": "e8e804b4de365de92ebc4429269e4ae54492af39104458e1a9787709bd4e8a2d",
+    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
   },
   "GET /api/assistant/library-tags#parameters": {
     "sha256": "f3a5f738cec551f529854906b9f3e89b9fd86a4ebafe1c79248f10d1aacb6e87",
     "reason": "Adds optional model_status, model_job_id and suggestion_source filters for retained AI results. Existing search/tag/review/folder/pagination semantics and defaults remain supported; source narrows suggestions before review filtering. No playback or Baton contract change."
   },
   "GET /api/assistant/library-tags#responses": {
-    "sha256": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
-    "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
+    "sha256": "a7826d947fd8a65a9201591b833c520ccea544444339a838d3e389dbb73f4128",
+    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
   },
   "POST /api/assistant/library-tags/query#responses": {
-    "sha256": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
-    "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
+    "sha256": "a7826d947fd8a65a9201591b833c520ccea544444339a838d3e389dbb73f4128",
+    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
   },
   "GET /api/library/cleanup/sources#operation": {
     "sha256": "5a750721067f3e9d9d7c8f516036a00ab74d5f04e9e28cfba618c3f665d9d47a",
@@ -40,12 +40,12 @@
     "reason": "Readiness separates dependency readiness from liveness for the Rust runtime."
   },
   "POST /api/assistant/library-tags/model-jobs#request_body": {
-    "sha256": "cf131875f8d10d8ff31087caa78cb38db2aaa28f55b34be322f8266280c7f253",
-    "reason": "September 8 mood rework defaults pilots to 20 tracks and adds optional stop_on_empty_batch=true. New inference requires disclosure v13 for compact evidence and an explanation on every result; old consent is deliberately rejected. Explicit scope, consent and quality gates remain. Assistant web only; no Baton or playback wire change."
+    "sha256": "5bf31c2f6558beffddc37c194d10ea6fc86b1e2eaa7a766a0e9aef89f8e44785",
+    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
   },
   "POST /api/assistant/library-tags/model-plan#responses": {
-    "sha256": "f71468091fddcd9b792af9cfb7591d66bc32842cb6720d76aa32366969550875",
-    "reason": "September 8 mood rework returns the 20-track pilot default, optional empty-request stop and disclosure v13. Existing counts and execution fields remain. Multi-request Batch plans with the stop enabled are unavailable before upload. Web Assistant consumes these fields; no native client change."
+    "sha256": "a2225b1f160bb29e172a4bfff27eeae1a3f74ca31d51e1337bb31b8e6e739a58",
+    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
   },
   "POST /api/library/cleanup/enrichment-jobs#operation": {
     "sha256": "282a7902b9e1df5cce5254bbe2ac5abf2b86f70a809af2fbfe2add4bf0bb7ab9",
@@ -72,8 +72,8 @@
     "reason": "ADR-025 adds authenticated explicit collect/cancel/recovery actions for already-recorded batches. Recovery checks run and input-file identity. Actions cannot start new paid inference; abandonment requires an explicit acknowledgement in the browser."
   },
   "PATCH /api/assistant/library-tags/{track_id}#responses": {
-    "sha256": "c9d6adfa98974a0fc580a9b76c867dfe6e4d91b4908659565c0e90702cd296a3",
-    "reason": "September 8 mood rework adds optional count, public explanation, confidence, recorded context status and bounded per-track input snapshot to model_analysis. Empty and outdated profiles remain inspectable; missing historical fields stay unknown. Existing tags, review authority and authentication remain unchanged. No playback or Baton DTO change."
+    "sha256": "168c415f5cbb8475f6a0438b415fc05dd21a3c027d6d41ae2c1354f1948f7552",
+    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
   },
   "GET /api/library/cleanup/model#operation": {
     "sha256": "3fa6a9c1f94cc23cb05488ec86edddf2b8f09ca5c8f7f7de5cb2360cd6817c17",
@@ -174,5 +174,69 @@
   "PATCH /api/library/tracks/{track_id}/metadata#request_body": {
     "sha256": "dbd8ebdaae9f1bc7c39c982954d39600b151a876a49b357701bc220e87977df1",
     "reason": "Approved soundtrack metadata adds optional nullable release_date, original_release_date and composer strings. Omitted fields preserve per-track values; empty/null clears. Dates validate calendar precision and derive the legacy year on readback. A year-only edit that would erase known month/day is deliberately rejected and must instead edit release_date explicitly; unchanged year edits preserve precision. The web editor uses dates, and Baton does not author file tags. See docs/LIBRARY_RICH_METADATA.md."
+  },
+  "DELETE /api/playlists/{playlist_id}/automatic#responses": {
+    "sha256": "fc01f21f17e16b80347c5f5776f72cf1659933d2600b31641c1b8fbe660c8ca2",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "GET /api/assistant/library-analysis/summary#retired": {
+    "sha256": "72316e43d605e6ada3d78bfc8b6b1edb288048696bf13300d8be25e43b701bef",
+    "reason": "The September 24 song-evidence cutover deliberately retires this metadata/audio heuristic endpoint. Current factual analysis uses library-context and per-tag suggestions use the current catalog/model contracts. No compatibility route remains; web clients refresh. Playback and Baton do not consume this endpoint."
+  },
+  "GET /api/assistant/library-audio-analysis/summary#retired": {
+    "sha256": "72316e43d605e6ada3d78bfc8b6b1edb288048696bf13300d8be25e43b701bef",
+    "reason": "The September 24 song-evidence cutover deliberately retires this metadata/audio heuristic endpoint. Current factual analysis uses library-context and per-tag suggestions use the current catalog/model contracts. No compatibility route remains; web clients refresh. Playback and Baton do not consume this endpoint."
+  },
+  "GET /api/assistant/library-context/summary#responses": {
+    "sha256": "96fa443a87fa391d2927c397f3df4354b6a5b3c357850b044805df87a3e5c991",
+    "reason": "Context v3 removes misleading whole-track confidence, uses gain-invariant relative level and voice_score, and records decoded coverage. Generated contexts are rebuilt from source audio after a verified backup; old payloads are not adapted."
+  },
+  "GET /api/assistant/library-context/tracks/{track_id}#responses": {
+    "sha256": "c3dcadff05140c67581facd1c3942e4b81e3150db0295372993954386d648692",
+    "reason": "Context v3 removes misleading whole-track confidence, uses gain-invariant relative level and voice_score, and records decoded coverage. Generated contexts are rebuilt from source audio after a verified backup; old payloads are not adapted."
+  },
+  "GET /api/playlists#responses": {
+    "sha256": "a4579c378781a8bad8c7435cb1d8f61101e04cc8a9188c37b23878e65d35ff6a",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "GET /api/playlists/{playlist_id}#responses": {
+    "sha256": "fc01f21f17e16b80347c5f5776f72cf1659933d2600b31641c1b8fbe660c8ca2",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "PATCH /api/playlists/{playlist_id}#responses": {
+    "sha256": "fc01f21f17e16b80347c5f5776f72cf1659933d2600b31641c1b8fbe660c8ca2",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "POST /api/assistant/library-analysis/jobs#retired": {
+    "sha256": "a784a1ab873b444d4aa0bb2a21eb07140582c203d259c59133c8bc816d1c4b75",
+    "reason": "The September 24 song-evidence cutover deliberately retires this metadata/audio heuristic endpoint. Current factual analysis uses library-context and per-tag suggestions use the current catalog/model contracts. No compatibility route remains; web clients refresh. Playback and Baton do not consume this endpoint."
+  },
+  "POST /api/assistant/library-audio-analysis/jobs#retired": {
+    "sha256": "a784a1ab873b444d4aa0bb2a21eb07140582c203d259c59133c8bc816d1c4b75",
+    "reason": "The September 24 song-evidence cutover deliberately retires this metadata/audio heuristic endpoint. Current factual analysis uses library-context and per-tag suggestions use the current catalog/model contracts. No compatibility route remains; web clients refresh. Playback and Baton do not consume this endpoint."
+  },
+  "POST /api/assistant/playlists/suggest#responses": {
+    "sha256": "6d399990b992d9eec2e553deaedadd97d4194dd4a57af26e28bbdf46913d15d2",
+    "reason": "Playlist input v5 and disclosure v4 remove heuristic analysis tags and retired audio-signal summaries. Candidates retain metadata, accepted/manual tags and deterministic search ranking hints. Local planner v3 and model suite v7 require fresh matching quality evidence; no playback wire or Baton model changes."
+  },
+  "POST /api/playlists#responses": {
+    "sha256": "dc5ec35603915bcc0fe42c73398b9c31b31b0e13a34cb62c4f9d002da94a866d",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "POST /api/playlists/{playlist_id}/automatic/preview#request_body": {
+    "sha256": "9e1df1f7320a75688c2dfafb3be061010859ecf281029d173df5a34105f5baf9",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "POST /api/playlists/{playlist_id}/automatic/refresh#responses": {
+    "sha256": "031a750b030caca18a45ea2519352d1b41710deae204879cc814cfb0e557a9ef",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "PUT /api/playlists/{playlist_id}/automatic#request_body": {
+    "sha256": "bff771ba206df4e01f285a4018ae013002ed7e7362b65602229a8f767aaf8f0d",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
+  },
+  "PUT /api/playlists/{playlist_id}/automatic#responses": {
+    "sha256": "031a750b030caca18a45ea2519352d1b41710deae204879cc814cfb0e557a9ef",
+    "reason": "The song-evidence cutover restricts automatic playlist tag_sources to manual (accepted/operator-owned tags). The one-time migration preserves authored filters and materialized playlist tracks. Pending and rejected generated suggestions cannot silently change playlists; ordinary playback messages are unchanged."
   }
 }

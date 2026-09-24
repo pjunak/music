@@ -206,7 +206,7 @@ export function MoodTaggingDialog({
           new Set(
             result.items.flatMap((track) =>
               track.analysis_suggestions
-                .filter((suggestion) => suggestion.confidence !== "low")
+                .filter((suggestion) => suggestion.support === "supported")
                 .map((suggestion) =>
                   suggestionKey({
                     track_id: track.track_id,
@@ -284,7 +284,7 @@ export function MoodTaggingDialog({
       title: "Create mood-library suggestions?",
       body:
         `${workTracks} track${workTracks === 1 ? "" : "s"} in ${scopeLabel} will use about ` +
-        `${executionMode === "batch" ? "OpenAI Batch uploads a metadata/context file; input expires after 7 days, output after up to 30 days. Completion can take 24 hours; completed work is charged even after cancellation. " : ""}${requests} provider request${requests === 1 ? "" : "s"}, with a hard limit of ${limits.max_requests} calls including corrections. ${plan.deferred_tracks} tracks are deferred. Token reservation: ${plan.token_reservation.toLocaleString()} of ${limits.max_token_reservation.toLocaleString()} units (conservative input bytes plus output allowance, not a bill). Artist, album, origin, and genre metadata plus bounded time-aware local context may be sent. Track titles, display titles, file and folder names, library paths, audio, waveforms, full-resolution timelines, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
+        `${executionMode === "batch" ? "OpenAI Batch uploads a metadata/context file; input expires after 7 days, output after up to 30 days. Completion can take 24 hours; completed work is charged even after cancellation. " : ""}${requests} provider request${requests === 1 ? "" : "s"}, with a hard limit of ${limits.max_requests} calls including corrections. ${plan.deferred_tracks} tracks are deferred. Token reservation: ${plan.token_reservation.toLocaleString()} of ${limits.max_token_reservation.toLocaleString()} units (conservative input bytes plus output allowance, not a bill). Artist, album, origin, and genre metadata, bounded time-aware local context, and permitted source-attributed catalog observations may be sent. Track titles, display titles, file and folder names, library paths, audio, waveforms, full-resolution timelines, file-embedded tags beyond the disclosed metadata, and your database mood tags stay local. Results remain proposals until you accept them here.`,
       confirmLabel: workTracks === 0 ? "Check current suggestions" : "Create suggestions",
       tone: "primary",
     });
@@ -331,7 +331,7 @@ export function MoodTaggingDialog({
     wsClient.send({ type: ambientIsPlaying ? "pause" : "resume" });
   }
 
-  function selectVisible(mode: "all" | "confident" | "none") {
+  function selectVisible(mode: "all" | "supported" | "none") {
     if (mode === "none") {
       setSelected(new Set());
       return;
@@ -339,7 +339,7 @@ export function MoodTaggingDialog({
     const allowed = new Set(
       page?.items.flatMap((track) =>
         track.analysis_suggestions
-          .filter((suggestion) => mode === "all" || suggestion.confidence !== "low")
+          .filter((suggestion) => mode === "all" || suggestion.support === "supported")
           .map((suggestion) =>
             suggestionKey({
               track_id: track.track_id,
@@ -492,7 +492,7 @@ export function MoodTaggingDialog({
               <span>
                 Run anyway
                 <span className="cleanup-hint muted">
-                  The model receives metadata and path context for tracks without full analysis.
+                  The model receives allowed metadata and available catalog observations for tracks without full audio analysis.
                 </span>
               </span>
             </label>
@@ -574,7 +574,7 @@ export function MoodTaggingDialog({
         </span>
         <span className="cleanup-review-spacer" />
         <button type="button" className="btn-ghost" onClick={() => selectVisible("all")}>All on page</button>
-        <button type="button" className="btn-ghost" onClick={() => selectVisible("confident")}>High + medium</button>
+        <button type="button" className="btn-ghost" onClick={() => selectVisible("supported")}>Supported only</button>
         <button type="button" className="btn-ghost" onClick={() => selectVisible("none")}>None</button>
       </div>
       {page !== null && page.items.length === 0 ? (
@@ -617,10 +617,10 @@ export function MoodTaggingDialog({
                     };
                     const key = suggestionKey(target);
                     return (
-                      <label className={`mood-tagging-suggestion is-${suggestion.confidence}`} key={key}>
+                      <label className={`mood-tagging-suggestion is-${suggestion.support}`} key={key}>
                         <input
                           type="checkbox"
-                          aria-label={`Select ${suggestion.tag} (${suggestion.confidence} confidence)`}
+                          aria-label={`Select ${suggestion.tag} (${suggestion.support} support)`}
                           checked={selected.has(key)}
                           disabled={busy}
                           onChange={(event) => {
@@ -633,16 +633,21 @@ export function MoodTaggingDialog({
                           }}
                         />
                         <span>{suggestion.tag}</span>
-                        <small>{suggestion.confidence}</small>
+                        <small>{suggestion.support}</small>
                       </label>
                     );
                   })}
                 </div>
-                {track.analysis_suggestions[0]?.evidence.length ? (
+                {track.analysis_suggestions.length ? (
                   <details className="mood-tagging-evidence">
                     <summary>Why these tags were suggested</summary>
                     <ul>
-                      {track.analysis_suggestions[0].evidence.map((item) => <li key={item}>{item}</li>)}
+                      {track.analysis_suggestions.map((suggestion) => <li key={suggestion.tag}>
+                        <strong>{suggestion.tag} · {suggestion.support} support</strong>
+                        <ul>{suggestion.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
+                        <p>Evidence: {suggestion.evidence_ids.join(", ")}</p>
+                        {suggestion.contradiction_ids.length > 0 ? <p>Conflicting evidence: {suggestion.contradiction_ids.join(", ")}</p> : null}
+                      </li>)}
                     </ul>
                   </details>
                 ) : null}

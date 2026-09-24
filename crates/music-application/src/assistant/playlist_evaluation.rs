@@ -5,47 +5,20 @@ use std::time::Duration;
 
 use music_domain::{IndexedTrack, LibraryPath, TrackId, TrackMetadata};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, json};
+
 use sha2::{Digest, Sha256};
 
 use super::{
-    AssistantTrackEvidence, Confidence, EnergyCurve, LOCAL_AUDIO_ANALYZER_ID,
-    LOCAL_METADATA_ANALYZER_ID, LOCAL_PLAYLIST_ENGINE_ID, MODEL_PLAYLIST_ENGINE_ID,
+    AssistantTrackEvidence, EnergyCurve, LOCAL_PLAYLIST_ENGINE_ID, MODEL_PLAYLIST_ENGINE_ID,
     ModelPlaylistTask, ModelTaskError, PLAYLIST_QUALITY_SUITE_ID, PlaylistCandidate,
-    PlaylistSuggestion, PlaylistSuggestionRequest, StoredAnalysis, audio_source_signature,
-    metadata_source_signature, playlist_suggestion_payload, suggest_local_playlist,
+    PlaylistSuggestion, PlaylistSuggestionRequest, playlist_suggestion_payload,
+    suggest_local_playlist,
 };
 
 pub const PLAYLIST_EVALUATION_CONTRACT: &str = "playlist-evaluation/v1";
 pub const PLAYLIST_EVALUATION_RESULT_CONTRACT: &str = "playlist-evaluation-result/v1";
 const MAX_EVALUATION_SUITE_BYTES: u64 = 4 * 1_024 * 1_024;
 const MAX_EVALUATION_INCLUDE_DEPTH: usize = 8;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EvaluationAnalysisProfile {
-    energy: f64,
-    brightness: f64,
-    tension: f64,
-    #[serde(default)]
-    moods: Vec<String>,
-    #[serde(default)]
-    evidence: Vec<String>,
-    confidence: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EvaluationSignalProfile {
-    #[serde(default = "default_signal_analyzer")]
-    analyzer_id: String,
-    energy: f64,
-    brightness: f64,
-    tension: f64,
-    #[serde(default)]
-    tempo_bpm: Option<f64>,
-    confidence: String,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -69,10 +42,6 @@ struct EvaluationTrack {
     bpm: Option<u32>,
     #[serde(default)]
     manual_tags: Vec<String>,
-    #[serde(default)]
-    analysis: Option<EvaluationAnalysisProfile>,
-    #[serde(default)]
-    signal: Option<EvaluationSignalProfile>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -511,7 +480,7 @@ pub fn playlist_quality_suite() -> Result<PlaylistQualitySuite, ModelTaskError> 
         serde_json::from_str(include_str!("evaluation_suites/playlist-model-v1.json"))
             .map_err(|error| ModelTaskError::invalid_output(error.to_string()))?;
     if local.schema_version != PLAYLIST_EVALUATION_CONTRACT
-        || local.id != "local-dnd-playlist-baseline-v4"
+        || local.id != "local-dnd-playlist-baseline-v5"
         || local.include_cases_from.is_some()
         || model.schema_version != PLAYLIST_EVALUATION_CONTRACT
         || model.id != PLAYLIST_QUALITY_SUITE_ID
@@ -725,8 +694,6 @@ fn materialize_generated(
                 length_s: generated.length_s,
                 bpm: None,
                 manual_tags: generated.manual_tags.clone(),
-                analysis: None,
-                signal: None,
             })
         })
         .collect()
@@ -818,21 +785,6 @@ fn track_valid(track: &EvaluationTrack) -> bool {
         && (0.0..=86_400.0).contains(&track.length_s)
         && track.bpm.is_none_or(|bpm| (1..=999).contains(&bpm))
         && track.manual_tags.len() <= 100
-        && track.analysis.as_ref().is_none_or(|analysis| {
-            axes_valid(analysis.energy, analysis.brightness, analysis.tension)
-                && Confidence::parse(&analysis.confidence).is_some()
-                && analysis.moods.len() <= 50
-                && analysis.evidence.len() <= 50
-        })
-        && track.signal.as_ref().is_none_or(|signal| {
-            !signal.analyzer_id.is_empty()
-                && signal.analyzer_id.chars().count() <= 128
-                && axes_valid(signal.energy, signal.brightness, signal.tension)
-                && signal
-                    .tempo_bpm
-                    .is_none_or(|tempo| tempo.is_finite() && tempo > 0.0 && tempo <= 999.0)
-                && Confidence::parse(&signal.confidence).is_some()
-        })
 }
 
 fn thresholds_valid(thresholds: &EvaluationThresholds) -> bool {
@@ -879,42 +831,7 @@ fn evaluation_track_evidence(
         mtime_unix_seconds: fixture.id,
         added_at_unix_seconds: 0,
     };
-    let mut analyses = Vec::new();
-    if let Some(analysis) = &fixture.analysis {
-        analyses.push(StoredAnalysis {
-            job_id: String::new(),
-            updated_at_unix_seconds: None,
-            analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
-            source_signature: metadata_source_signature(&track)
-                .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?,
-            energy: analysis.energy,
-            brightness: analysis.brightness,
-            tension: analysis.tension,
-            moods: analysis.moods.clone(),
-            evidence: analysis.evidence.clone(),
-            metrics: Map::new(),
-            confidence: analysis.confidence.clone(),
-        });
-    }
-    if let Some(signal) = &fixture.signal {
-        let mut metrics = Map::new();
-        metrics.insert("schema".to_owned(), json!(LOCAL_AUDIO_ANALYZER_ID));
-        metrics.insert("tempo_bpm".to_owned(), json!(signal.tempo_bpm));
-        analyses.push(StoredAnalysis {
-            job_id: String::new(),
-            updated_at_unix_seconds: None,
-            analyzer_id: LOCAL_AUDIO_ANALYZER_ID.to_owned(),
-            source_signature: audio_source_signature(&track)
-                .map_err(|_| ModelTaskError::new("model_evaluation_suite_invalid"))?,
-            energy: signal.energy,
-            brightness: signal.brightness,
-            tension: signal.tension,
-            moods: Vec::new(),
-            evidence: vec![format!("Synthetic {} fixture", signal.analyzer_id)],
-            metrics,
-            confidence: signal.confidence.clone(),
-        });
-    }
+    let analyses = Vec::new();
     Ok(AssistantTrackEvidence {
         catalog_evidence: None,
         track,
@@ -1243,12 +1160,6 @@ fn round_to(value: f64, places: i32) -> f64 {
     (value * factor).round() / factor
 }
 
-fn axes_valid(energy: f64, brightness: f64, tension: f64) -> bool {
-    [energy, brightness, tension]
-        .iter()
-        .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
-}
-
 fn valid_case_id(value: &str) -> bool {
     (2..=64).contains(&value.len())
         && value
@@ -1277,10 +1188,6 @@ fn format_task_failure(prefix: &str, error: &ModelTaskError) -> String {
         failure.push_str(&format!(" ({diagnostic})"));
     }
     failure
-}
-
-fn default_signal_analyzer() -> String {
-    "evaluation-signal/v1".to_owned()
 }
 
 const fn default_track_length() -> f64 {

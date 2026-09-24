@@ -12,7 +12,7 @@ use super::{
     cleanup_enrichment_source_signature,
 };
 use crate::assistant::{
-    AnalysisWrite, AssistantService, CATALOG_TAG_ANALYZER_ID, Confidence, LocalAnalysisRepository,
+    AnalysisWrite, AssistantService, CATALOG_TAG_ANALYZER_ID, LocalAnalysisRepository,
     TagVocabularySnapshot, catalog_tag_source_signature, normalize_manual_tag,
 };
 use crate::cleanup::{CleanupScope, CleanupService};
@@ -658,9 +658,17 @@ impl CleanupEnrichmentJobHandler {
         let profile = AnalysisWrite {
             track_id: track.id,
             source_signature,
-            energy: 0.5,
-            brightness: 0.5,
-            tension: 0.5,
+            decisions: moods
+                .iter()
+                .zip(&evidence)
+                .map(|(tag, reason)| crate::assistant::TagDecision {
+                    tag: tag.clone(),
+                    support: crate::assistant::TagSupport::Tentative,
+                    evidence: vec![reason.clone()],
+                    evidence_ids: vec!["catalog.lastfm.community_tags".to_owned()],
+                    contradiction_ids: Vec::new(),
+                })
+                .collect(),
             moods,
             evidence,
             metrics: json!({
@@ -673,12 +681,11 @@ impl CleanupEnrichmentJobHandler {
             .as_object()
             .cloned()
             .ok_or(CatalogError::InvalidResponse)?,
-            confidence: Confidence::Medium,
         };
         let stored = self
             .services
             .analyses
-            .store_metadata_analysis(CATALOG_TAG_ANALYZER_ID, job_id, &[profile])
+            .store_catalog_analysis(CATALOG_TAG_ANALYZER_ID, job_id, &[profile])
             .await
             .map_err(|_| CatalogError::Storage)?;
         if stored != 1 {

@@ -86,7 +86,7 @@ const succeededJob: BackgroundJob = {
   parameters: {},
   result: {
     schema_version: "assistant-model-music-tagging-job-result/v6",
-    analyzer_id: "model-context-tagger/v7",
+    analyzer_id: "model-context-tagger/v8",
     vocabulary_fingerprint: "a".repeat(64),
     library_tracks: 90,
     scope_tracks: 1,
@@ -122,24 +122,21 @@ const reviewPage: LibraryTagPage = {
       artist: "Tabletop Ensemble",
       album: "Wilderness",
       manual_tags: [],
-      analysis_analyzer: null,
       analysis_tags: [],
-      analysis_confidence: null,
-      audio_signal: null,
       analysis_suggestions: [
         {
           tag: "forest",
-          analyzer_id: "model-context-tagger/v7",
+          analyzer_id: "model-context-tagger/v8",
           source_signature: "source-1",
-          confidence: "high",
-          evidence: ["Library path contains Forest."],
+          support: "supported", evidence_ids: ["metadata.genre"], contradiction_ids: [],
+          evidence: ["Catalog genre explicitly describes a forest ambience."],
           status: "pending",
         },
         {
           tag: "calm",
-          analyzer_id: "model-context-tagger/v7",
+          analyzer_id: "model-context-tagger/v8",
           source_signature: "source-1",
-          confidence: "low",
+          support: "tentative", evidence_ids: ["audio.trajectories.relative_level"], contradiction_ids: [],
           evidence: ["Bounded signal evidence is restrained."],
           status: "pending",
         },
@@ -333,8 +330,8 @@ describe("MoodTaggingDialog", () => {
     );
 
     expect(await screen.findByText("Quiet Road")).toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "Select forest (high confidence)" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Select calm (low confidence)" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select forest (supported support)" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select calm (tentative support)" })).not.toBeChecked();
 
     await user.click(screen.getByRole("button", { name: "Play Quiet Road" }));
     expect(vi.mocked(wsClient.send).mock.calls.map(([action]) => action)).toEqual([
@@ -343,7 +340,7 @@ describe("MoodTaggingDialog", () => {
     ]);
 
     await user.click(
-      screen.getByRole("checkbox", { name: "Select calm (low confidence)" }),
+      screen.getByRole("checkbox", { name: "Select calm (tentative support)" }),
     );
     await user.click(screen.getByRole("button", { name: "Add 2 to mood library" }));
 

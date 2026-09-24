@@ -57,7 +57,7 @@ import { wsClient } from "@/core/ws";
 import { PlaylistBuilderView } from "./PlaylistBuilderView";
 
 const suggestion: PlaylistSuggestion = {
-  engine: "local-planner/v2",
+  engine: "local-planner/v3",
   library_tracks: 24,
   eligible_tracks: 22,
   intent: {
@@ -71,7 +71,6 @@ const suggestion: PlaylistSuggestion = {
     energy_curve: "rising",
     selected_tracks: 2,
     selected_duration_s: 420,
-    audio_profile_tracks: 1,
   },
   candidates: [
     {
@@ -84,7 +83,6 @@ const suggestion: PlaylistSuggestion = {
       origin: "Scores",
       genre: "soundtrack",
       manual_tags: ["investigation"],
-      analysis_tags: ["tense", "dark"],
       length_s: 240,
       bpm: 92,
       match_score: 0.91,
@@ -93,14 +91,6 @@ const suggestion: PlaylistSuggestion = {
       default_selected: true,
       sequence_position: 1,
       planning_energy: 0.48,
-      audio_signal: {
-        analyzer_id: "local-audio/v1",
-        energy: 0.44,
-        brightness: 0.2,
-        tension: 0.8,
-        tempo_bpm: 91.8,
-        confidence: "high",
-      },
     },
     {
       track_id: 12,
@@ -112,7 +102,6 @@ const suggestion: PlaylistSuggestion = {
       origin: "Scores",
       genre: "ambient",
       manual_tags: [],
-      analysis_tags: ["calm"],
       length_s: 180,
       bpm: null,
       match_score: 0.73,
@@ -121,7 +110,6 @@ const suggestion: PlaylistSuggestion = {
       default_selected: true,
       sequence_position: 2,
       planning_energy: 0.61,
-      audio_signal: null,
     },
   ],
 };
@@ -140,7 +128,7 @@ const modelAvailability: ModelPlaylistAvailability = {
   quality_evaluation_id: "playlist-quality-v1",
   job_kind: "assistant.model-playlist-suggestion",
   disclosure: {
-    version: "assistant-playlist-model-disclosure/v3",
+    version: "assistant-playlist-model-disclosure/v4",
     shared_with_provider: [
       "Your mood prompt and filters",
       "Up to 100 locally prefiltered candidate IDs and metadata",
@@ -162,7 +150,7 @@ function modelJob(
     status,
     parameters: {
       consent: true,
-      disclosure_version: "assistant-playlist-model-disclosure/v3",
+      disclosure_version: "assistant-playlist-model-disclosure/v4",
       request: {
         prompt: "misty medieval forest",
         target_minutes: 45,
@@ -175,7 +163,7 @@ function modelJob(
       status === "succeeded"
         ? {
             schema_version: "assistant-playlist-suggestion-job-result/v1",
-            disclosure_version: "assistant-playlist-model-disclosure/v3",
+            disclosure_version: "assistant-playlist-model-disclosure/v4",
             role_id: "playlist_planner",
             role_fingerprint: "a".repeat(64),
             suggestion: modelSuggestion,
@@ -274,9 +262,9 @@ describe("PlaylistBuilderView", () => {
       expect.objectContaining({ energy_curve: "rising" }),
     );
     expect(screen.getByText("Your tags")).toBeInTheDocument();
-    expect(screen.getAllByText("Analysis")).toHaveLength(2);
-    expect(screen.getByText("Audio signal")).toBeInTheDocument();
-    expect(screen.getByText("≈92 BPM")).toBeInTheDocument();
+    expect(screen.queryByText("Analysis")).not.toBeInTheDocument();
+    expect(screen.queryByText("Audio signal")).not.toBeInTheDocument();
+    expect(screen.queryByText("≈92 BPM")).not.toBeInTheDocument();
     expect(screen.getByText(/Rising intensity/)).toBeInTheDocument();
     expect(screen.getByText("Distant Footsteps")).toBeInTheDocument();
     expect(screen.getByRole("meter", { name: "Tension" })).toHaveAttribute(
@@ -449,7 +437,7 @@ describe("PlaylistBuilderView", () => {
     );
     expect(assistantApi.startModelPlaylistSuggestion).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: "misty medieval forest" }),
-      "assistant-playlist-model-disclosure/v3",
+      "assistant-playlist-model-disclosure/v4",
     );
     expect(
       await screen.findByRole("progressbar", {

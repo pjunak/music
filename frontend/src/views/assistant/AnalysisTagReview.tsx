@@ -44,7 +44,7 @@ export function AnalysisTagReview({
   onReviewed,
   onSelectionChange,
 }: AnalysisTagReviewProps) {
-  const groups = ["model", "metadata", "catalog", "other"].map((source) => ({
+  const groups = ["model", "catalog", "other"].map((source) => ({
     source, items: suggestions.filter((suggestion) => suggestionSource(suggestion.analyzer_id) === source),
   })).filter((group) => group.items.length > 0);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -104,12 +104,11 @@ export function AnalysisTagReview({
         ) : null}
         {modelAnalysis?.suggested_tag_count === 0 ? <strong>No supported tags returned</strong> : null}
         {modelAnalysis?.suggested_tag_count != null && modelAnalysis.suggested_tag_count > 0 ? <span>{modelAnalysis.suggested_tag_count} tags returned by this analysis; review filters may hide some.</span> : null}
-        {modelAnalysis?.evidence?.length ? <div><strong>Model explanation</strong><ul>{modelAnalysis.evidence.map((value, index) => <li key={index}>{value}</li>)}</ul></div> : modelAnalysis?.suggested_tag_count === 0 ? <span>The reason was not recorded in this older result.</span> : null}
+        {modelAnalysis?.evidence?.length ? <div><strong>Model explanation</strong><ul>{modelAnalysis.evidence.map((value, index) => <li key={index}>{value}</li>)}</ul></div> : null}
         {modelAnalysis?.context_status ? <span>Context used: {modelAnalysis.context_status === "full" ? "complete local analysis" : modelAnalysis.context_status === "partial" ? "partial local analysis" : "metadata only"}. Coverage does not measure mood accuracy.</span> : null}
-        {modelAnalysis?.confidence ? <span>Model-reported confidence: {modelAnalysis.confidence}</span> : null}
-        {modelAnalysis?.input_snapshot ? <ModelInputEvidence input={modelAnalysis.input_snapshot} /> : modelAnalysis?.status !== "missing" && modelAnalysis?.status ? <span>The exact input was not retained for this older result.</span> : null}
+        {modelAnalysis?.input_snapshot ? <ModelInputEvidence input={modelAnalysis.input_snapshot} /> : null}
         {modelAnalysis?.status === "stale" ? <span>The saved AI result no longer matches current evidence or model settings. Its old suggestions cannot be accepted.</span> : null}
-        {modelAnalysis?.status === "missing" ? <span>Local measurements and keyword guesses do not mean this track has an AI result.</span> : null}
+        {modelAnalysis?.status === "missing" ? <span>Local measurements are available independently of AI tagging.</span> : null}
         {modelAnalysis?.job_id ? <details><summary>AI run details</summary><code>{modelAnalysis.job_id}</code></details> : null}
       </div>
       {disabled ? (
@@ -124,7 +123,6 @@ export function AnalysisTagReview({
           {groups.map((group) => (
             <section key={group.source} className="assistant-review-source-group" aria-label={suggestionSourceLabel(group.items[0]!.analyzer_id)}>
               <h3>{suggestionSourceLabel(group.items[0]!.analyzer_id)}</h3>
-              {group.source === "metadata" ? <p className="muted small">Guesses from words in the title, album and genre. These are not embedded mood tags or AI detection; misleading song names can produce wrong guesses. Reject any that do not fit.</p> : null}
               {group.source === "model" ? <p className="muted small">Mood tags describe an impression. Scene and setting tags propose session uses; they do not claim the song depicts a literal event. Accept only tags you find useful for this music.</p> : null}
               {group.items.map((suggestion) => {
                 const key = analysisTagSuggestionKey(trackId, suggestion);
@@ -142,7 +140,7 @@ export function AnalysisTagReview({
                           return kind === "mood" ? "Musical impression" : kind === "scene" || kind === "setting" ? "Suggested session use" : kind === "period" ? "Period character" : "Custom vocabulary suggestion";
                         })()}</span> : null}
                         <span>
-                          {suggestionSourceLabel(suggestion.analyzer_id)} · {suggestion.confidence} confidence
+                          {suggestionSourceLabel(suggestion.analyzer_id)} · {suggestion.support === "supported" ? "Supported" : "Tentative support"}
                         </span>
                       </div>
                       <span className="assistant-review-status">
@@ -154,9 +152,12 @@ export function AnalysisTagReview({
                         <summary>Why this was suggested</summary>
                         <ul>
                           {suggestion.evidence.map((evidence) => (
-                            <li key={evidence}>{group.source === "metadata" ? evidence.replace(/^Mood metadata:/, "Keyword match:") : evidence}</li>
+                            <li key={evidence}>{evidence}</li>
                           ))}
                         </ul>
+                        <p className="muted small">Evidence: {suggestion.evidence_ids.join(", ")}</p>
+                        {suggestion.contradiction_ids.length > 0 ? <p className="muted small">Conflicting evidence: {suggestion.contradiction_ids.join(", ")}</p> : null}
+                        <p className="muted small">Support describes this suggestion, not measured accuracy. Listen before accepting.</p>
                       </details>
                     ) : null}
                     {suggestion.status === "pending" ? (

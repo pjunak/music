@@ -262,7 +262,7 @@ impl ModelFeatureJobHandler {
             &parameters.quality_evaluation_id,
             TAGGING_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v14",
+            "assistant-model-music-tagging-disclosure/v15",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;
@@ -367,11 +367,10 @@ impl ModelFeatureJobHandler {
             && !work.is_empty()
         {
             let templates = work.iter().map(|track| {
-                let (energy, brightness, tension) = local_context_axes(contexts.get(&track.track.id));
                 AnalysisWrite {
                     track_id: track.track.id, source_signature: signatures[&track.track.id].clone(),
-                    energy, brightness, tension, moods: Vec::new(), evidence: Vec::new(), confidence: Confidence::Low,
-                    metrics: json!({"contract":"assistant-music-tagger-output/v4", "input_contract":MODEL_TAGGER_INPUT_CONTRACT,
+                    moods: Vec::new(), evidence: Vec::new(), decisions: Vec::new(),
+                    metrics: json!({"contract":"assistant-music-tagger-output/v5", "input_contract":MODEL_TAGGER_INPUT_CONTRACT,
                         "context_status":contexts.get(&track.track.id).map_or("missing", |context| context.completeness.as_str()),
                         "role_fingerprint":parameters.role_fingerprint,"vocabulary_fingerprint":parameters.vocabulary_fingerprint,
                         "input_snapshot":super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id), track.catalog_evidence.as_ref()))}).as_object().cloned().unwrap_or_default(),
@@ -492,17 +491,10 @@ impl ModelFeatureJobHandler {
                     let model = profiles
                         .get(&track.track.id.get())
                         .ok_or_else(|| JobHandlerError::new("model_output_track_set_mismatch"))?;
-                    let (energy, brightness, tension) =
-                        local_context_axes(contexts.get(&track.track.id));
                     let context_status = contexts
                         .get(&track.track.id)
                         .map(|context| context.completeness.as_str())
                         .unwrap_or("missing");
-                    let confidence = match model.confidence {
-                        TagConfidence::High => Confidence::High,
-                        TagConfidence::Medium => Confidence::Medium,
-                        TagConfidence::Low => Confidence::Low,
-                    };
                     Ok(ModelAnalysisWrite {
                         profile: AnalysisWrite {
                             track_id: track.track.id,
@@ -510,13 +502,10 @@ impl ModelFeatureJobHandler {
                                 .get(&track.track.id)
                                 .cloned()
                                 .ok_or_else(|| JobHandlerError::new("model_tag_source_invalid"))?,
-                            energy,
-                            brightness,
-                            tension,
                             moods: model.tags.clone(),
                             evidence: model.evidence.clone(),
                             metrics: json!({
-                                "contract": "assistant-music-tagger-output/v4",
+                                "contract": "assistant-music-tagger-output/v5",
                                 "input_contract": MODEL_TAGGER_INPUT_CONTRACT,
                                 "context_status": context_status,
                                 "role_fingerprint": parameters.role_fingerprint,
@@ -526,7 +515,7 @@ impl ModelFeatureJobHandler {
                             .as_object()
                             .cloned()
                             .ok_or_else(|| JobHandlerError::new("model_tag_profile_invalid"))?,
-                            confidence,
+                            decisions: model.decisions.clone(),
                         },
                     })
                 })
@@ -564,7 +553,7 @@ impl ModelFeatureJobHandler {
                     "source_signature": write.profile.source_signature,
                     "tags": write.profile.moods,
                     "evidence": write.profile.evidence,
-                    "confidence": write.profile.confidence,
+                    "decisions": write.profile.decisions,
                 })
             }));
             provider_usage.set_feature_progress(json!({

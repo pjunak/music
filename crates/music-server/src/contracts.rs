@@ -218,8 +218,12 @@ fn differences_reviewed(
     report: &OpenApiCompatibilityReport,
     review: &BTreeMap<String, AcceptedDifference>,
 ) -> bool {
-    report.missing_operations.is_empty()
-        && report.security_mismatches.is_empty()
+    report.security_mismatches.is_empty()
+        && report.missing_operations.iter().all(|key| {
+            report
+                .difference_fingerprints
+                .contains_key(&format!("{key}#retired"))
+        })
         && report.difference_fingerprints.len() == review.len()
         && report.difference_fingerprints.iter().all(|(key, digest)| {
             review.get(key).is_some_and(|accepted| {
@@ -277,6 +281,12 @@ fn compare_openapi(
     let mut response_mismatches = Vec::new();
     let mut security_mismatches = Vec::new();
     let mut difference_fingerprints = BTreeMap::new();
+    // An intentional retirement is reviewed against the exact removed contract.
+    for key in &missing_operations {
+        if let Some(operation) = reference_operations.get(key) {
+            difference_fingerprints.insert(format!("{key}#retired"), contract_digest(operation)?);
+        }
+    }
     for key in &candidate_only_operations {
         if let Some(operation) = candidate_operations.get(key) {
             difference_fingerprints.insert(format!("{key}#operation"), contract_digest(operation)?);
@@ -578,6 +588,44 @@ mod tests {
             &compare_openapi(&reference, &security)?,
             &std::collections::BTreeMap::new()
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn operation_retirement_requires_explicit_review_of_the_removed_contract()
+    -> Result<(), Box<dyn Error>> {
+        let reference = json!({"paths":{"/retired":{"get":{"responses":{"200":{"description":"old result"}}}}}});
+        let candidate = json!({"paths":{}});
+        let report = compare_openapi(&reference, &candidate)?;
+        assert_eq!(report.missing_operations, vec!["GET /retired"]);
+        let key = "GET /retired#retired";
+        let digest = report
+            .difference_fingerprints
+            .get(key)
+            .ok_or("missing retirement digest")?;
+        let mut review = std::collections::BTreeMap::new();
+        assert!(!super::differences_reviewed(&report, &review));
+        review.insert(
+            key.to_owned(),
+            super::AcceptedDifference {
+                sha256: digest.clone(),
+                reason: "Replaced by the current analysis contract".to_owned(),
+            },
+        );
+        assert!(super::differences_reviewed(&report, &review));
+        let mut different = reference.clone();
+        different["paths"]["/retired"]["get"]["responses"]["201"] =
+            json!({"description":"another result"});
+        assert!(!super::differences_reviewed(
+            &compare_openapi(&different, &candidate)?,
+            &review
+        ));
+        assert!(!super::differences_reviewed(
+            &compare_openapi(&reference, &reference)?,
+            &review
+        ));
+        review.get_mut(key).ok_or("review missing")?.reason.clear();
+        assert!(!super::differences_reviewed(&report, &review));
         Ok(())
     }
 

@@ -43,9 +43,6 @@ export function AutomaticPlaylistEditor({
   const [includeTags, setIncludeTags] = useState("");
   const [match, setMatch] = useState<"any" | "all">("any");
   const [excludeTags, setExcludeTags] = useState("");
-  const [tagSources, setTagSources] = useState<"manual" | "manual_and_local">(
-    "manual",
-  );
   const [minBpm, setMinBpm] = useState("");
   const [maxBpm, setMaxBpm] = useState("");
   const [includeUnknownBpm, setIncludeUnknownBpm] = useState(true);
@@ -62,7 +59,6 @@ export function AutomaticPlaylistEditor({
     setIncludeTags(stored?.include_tags.join(", ") ?? "");
     setMatch(stored?.match ?? "any");
     setExcludeTags(stored?.exclude_tags.join(", ") ?? "");
-    setTagSources(stored?.tag_sources ?? "manual");
     setMinBpm(stored?.min_bpm?.toString() ?? "");
     setMaxBpm(stored?.max_bpm?.toString() ?? "");
     setIncludeUnknownBpm(stored?.include_unknown_bpm ?? true);
@@ -77,7 +73,7 @@ export function AutomaticPlaylistEditor({
       include_tags: tagList(includeTags),
       match,
       exclude_tags: tagList(excludeTags),
-      tag_sources: tagSources,
+      tag_sources: "manual",
       min_bpm: optionalNumber(minBpm),
       max_bpm: optionalNumber(maxBpm),
       include_unknown_bpm: includeUnknownBpm,
@@ -93,7 +89,6 @@ export function AutomaticPlaylistEditor({
       maxBpm,
       minBpm,
       orderBy,
-      tagSources,
     ],
   );
 
@@ -285,17 +280,6 @@ export function AutomaticPlaylistEditor({
             placeholder="combat, tense"
             onChange={(event) => setExcludeTags(event.target.value)}
           />
-        </Field>
-        <Field label="Tag evidence">
-          <select
-            value={tagSources}
-            onChange={(event) =>
-              setTagSources(event.target.value as "manual" | "manual_and_local")
-            }
-          >
-            <option value="manual">Database mood tags only</option>
-            <option value="manual_and_local">Manual + current local analysis</option>
-          </select>
         </Field>
         <Field label="Minimum BPM">
           <input type="number" min={1} max={999} value={minBpm} onChange={(event) => setMinBpm(event.target.value)} />

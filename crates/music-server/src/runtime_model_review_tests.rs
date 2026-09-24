@@ -1,8 +1,16 @@
+
+fn runtime_fixture_decisions(tags: &[&str]) -> Vec<music_application::assistant::TagDecision> {
+    tags.iter().map(|tag| music_application::assistant::TagDecision {
+        tag: (*tag).to_owned(), support: music_application::assistant::TagSupport::Tentative,
+        evidence: vec!["Synthetic evidence".to_owned()], evidence_ids: vec!["metadata.genre".to_owned()], contradiction_ids: Vec::new(),
+    }).collect()
+}
+
 #[tokio::test]
 async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_decisions()
 -> Result<(), Box<dyn Error>> {
     use music_application::assistant::{
-        AnalysisWrite, Confidence, LocalAnalysisRepository, MODEL_TAG_ANALYZER_ID,
+        AnalysisWrite, LocalAnalysisRepository, MODEL_TAG_ANALYZER_ID,
         ModelAnalysisWrite, ModelRoleRecord, ProviderConnectionRecord, ProviderRepository,
         model_tag_source_signature,
     };
@@ -90,16 +98,13 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
                     profile: AnalysisWrite {
                         track_id: track.id,
                         source_signature: signature.clone(),
-                        energy: 0.5,
-                        brightness: 0.5,
-                        tension: 0.5,
-                        moods: vec!["calm".to_owned()],
+                        decisions: runtime_fixture_decisions(&["calm"]),
+                moods: vec!["calm".to_owned()],
                         evidence: vec!["Synthetic metadata".to_owned()],
-                        metrics: json!({"contract":"assistant-music-tagger-output/v4"})
+                        metrics: json!({"contract":"assistant-music-tagger-output/v5","input_snapshot":music_application::assistant::model_tag_track_input(&track,None,None)})
                             .as_object()
                             .cloned()
                             .ok_or("metrics missing")?,
-                        confidence: Confidence::High,
                     }
                 }]
             )
@@ -163,7 +168,7 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
         ("model_status=stale", 0),
         ("model_job_id=other-run", 0),
         ("model_status=processed&folder=Other&recursive=true", 0),
-        ("suggestion_source=metadata&review=pending", 0),
+        ("suggestion_source=catalog&review=pending", 0),
     ] {
         let response = router
             .clone()
@@ -218,13 +223,10 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
                 profile: AnalysisWrite {
                     track_id: track.id,
                     source_signature: signature.clone(),
-                    energy: 0.5,
-                    brightness: 0.5,
-                    tension: 0.5,
-                    moods: Vec::new(),
+                    decisions: Vec::new(),
+                moods: Vec::new(),
                     evidence: vec!["Insufficient evidence".to_owned()],
-                    confidence: Confidence::Low,
-                    metrics: json!({"contract":"assistant-music-tagger-output/v4"})
+                    metrics: json!({"contract":"assistant-music-tagger-output/v5","input_snapshot":music_application::assistant::model_tag_track_input(&track,None,None)})
                         .as_object()
                         .cloned()
                         .ok_or("metrics")?,

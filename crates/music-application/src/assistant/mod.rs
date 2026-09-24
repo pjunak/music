@@ -34,14 +34,12 @@ mod vocabulary;
 #[doc(hidden)]
 pub use fuzzing::exercise_structured_model_outputs;
 pub use local_analysis::{
-    AUDIO_ANALYSIS_JOB_KIND, AnalysisFailureState, AnalysisFailureWrite, AnalysisState,
-    AnalysisWrite, ContextScope, ContextState, ContextWrite, CurrentTrackContext,
-    LIBRARY_CONTEXT_JOB_KIND, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
-    LibraryAnalysisSummary, LibraryContextPassSummary, LibraryContextSummary, LocalAnalysisError,
-    LocalAnalysisRepository, LocalAnalysisService, METADATA_ANALYSIS_JOB_KIND,
-    MetadataAnalysisJobHandler, ModelAnalysisWrite, TrackContextDetail, VOICE_ANALYZER_ID,
-    VOICE_MODEL_FILENAME, VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature,
-    parse_context_state,
+    AnalysisFailureState, AnalysisFailureWrite, AnalysisState, AnalysisWrite, ContextScope,
+    ContextState, ContextWrite, CurrentTrackContext, LIBRARY_CONTEXT_JOB_KIND,
+    LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LibraryContextPassSummary,
+    LibraryContextSummary, LocalAnalysisError, LocalAnalysisRepository, LocalAnalysisService,
+    ModelAnalysisWrite, TrackContextDetail, VOICE_ANALYZER_ID, VOICE_MODEL_FILENAME,
+    VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature, parse_context_state,
 };
 pub use model_batch::*;
 pub use model_eq::*;
@@ -58,8 +56,8 @@ pub use model_tag_cleanup::*;
 pub use model_tagger::*;
 pub use model_transport::{ModelTransportFuture, StructuredModelTransport};
 pub use planner::{
-    EnergyCurve, LOCAL_PLAYLIST_ENGINE_ID, PlaylistAudioSignal, PlaylistCandidate, PlaylistIntent,
-    PlaylistPlan, PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
+    EnergyCurve, LOCAL_PLAYLIST_ENGINE_ID, PlaylistCandidate, PlaylistIntent, PlaylistPlan,
+    PlaylistSuggestion, PlaylistSuggestionRequest, suggest_local_playlist,
 };
 pub use playlist_evaluation::*;
 pub use provider_profiles::*;
@@ -76,13 +74,12 @@ pub use tags::{
     AnalysisReviewBatch, AnalysisReviewDecision, AnalysisReviewFailure, AnalysisReviewFailureCode,
     AnalysisReviewOutcome, AnalysisReviewTarget, AnalysisSuggestion, AssistantDependencyError,
     AssistantFuture, AssistantRepository, AssistantService, AssistantServiceError,
-    AssistantTrackEvidence, AssistantTrackView, AudioSignalProfile, BulkTagFailure, BulkTagOutcome,
-    CATALOG_TAG_ANALYZER_ID, Confidence, LOCAL_AUDIO_ANALYZER_ID, LOCAL_METADATA_ANALYZER_ID,
-    MAX_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ManualTagQuery, ModelAnalysisState,
-    ModelAnalysisStatus, ModelTagFilter, ModelTagReviewGuard, RenameTagOutcome, StoredAnalysis,
-    StoredAnalysisReview, TagPage, TagReviewCounts, TagReviewSummary, TagUsage,
-    audio_source_signature, catalog_tag_source_signature, metadata_source_signature,
-    normalize_manual_tag, normalize_manual_tags,
+    AssistantTrackEvidence, AssistantTrackView, BulkTagFailure, BulkTagOutcome,
+    CATALOG_TAG_ANALYZER_ID, Confidence, MAX_TAGS_PER_TRACK, MODEL_TAG_ANALYZER_ID, ManualTagQuery,
+    ModelAnalysisState, ModelAnalysisStatus, ModelTagFilter, ModelTagReviewGuard, RenameTagOutcome,
+    StoredAnalysis, StoredAnalysisReview, TagPage, TagReviewCounts, TagReviewSummary, TagUsage,
+    catalog_tag_source_signature, metadata_source_signature, normalize_manual_tag,
+    normalize_manual_tags,
 };
 pub use vocabulary::{
     CleanupApplyOutcome, CleanupMutation, CleanupPreview, CleanupSelection, CleanupSuggestion,

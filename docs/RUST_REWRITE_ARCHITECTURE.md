@@ -304,6 +304,8 @@ expiry or revocation.
   being hidden.
 - Axum routes are registered with their OpenAPI definitions. A checked-in semantic OpenAPI baseline
   detects missing operations, parameters, response statuses, and incompatible schema changes.
+  Intentional endpoint retirements require a `#retired` review entry bound to the exact removed
+  operation, with a reason. Unreviewed removals and security changes continue to fail the gate.
 - Request rejection uses a single `ApiError` envelope compatible with the frontend's `detail`
   handling. Validation errors remain 422; auth remains 401/403 as currently contracted.
 - Unexpected failures retain a safe `detail`, stable code, and correlation ID. Internal exception

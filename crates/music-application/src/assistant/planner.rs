@@ -6,12 +6,9 @@ use serde::{Deserialize, Serialize};
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
-use super::tags::{
-    AssistantTrackEvidence, AudioSignalProfile, Confidence, current_audio_analysis,
-    current_metadata_analysis, view_for_track,
-};
+use super::tags::{AssistantTrackEvidence, Confidence, view_for_track};
 
-pub const LOCAL_PLAYLIST_ENGINE_ID: &str = "local-planner/v2";
+pub const LOCAL_PLAYLIST_ENGINE_ID: &str = "local-planner/v3";
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -89,21 +86,10 @@ pub struct PlaylistIntent {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PlaylistAudioSignal {
-    pub analyzer_id: String,
-    pub energy: f64,
-    pub brightness: f64,
-    pub tension: f64,
-    pub tempo_bpm: Option<f64>,
-    pub confidence: Confidence,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct PlaylistPlan {
     pub energy_curve: EnergyCurve,
     pub selected_tracks: usize,
     pub selected_duration_s: f64,
-    pub audio_profile_tracks: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,7 +103,6 @@ pub struct PlaylistCandidate {
     pub origin: String,
     pub genre: String,
     pub manual_tags: Vec<String>,
-    pub analysis_tags: Vec<String>,
     pub length_s: f64,
     pub bpm: Option<u32>,
     pub match_score: f64,
@@ -126,7 +111,6 @@ pub struct PlaylistCandidate {
     pub default_selected: bool,
     pub sequence_position: Option<usize>,
     pub planning_energy: f64,
-    pub audio_signal: Option<PlaylistAudioSignal>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -265,12 +249,11 @@ const GENRE_ENERGY: &[(&str, f64)] = &[
 ];
 
 #[derive(Debug, Clone)]
-pub(super) struct MetadataProfile {
-    pub(super) energy: f64,
-    pub(super) brightness: f64,
-    pub(super) tension: f64,
-    pub(super) moods: Vec<String>,
-    pub(super) confidence: Confidence,
+struct SearchProfile {
+    energy: f64,
+    brightness: f64,
+    tension: f64,
+    moods: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -280,9 +263,7 @@ struct RankedTrack<'a> {
     confidence: Confidence,
     reasons: Vec<String>,
     manual_tags: Vec<String>,
-    analysis_tags: Vec<String>,
     planning_energy: f64,
-    signal: Option<AudioSignalProfile>,
 }
 
 pub fn interpret_prompt(prompt: &str) -> PlaylistIntent {
@@ -376,14 +357,12 @@ pub(super) fn suggest_local_playlist_from<'a>(
     let mut library_tracks = 0usize;
     for evidence in source {
         library_tracks += 1;
-        let signal = current_audio_analysis(evidence);
-        if !eligible(&evidence.track, signal.as_ref(), request, &excluded) {
+        if !eligible(&evidence.track, request, &excluded) {
             continue;
         }
         eligible_tracks += 1;
         let view = view_for_track(evidence, None);
-        let profile = current_profile(evidence, &view.analysis_tags)
-            .unwrap_or_else(|| metadata_profile(&evidence.track));
+        let profile = metadata_search_profile(&evidence.track);
         ranked.push(rank_track(
             &evidence.track,
             &intent,
@@ -391,7 +370,6 @@ pub(super) fn suggest_local_playlist_from<'a>(
             &match_terms,
             &profile,
             &view.manual_tags,
-            signal,
         ));
     }
     ranked.sort_by(|left, right| {
@@ -432,7 +410,6 @@ pub(super) fn suggest_local_playlist_from<'a>(
             origin: item.track.origin.clone(),
             genre: item.track.metadata.genre.clone(),
             manual_tags: item.manual_tags.clone(),
-            analysis_tags: item.analysis_tags.clone(),
             length_s: item.track.duration.as_secs_f64().max(0.0),
             bpm: item.track.metadata.bpm,
             match_score: round_to(item.score, 4),
@@ -441,14 +418,6 @@ pub(super) fn suggest_local_playlist_from<'a>(
             default_selected: selected_ids.contains(&item.track.id),
             sequence_position: sequence_positions.get(&item.track.id).copied(),
             planning_energy: round_to(item.planning_energy, 4),
-            audio_signal: item.signal.as_ref().map(|signal| PlaylistAudioSignal {
-                analyzer_id: signal.analyzer_id.clone(),
-                energy: signal.energy,
-                brightness: signal.brightness,
-                tension: signal.tension,
-                tempo_bpm: signal.tempo_bpm,
-                confidence: signal.confidence,
-            }),
         })
         .collect();
     Ok(PlaylistSuggestion {
@@ -460,27 +429,13 @@ pub(super) fn suggest_local_playlist_from<'a>(
             energy_curve: request.energy_curve,
             selected_tracks: default_pool.len(),
             selected_duration_s: round_to(selected_seconds, 3),
-            audio_profile_tracks: planned.iter().filter(|item| item.signal.is_some()).count(),
         },
         candidates,
     })
 }
 
-fn current_profile(
-    evidence: &AssistantTrackEvidence,
-    visible_tags: &[String],
-) -> Option<MetadataProfile> {
-    let (analysis, confidence) = current_metadata_analysis(evidence)?;
-    Some(MetadataProfile {
-        energy: analysis.energy,
-        brightness: analysis.brightness,
-        tension: analysis.tension,
-        moods: visible_tags.to_vec(),
-        confidence,
-    })
-}
-
-pub(super) fn metadata_profile(track: &IndexedTrack) -> MetadataProfile {
+// Search ranking priors only: these never become generated tags or audio measurements.
+fn metadata_search_profile(track: &IndexedTrack) -> SearchProfile {
     let fields = track_field_tokens(track, &[]);
     let mood_tokens = fields["title"]
         .union(&fields["genre"])
@@ -510,10 +465,7 @@ pub(super) fn metadata_profile(track: &IndexedTrack) -> MetadataProfile {
             energy_values.push(*prior);
         }
     }
-    let evidence_count = usize::from(!track_moods.is_empty())
-        + usize::from(track.metadata.bpm.is_some())
-        + usize::from(!track.metadata.genre.is_empty());
-    MetadataProfile {
+    SearchProfile {
         energy: mean(&energy_values, 0.5),
         brightness: mean(
             &track_moods
@@ -533,13 +485,6 @@ pub(super) fn metadata_profile(track: &IndexedTrack) -> MetadataProfile {
             .iter()
             .map(|profile| profile.name.to_owned())
             .collect(),
-        confidence: if evidence_count >= 3 {
-            Confidence::High
-        } else if evidence_count > 0 {
-            Confidence::Medium
-        } else {
-            Confidence::Low
-        },
     }
 }
 
@@ -548,12 +493,11 @@ fn rank_track<'a>(
     intent: &PlaylistIntent,
     intent_tokens: &BTreeSet<String>,
     match_terms: &BTreeSet<String>,
-    profile: &MetadataProfile,
+    profile: &SearchProfile,
     manual_tags: &[String],
-    signal: Option<AudioSignalProfile>,
 ) -> RankedTrack<'a> {
     let fields = track_field_tokens(track, manual_tags);
-    let (energy, brightness, tension) = combined_axes(profile, signal.as_ref());
+    let (energy, brightness, tension) = (profile.energy, profile.brightness, profile.tension);
     let (semantic_score, matched_terms) = semantic_match(intent_tokens, &fields);
     let manual_tokens = &fields["manual_tags"];
     let manual_matches = match_terms
@@ -610,19 +554,12 @@ fn rank_track<'a>(
     if weighted.is_empty() {
         weighted.push((0.5, 1.0));
     }
-    let mut evidence_count = matched_terms.len()
+    let evidence_count = matched_terms.len()
         + profile.moods.len()
         + manual_matches.len()
         + manual_mood_matches.len()
         + usize::from(track.metadata.bpm.is_some() && !intent.matched_moods.is_empty())
         + usize::from(!track.metadata.genre.is_empty());
-    if let Some(signal) = &signal {
-        evidence_count += if signal.confidence == Confidence::High {
-            2
-        } else {
-            1
-        };
-    }
     let raw_score = weighted
         .iter()
         .map(|(value, weight)| value * weight)
@@ -663,7 +600,7 @@ fn rank_track<'a>(
     }
     if !profile.moods.is_empty() {
         reasons.push(format!(
-            "Mood metadata: {}",
+            "Search keywords: {}",
             profile
                 .moods
                 .iter()
@@ -673,11 +610,7 @@ fn rank_track<'a>(
                 .join(", ")
         ));
     }
-    let effective_bpm = track
-        .metadata
-        .bpm
-        .map(f64::from)
-        .or_else(|| signal.as_ref().and_then(|item| item.tempo_bpm));
+    let effective_bpm = track.metadata.bpm.map(f64::from);
     if let Some(bpm) = effective_bpm
         && !intent.matched_moods.is_empty()
     {
@@ -687,33 +620,13 @@ fn rank_track<'a>(
             "higher-energy"
         };
         if (intent.energy - energy).abs() <= 0.25 {
-            let source = if track.metadata.bpm.is_none() {
-                "Measured tempo"
-            } else {
-                "Tempo"
-            };
+            let source = "Tempo metadata";
             reasons.push(format!(
                 "{source}: {bpm:.0} BPM supports the requested {pace} pace"
             ));
         } else {
-            let source = if track.metadata.bpm.is_none() {
-                "Measured tempo"
-            } else {
-                "Tempo evidence"
-            };
+            let source = "Tempo metadata";
             reasons.push(format!("{source}: {bpm:.0} BPM"));
-        }
-    }
-    if let Some(signal) = &signal
-        && reasons.len() < 4
-    {
-        if (intent.energy - signal.energy).abs() <= 0.25 {
-            reasons.push("Measured audio energy supports the requested flow".to_owned());
-        } else {
-            reasons.push(format!(
-                "Measured audio energy: {:.0}%",
-                signal.energy * 100.0
-            ));
         }
     }
     if !track.metadata.genre.is_empty() && reasons.len() < 3 {
@@ -735,54 +648,8 @@ fn rank_track<'a>(
         },
         reasons,
         manual_tags: manual_tags.to_vec(),
-        analysis_tags: profile.moods.clone(),
         planning_energy: energy,
-        signal,
     }
-}
-
-fn combined_axes(
-    profile: &MetadataProfile,
-    signal: Option<&AudioSignalProfile>,
-) -> (f64, f64, f64) {
-    let Some(signal) = signal else {
-        return (profile.energy, profile.brightness, profile.tension);
-    };
-    (
-        blend_axis(
-            profile.energy,
-            profile.confidence,
-            signal.energy,
-            signal.confidence,
-            1.0,
-        ),
-        blend_axis(
-            profile.brightness,
-            profile.confidence,
-            signal.brightness,
-            signal.confidence,
-            0.85,
-        ),
-        blend_axis(
-            profile.tension,
-            profile.confidence,
-            signal.tension,
-            signal.confidence,
-            0.6,
-        ),
-    )
-}
-
-fn blend_axis(
-    metadata: f64,
-    metadata_confidence: Confidence,
-    signal: f64,
-    signal_confidence: Confidence,
-    multiplier: f64,
-) -> f64 {
-    let metadata_weight = metadata_confidence.weight();
-    let signal_weight = signal_confidence.weight() * multiplier;
-    clamp((metadata * metadata_weight + signal * signal_weight) / (metadata_weight + signal_weight))
 }
 
 fn semantic_match(
@@ -842,18 +709,13 @@ fn track_field_tokens(
 
 fn eligible(
     track: &IndexedTrack,
-    signal: Option<&AudioSignalProfile>,
     request: &PlaylistSuggestionRequest,
     excluded: &BTreeSet<TrackId>,
 ) -> bool {
     if excluded.contains(&track.id) {
         return false;
     }
-    let bpm = track
-        .metadata
-        .bpm
-        .map(f64::from)
-        .or_else(|| signal.and_then(|item| item.tempo_bpm));
+    let bpm = track.metadata.bpm.map(f64::from);
     let Some(bpm) = bpm else {
         return request.include_unknown_bpm;
     };

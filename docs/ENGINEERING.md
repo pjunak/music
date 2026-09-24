@@ -102,9 +102,9 @@ is selected using [the validation matrix](VALIDATION.md).
 - Automatic playlists are a mode on the normal `Playlist` model, not a second playlist type. Keep
   `automatic-playlist/v1` local and deterministic, require an exact read-only preview before saving
   a rule, and materialize matches into ordinary ordered playlist items so existing playback clients
-  remain unchanged. Refresh stale rules before reads and playback. Only accepted/manual tags and,
-  when explicitly selected, current `local-metadata/v1` moods may be rule evidence; provider/model
-  suggestions must never become silent automatic inputs. Lock individual item edits while the rule
+  remain unchanged. Refresh stale rules before reads and playback. Only accepted/manual tags may be rule evidence; generated
+  suggestions become usable only after explicit acceptance. The forward analysis reset converts
+  old rules to this source while preserving their filters and materialized tracks. Lock individual item edits while the rule
   is active, and preserve the materialized list when the operator switches back to manual. A
   malformed persisted rule must not break playlist listing or playback: expose its safe error state,
   keep the last materialized rows, and let the operator replace the rule or make the playlist manual.

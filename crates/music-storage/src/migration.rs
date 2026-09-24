@@ -38,6 +38,7 @@ const CLEANUP_REJECTIONS_MIGRATION_SQL: &str =
 const RICH_TRACK_METADATA_MIGRATION_SQL: &str =
     include_str!("../migrations/0014_rich_track_metadata.sql");
 
+const TAG_DECISIONS_SQL: &str = include_str!("../migrations/0016_tag_decisions.sql");
 const SONG_EVIDENCE_REBUILD_SQL: &str =
     include_str!("../migrations/0015_song_evidence_rebuild.sql");
 
@@ -318,6 +319,13 @@ fn migrator() -> Migrator {
             "song evidence rebuild".into(),
             MigrationType::Simple,
             SONG_EVIDENCE_REBUILD_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            16,
+            "per-tag decisions".into(),
+            MigrationType::Simple,
+            TAG_DECISIONS_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -843,6 +851,13 @@ mod tests {
             VALUES ('job','assistant.library-context-analysis','running','{}','{\"old_checkpoint\":true}',1,'Old','Old',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);")
             .execute(&pool).await?;
         sqlx::query("INSERT INTO background_jobs (id,kind,status,lane,parameters_json,result_json,progress_current,progress_phase,progress_message,attempts,created_at,updated_at) VALUES ('paid','assistant.model-music-tagging','running','provider','{}','{\"provider_attempt\":\"uncertain\"}',1,'Submitted','Submitted',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").execute(&pool).await?;
+        let rule = serde_json::json!({"schema":"automatic-playlist/v1","tag_sources":"manual_and_local","include_tags":["accepted-calm"],"maximum_tracks":25});
+        sqlx::query(
+            "UPDATE playlists SET automatic_rule_json = ?, automatic_source_signature = 'old'",
+        )
+        .bind(rule.to_string())
+        .execute(&pool)
+        .await?;
         pool.close().await;
         let before = crate::inspect_database(&path).await?;
         assert!(before.is_compatible(), "{before:?}");
@@ -912,6 +927,37 @@ mod tests {
                 .await?,
             "cancelled"
         );
+        let actual_rule: String =
+            sqlx::query_scalar("SELECT automatic_rule_json FROM playlists WHERE id=1")
+                .fetch_one(&storage.pool)
+                .await?;
+        let parsed_rule: music_application::playlists::AutomaticPlaylistRule =
+            serde_json::from_str(&actual_rule)?;
+        assert_eq!(parsed_rule.normalized()?.maximum_tracks, 25);
+        let mut expected_rule = rule;
+        expected_rule["tag_sources"] = serde_json::json!("manual");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actual_rule)?,
+            expected_rule
+        );
+        assert!(
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT automatic_source_signature FROM playlists WHERE id=1"
+            )
+            .fetch_one(&storage.pool)
+            .await?
+            .is_none()
+        );
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('track_analyses')")
+                .fetch_all(&storage.pool)
+                .await?;
+        for retired in ["energy", "brightness", "tension", "confidence"] {
+            assert!(!columns.iter().any(|name| name == retired));
+        }
+        assert!(columns.iter().any(|name| name == "decisions_json"));
+        sqlx::query("INSERT INTO track_analyses (track_id,analyzer_id,source_signature,job_id,moods_json,evidence_json,metrics_json,decisions_json,updated_at) VALUES (1,'model-context-tagger/v8','new','new-job','[]','[\"No useful support\"]','{}','[]',CURRENT_TIMESTAMP)")
+            .execute(&storage.pool).await?;
         sqlx::query("INSERT INTO track_contexts VALUES (1,'local-context/v3','new','new-job','full','{}','[]','[]','{}','{}',CURRENT_TIMESTAMP)").execute(&storage.pool).await?;
         storage.close().await;
         drop(storage);
@@ -920,6 +966,12 @@ mod tests {
         assert!(reopened.migration_outcome().backup.is_none());
         assert_eq!(
             sqlx::query_scalar::<_, String>("SELECT source_signature FROM track_contexts")
+                .fetch_one(&reopened.pool)
+                .await?,
+            "new"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT source_signature FROM track_analyses")
                 .fetch_one(&reopened.pool)
                 .await?,
             "new"

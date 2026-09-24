@@ -156,6 +156,10 @@ mod tests {
                 .collect::<Result<Vec<_>, _>>()?;
             let id = case.track["track_id"].as_i64().ok_or("track ID missing")?;
             let batch = ModelTaggerBatch::new(vec![case.track.clone()], vocabulary.clone())?;
+            let evidence_id = super::super::evidence_ids(&case.track)
+                .into_iter()
+                .next()
+                .ok_or("evidence ID missing")?;
             let profiles = batch.finish(StructuredModelResult {
                 token_details: Default::default(),
                 outcome: ProviderAttemptOutcome::ResponseReceived,
@@ -163,8 +167,9 @@ mod tests {
                 error_code: None,
                 payload: Some(
                     json!({"schema_version": MODEL_TAGGER_OUTPUT_CONTRACT, "tracks": [{
-                        "track_id": 1, "tag_ids": ids, "confidence": case.allowed_confidences[0],
-                        "evidence": ["Fixed synthetic expected-label fixture."]
+                        "track_id": 1,
+                        "decisions":ids.iter().map(|id| json!({"tag_id":id,"support":case.allowed_support[0],"evidence":["Fixed synthetic expected-label fixture."],"evidence_ids":[evidence_id],"contradiction_ids":[]})).collect::<Vec<_>>(),
+                        "abstention_reason":if ids.is_empty() {Some("Fixed synthetic abstention fixture.")} else {None}
                     }]}),
                 ),
                 provider_model_id: None,

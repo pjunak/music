@@ -161,7 +161,7 @@
   font-size: var(--text-2xs);
   text-transform: uppercase;
 }
-.mood-tagging-suggestion.is-low small {
+.mood-tagging-suggestion.is-tentative small {
   color: var(--warn);
 }
 .mood-tagging-evidence {

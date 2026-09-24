@@ -1,23 +1,34 @@
+
+fn review_fixture_decisions(tags: &[&str]) -> Vec<music_application::assistant::TagDecision> {
+    tags.iter().map(|tag| music_application::assistant::TagDecision {
+        tag: (*tag).to_owned(), support: music_application::assistant::TagSupport::Tentative,
+        evidence: vec!["Synthetic evidence".to_owned()], evidence_ids: vec!["metadata.length_s".to_owned()], contradiction_ids: Vec::new(),
+    }).collect()
+}
+
 #[tokio::test]
 async fn review_write_failure_rolls_back_manual_tags_and_earlier_decisions()
 -> Result<(), Box<dyn Error + Send + Sync>> {
-    use music_application::assistant::{AnalysisWrite, Confidence, LocalAnalysisRepository};
+    use music_application::assistant::{AnalysisWrite, LocalAnalysisRepository};
     let (_directory, storage) = storage().await?;
-    let tracks = AssistantRepository::tracks(&storage).await?;
+    music_application::cleanup_sources::CleanupSourceRepository::set_cleanup_source_enabled(&storage, "lastfm", true).await?;
+    let storage = std::sync::Arc::new(storage);
+    let tracks = AssistantRepository::tracks(storage.as_ref()).await?;
     let mut targets = Vec::new();
     for evidence in &tracks {
-        let source_signature = metadata_source_signature(&evidence.track)?;
-        storage.store_metadata_analysis(
-            LOCAL_METADATA_ANALYZER_ID, "fixture", &[AnalysisWrite {
+        let revision = music_application::cleanup_enrichment::CleanupEnrichmentRepository::catalog_evidence_revision(storage.as_ref()).await?;
+        let source_signature = music_application::assistant::catalog_tag_source_signature(&evidence.track, revision)?;
+        storage.store_catalog_analysis(
+            CATALOG_TAG_ANALYZER_ID, "fixture", &[AnalysisWrite {
                 track_id: evidence.track.id, source_signature: source_signature.clone(),
-                energy: 0.2, brightness: 0.5, tension: 0.1,
+                decisions: review_fixture_decisions(&["calm"]),
                 moods: vec!["calm".to_owned()], evidence: vec!["Synthetic metadata".to_owned()],
-                metrics: Map::new(), confidence: Confidence::High,
+                metrics: serde_json::json!({"evidence_revision":revision}).as_object().cloned().ok_or("metrics")?,
             }],
         ).await?;
         targets.push(AnalysisReviewTarget {
             track_id: evidence.track.id, tag: "calm".to_owned(),
-            analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(), source_signature,
+            analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(), source_signature,
         });
     }
     assert_eq!(targets.len(), 2);
@@ -27,7 +38,7 @@ async fn review_write_failure_rolls_back_manual_tags_and_earlier_decisions()
         WHEN NEW.track_id = 2 BEGIN SELECT RAISE(ABORT, 'synthetic review failure'); END")
         .execute(&storage.pool).await?;
     assert!(AssistantRepository::review_analysis(
-        &storage, &targets, AnalysisReviewDecision::Accepted, None,
+        storage.as_ref(), &targets, AnalysisReviewDecision::Accepted, None,
     ).await.is_err());
     for table in ["track_user_tags", "track_analysis_tag_reviews"] {
         let query = format!("SELECT COUNT(*) FROM {table}");
@@ -35,11 +46,11 @@ async fn review_write_failure_rolls_back_manual_tags_and_earlier_decisions()
     }
     sqlx::query("DROP TRIGGER fail_second_review").execute(&storage.pool).await?;
     let retry = AssistantRepository::review_analysis(
-        &storage, &targets, AnalysisReviewDecision::Accepted, None,
+        storage.as_ref(), &targets, AnalysisReviewDecision::Accepted, None,
     ).await?;
     assert_eq!(retry.applied.len(), 2);
     assert!(retry.failures.is_empty());
-    assert!(AssistantRepository::tracks(&storage).await?.iter().all(|evidence| evidence.manual_tags == ["calm"]));
+    assert!(AssistantRepository::tracks(storage.as_ref()).await?.iter().all(|evidence| evidence.manual_tags == ["calm"]));
     Ok(())
 }
 
@@ -47,7 +58,7 @@ async fn review_write_failure_rolls_back_manual_tags_and_earlier_decisions()
 async fn review_summary_preserves_denominators_and_tracks_real_decisions()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     use music_application::assistant::{
-        AnalysisWrite, Confidence, ContextScope, LocalAnalysisRepository, ManualTagQuery,
+        AnalysisWrite, ContextScope, LocalAnalysisRepository, ManualTagQuery,
         TagReviewCounts,
     };
     use std::sync::Arc;
@@ -55,27 +66,26 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
     sqlx::query("UPDATE tracks SET path = 'Sub/b.mp3' WHERE id = 2")
         .execute(&storage.pool)
         .await?;
+    music_application::cleanup_sources::CleanupSourceRepository::set_cleanup_source_enabled(&storage, "lastfm", true).await?;
     let storage = Arc::new(storage);
     let service = AssistantService::new(storage.clone());
     let tracks = service.tracks().await?;
     let mut targets = Vec::new();
     for evidence in &tracks {
-        let source_signature = metadata_source_signature(&evidence.track)?;
+        let revision = music_application::cleanup_enrichment::CleanupEnrichmentRepository::catalog_evidence_revision(storage.as_ref()).await?;
+        let source_signature = music_application::assistant::catalog_tag_source_signature(&evidence.track, revision)?;
         assert_eq!(
             storage
-                .store_metadata_analysis(
-                    LOCAL_METADATA_ANALYZER_ID,
+                .store_catalog_analysis(
+                    CATALOG_TAG_ANALYZER_ID,
                     "fixture",
                     &[AnalysisWrite {
                         track_id: evidence.track.id,
                         source_signature: source_signature.clone(),
-                        energy: 0.2,
-                        brightness: 0.5,
-                        tension: 0.1,
-                        moods: vec!["calm".to_owned()],
+                        decisions: review_fixture_decisions(&["calm"]),
+                moods: vec!["calm".to_owned()],
                         evidence: vec!["Synthetic metadata".to_owned()],
-                        metrics: Map::new(),
-                        confidence: Confidence::High,
+                        metrics: serde_json::json!({"evidence_revision":revision}).as_object().cloned().ok_or("metrics")?,
                     }]
                 )
                 .await?,
@@ -84,7 +94,7 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
         targets.push(AnalysisReviewTarget {
             track_id: evidence.track.id,
             tag: "calm".to_owned(),
-            analyzer_id: LOCAL_METADATA_ANALYZER_ID.to_owned(),
+            analyzer_id: CATALOG_TAG_ANALYZER_ID.to_owned(),
             source_signature,
         });
     }
@@ -93,7 +103,7 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
         .await?;
     let initial = service.tag_page(ManualTagQuery::default()).await?;
     assert_eq!(
-        initial.review_summary.sources[LOCAL_METADATA_ANALYZER_ID].pending,
+        initial.review_summary.sources[CATALOG_TAG_ANALYZER_ID].pending,
         2
     );
     for (target, decision) in targets.iter().zip([
@@ -115,7 +125,7 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
         .review_summary;
     assert_eq!(expected.matching_tracks, 2);
     assert_eq!(
-        expected.sources[LOCAL_METADATA_ANALYZER_ID],
+        expected.sources[CATALOG_TAG_ANALYZER_ID],
         TagReviewCounts {
             pending: 0,
             accepted: 1,
@@ -175,8 +185,8 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
     ] {
         let summary = service.tag_page(query).await?.review_summary;
         assert_eq!(summary.matching_tracks, 1);
-        assert_eq!(summary.sources[LOCAL_METADATA_ANALYZER_ID].accepted, 1);
-        assert_eq!(summary.sources[LOCAL_METADATA_ANALYZER_ID].rejected, 0);
+        assert_eq!(summary.sources[CATALOG_TAG_ANALYZER_ID].accepted, 1);
+        assert_eq!(summary.sources[CATALOG_TAG_ANALYZER_ID].rejected, 0);
     }
     let empty = service
         .tag_page(ManualTagQuery {
@@ -202,7 +212,7 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
         .await?;
     let reopened = service.tag_page(ManualTagQuery::default()).await?;
     assert_eq!(
-        reopened.review_summary.sources[LOCAL_METADATA_ANALYZER_ID],
+        reopened.review_summary.sources[CATALOG_TAG_ANALYZER_ID],
         TagReviewCounts {
             pending: 1,
             accepted: 0,
@@ -217,7 +227,7 @@ async fn review_summary_preserves_denominators_and_tracks_real_decisions()
 async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction()
 -> Result<(), Box<dyn Error + Send + Sync>> {
     use music_application::assistant::{
-        AnalysisWrite, Confidence, LocalAnalysisRepository, ModelAnalysisWrite,
+        AnalysisWrite, LocalAnalysisRepository, ModelAnalysisWrite,
         ModelRoleReviewIdentity, model_tag_source_signature,
     };
     use std::sync::Arc;
@@ -230,6 +240,7 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
         "profile",
         "context",
         "malformed",
+        "missing-reference",
         "missing-guard",
     ] {
         let (_directory, storage) = storage().await?;
@@ -281,17 +292,14 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
                         profile: AnalysisWrite {
                             track_id: track.id,
                             source_signature: signature,
-                            energy: 0.5,
-                            brightness: 0.5,
-                            tension: 0.5,
-                            moods: vec!["calm".to_owned()],
+                            decisions: review_fixture_decisions(&["calm"]),
+                moods: vec!["calm".to_owned()],
                             evidence: vec!["Synthetic evidence".to_owned()],
                             metrics:
-                                serde_json::json!({"contract":"assistant-music-tagger-output/v4"})
+                                serde_json::json!({"contract":"assistant-music-tagger-output/v5","input_snapshot":music_application::assistant::model_tag_track_input(&track,None,None)})
                                     .as_object()
                                     .cloned()
                                     .ok_or("metrics missing")?,
-                            confidence: Confidence::High,
                         }
                     }]
                 )
@@ -334,9 +342,13 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
                 );
             }
             "malformed" => {
-                sqlx::query("UPDATE track_analyses SET confidence = 'invalid'")
+                sqlx::query("UPDATE track_analyses SET decisions_json = '[]'")
                     .execute(&storage.pool)
                     .await?;
+            }
+            "missing-reference" => {
+                sqlx::query("UPDATE track_analyses SET decisions_json = json_set(decisions_json, '$[0].evidence_ids[0]', 'audio.missing')")
+                    .execute(&storage.pool).await?;
             }
             "role" => {
                 sqlx::query("UPDATE assistant_model_roles SET model_id = 'changed'")

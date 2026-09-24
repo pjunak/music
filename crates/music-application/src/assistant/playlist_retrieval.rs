@@ -97,11 +97,6 @@ pub(super) fn supplement_candidates(
         candidate.sequence_position = None;
     }
     baseline.candidates.extend(recalled);
-    baseline.plan.audio_profile_tracks = baseline
-        .candidates
-        .iter()
-        .filter(|candidate| candidate.audio_signal.is_some())
-        .count();
     Ok(())
 }
 

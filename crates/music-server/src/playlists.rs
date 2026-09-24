@@ -147,7 +147,6 @@ enum AutomaticMatchRequest {
 #[serde(rename_all = "snake_case")]
 enum AutomaticTagSourcesRequest {
     Manual,
-    ManualAndLocal,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, ToSchema)]
@@ -896,7 +895,6 @@ impl TryFrom<AutomaticPlaylistRuleRequest> for AutomaticPlaylistRule {
             exclude_tags: rule.exclude_tags,
             tag_sources: match rule.tag_sources {
                 AutomaticTagSourcesRequest::Manual => AutomaticTagSources::Manual,
-                AutomaticTagSourcesRequest::ManualAndLocal => AutomaticTagSources::ManualAndLocal,
             },
             min_bpm: rule.min_bpm,
             max_bpm: rule.max_bpm,
@@ -926,7 +924,6 @@ impl From<AutomaticPlaylistRule> for AutomaticPlaylistRuleResponse {
             exclude_tags: rule.exclude_tags,
             tag_sources: match rule.tag_sources {
                 AutomaticTagSources::Manual => AutomaticTagSourcesRequest::Manual,
-                AutomaticTagSources::ManualAndLocal => AutomaticTagSourcesRequest::ManualAndLocal,
             },
             min_bpm: rule.min_bpm,
             max_bpm: rule.max_bpm,
@@ -1209,7 +1206,7 @@ fn automatic_match_schema() -> RefOr<Schema> {
 fn automatic_tag_sources_schema() -> RefOr<Schema> {
     ObjectBuilder::new()
         .schema_type(Type::String)
-        .enum_values(Some(["manual", "manual_and_local"]))
+        .enum_values(Some(["manual"]))
         .default(Some(json!("manual")))
         .into()
 }
