@@ -392,7 +392,7 @@ impl JobHandler for ContextAnalysisJobHandler {
     fn definition(&self) -> JobDefinition {
         JobDefinition {
             kind: LIBRARY_CONTEXT_JOB_KIND,
-            schema_version: 1,
+            schema_version: 2,
             lane: JobLane::Local,
             restartable: true,
             checkpoint_policy: JobCheckpointPolicy::Replace,
@@ -570,7 +570,6 @@ impl JobHandler for ContextAnalysisJobHandler {
                             track_id,
                             source_signature: signature,
                             completeness: document.completeness.to_owned(),
-                            confidence: document.confidence.to_owned(),
                             summary: document.summary,
                             timeline: document.timeline,
                             sections: document.sections,
@@ -1155,7 +1154,6 @@ fn context_with_voice(
         track_id,
         source_signature: state.source_signature.clone(),
         completeness: "full".to_owned(),
-        confidence: context.confidence,
         summary: context.summary,
         timeline: context.timeline,
         sections: context.sections,
@@ -1397,9 +1395,8 @@ mod tests {
             source_signature: "current-signature".to_owned(),
             job_id: "signal-job".to_owned(),
             completeness: "partial".to_owned(),
-            confidence: "high".to_owned(),
             summary_json: json!({
-                "schema_version": "local-context/v2",
+                "schema_version": "local-context/v3",
                 "voice": {"status": "not_classified"},
                 "measurement_reliability": {"voice": "pending"},
             })
@@ -1419,7 +1416,7 @@ mod tests {
         let voice = VoiceAnalysisDocument {
             summary: json!({
                 "status": "classified",
-                "voice_probability": 0.8,
+                "voice_score": 0.8,
                 "vocal_coverage": 0.75,
                 "note": "bounded classifier evidence",
             })
@@ -1429,7 +1426,7 @@ mod tests {
             stage: json!({
                 "status": "complete",
                 "required": false,
-                "analyzer_id": "essentia-musicnn-voice/v1",
+                "analyzer_id": "essentia-musicnn-voice/v2",
             })
             .as_object()
             .cloned()

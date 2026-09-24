@@ -1,11 +1,57 @@
 # Song evidence and mood tagging implementation plan
 
 Prepared 23 September 2026; clean-cutover scope reviewed against `music` commit `046f67e`.
-Status: proposed implementation; no runtime changes or model certification.
+Status: implementation in progress; the foundation below is implemented. No model is certified.
 This turns the [research](SONG_EVIDENCE_RESEARCH.md) into dependency-ordered work.
 Public model specifications and current source were inspected; native compatibility,
 listening accuracy, licensing suitability, and production cost still need the gates below.
 All new module names, schemas, commands, and limits below are proposals.
+
+## Implementation status — 24 September 2026
+
+- **Implemented:** grouped JSONL pilot tooling with frozen recording groups, four-state
+  labels, separate development/confirmation scoring, per-tag counts and group bootstrap
+  intervals. The owner confirmed there is no labeled dataset yet; listening remains open.
+- **Implemented:** context v3 with gain-invariant relative dynamics, explicit coverage,
+  no whole-track context confidence, `voice_score`, and coarse local tempo withheld from
+  the model projection. Existing bounded execution and source-audio decoding are reused.
+- **Implemented:** bounded original Last.fm observations, current-policy MusicBrainz/
+  Last.fm projection in tagger input v23 (`song-evidence/v1`), source-aware result identity,
+  transactional save/review guards, updated disclosure v14 and runtime fingerprints.
+- **Implemented:** forward schema-15 reset of generated analysis and proposal reviews,
+  old-job supersession and audit preservation, current-only context parsing, updated
+  existing review/inspector UI. Accepted/manual tags and authored playlists survive.
+- **Native probe:** exact published ONNX encoder and both heads run with Tract 0.23.7
+  at batch size one. Full preprocessing/output parity, cancellation, production resource
+  bounds and listening usefulness remain unproven; no new model runtime/weights are bundled.
+- **Still required:** the per-tag decision/support contract and corresponding storage/UI
+  replacement, retirement of the separate metadata/audio heuristic paths, final acceptance
+  and an operator-started production rebuild. The current model output remains v4;
+  context confidence removal is not removal of model-level confidence.
+- **Conditional:** learned audio integration follows its parity/usefulness gates. Jev,
+  training, extra encoders/datasets and a new annotation UI are not release dependencies.
+
+### Native probe evidence
+
+An isolated release-build Rust probe on the Windows GNU host loaded all three artifacts.
+The ONNX encoder's real output names are `activations` and `embeddings`, and both heads
+use `activations`; the catalog JSON names describe a different exported graph interface.
+Use `with_ignore_value_info(true)` to let Tract infer intermediate shapes after binding
+batch size one; otherwise symbolic `batch_size` value-info conflicts with the concrete input.
+No graph operations or weights were rewritten. Encoder input is `[1,128,96]`, embedding
+`[1,1280]`, head inputs `[1,1280]`, outputs `[1,56]` and `[1,40]` respectively.
+
+| Artifact | Verified SHA-256 |
+|---|---|
+| `discogs-effnet-bsdynamic-1.onnx` | `a280825b334797cf677939db8cd5762c0392aedd0ca6415dbc1cd083f045e43c` |
+| `mtg_jamendo_moodtheme-discogs-effnet-1.onnx` | `7d6270acaa5f4bba4b115a0d6849aca05ed6bd153dcb6d9da4f6ab9f99ef10ff` |
+| `mtg_jamendo_instrument-discogs-effnet-1.onnx` | `9ae2d9e763d66bd8eed654d1ac3aa171e6539cb8a0e11f3dcd53df1428980802` |
+
+A zero-mel tensor produced finite outputs with those dimensions; one observed encoder
+load took 115 ms and inference 9 ms on this host. These are smoke-test observations,
+not audio/reference parity, a production performance budget or mood-quality evidence.
+The artifacts and temporary probe are private ignored research output, not app dependencies.
+The upstream artifact links and licensing gate remain in stage 2 below.
 
 ## Product purpose and admission rule
 

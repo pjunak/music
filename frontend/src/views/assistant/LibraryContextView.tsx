@@ -11,7 +11,7 @@ import { assistantApi, libraryApi } from "@/core/api";
 import type { Track } from "@/core/types";
 
 const TRAJECTORIES = [
-  ["intensity", "Intensity"],
+  ["relative_level", "Relative level"],
   ["loudness", "Signal level"],
   ["rhythmic_drive", "Rhythmic drive"],
   ["brightness", "Brightness"],
@@ -88,7 +88,7 @@ function Timeline({
   const plotHeight = height - plotInsetY * 2;
   const duration = timelineDuration(detail);
   const series = [
-    ["intensity", "#f5a65b"],
+    ["relative_level", "#f5a65b"],
     ["rhythmic_drive", "#57d3c8"],
     ["loudness", "#8ca8ff"],
   ] as const;
@@ -99,7 +99,7 @@ function Timeline({
       <div className="assistant-context-chart-timeline">
         <svg
           role="img"
-          aria-label="Intensity, rhythmic drive, and loudness across the track"
+          aria-label="Relative level, rhythmic drive, and loudness across the track"
           viewBox={`0 0 ${width} ${height}`}
           preserveAspectRatio="none"
         >
@@ -164,7 +164,7 @@ function Timeline({
       </div>
       <div className="assistant-context-chart-footer">
         <div className="assistant-context-chart-legend">
-          <span className="is-intensity">Intensity</span>
+          <span className="is-intensity">Relative level</span>
           <span className="is-rhythm">Rhythmic drive</span>
           <span className="is-loudness">Signal level</span>
         </div>
@@ -193,7 +193,7 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
   const voiceStatus = stringValue(voice?.status);
   // The legacy wire key is retained, but its value is a normalized classifier
   // score rather than a calibrated probability.
-  const voiceScore = numberValue(voice?.voice_probability);
+  const voiceScore = numberValue(voice?.voice_score);
   const vocalCoverage = numberValue(voice?.vocal_coverage);
   const duration = timelineDuration(detail);
 
@@ -274,7 +274,7 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
           <span
             className={`assistant-job-status assistant-context-status is-${detail.status === "full" ? "succeeded" : "queued"}`}
           >
-            {detail.status} · {detail.confidence ?? "unknown"} confidence
+            {detail.status} · audio coverage
           </span>
         </div>
         <audio
@@ -387,7 +387,7 @@ function ContextDetail({ detail }: { detail: TrackContextDetail }) {
                 <span>{seconds(section.start_s)}–{seconds(section.end_s)}</span>
               </div>
               <p>
-                Intensity {percent(section.intensity)} · rhythm {percent(section.rhythmic_drive)} ·
+                Relative level {percent(section.relative_level)} · rhythm {percent(section.rhythmic_drive)} ·
                 brightness {percent(section.brightness)} · fullness {percent(section.density)}
               </p>
               {Array.isArray(section.changes_from_previous) && section.changes_from_previous.length > 0 ? (

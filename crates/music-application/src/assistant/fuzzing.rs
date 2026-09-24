@@ -87,6 +87,7 @@ fn playlist_fixture() -> Option<ModelPlaylistTask> {
     let id = TrackId::new(1).ok()?;
     let path = LibraryPath::parse("Fuzz/track.flac").ok()?;
     let track = AssistantTrackEvidence {
+        catalog_evidence: None,
         track: IndexedTrack {
             id,
             path,

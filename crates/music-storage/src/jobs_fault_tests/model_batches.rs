@@ -299,7 +299,7 @@ async fn empty_tagging_pilots_stop_and_continue_without_rebilling_current_tracks
     let parameters = json!({
         "inference_fingerprint":execution.inference_fingerprint,"role_fingerprint":execution.fingerprint,
         "vocabulary_fingerprint":vocabulary.fingerprint,"role_id":"music_tagger",
-        "quality_evaluation_id":TAGGING_QUALITY_EVALUATION_ID,"disclosure_version":"assistant-model-music-tagging-disclosure/v13","consent":true,
+        "quality_evaluation_id":TAGGING_QUALITY_EVALUATION_ID,"disclosure_version":"assistant-model-music-tagging-disclosure/v14","consent":true,
         "scope":{"type":"all","path":"","recursive":false,"track_ids":[]},"context_policy":"include","force":false,
         "limits":{"max_tracks":35,"max_requests":10,"max_token_reservation":1_000_000,"stop_on_empty_batch":true}
     });
@@ -633,7 +633,7 @@ async fn partial_batch_results_preserve_missing_usage_and_reject_stale_inference
         "role_fingerprint":"old-certification", "role_configuration_fingerprint":"configuration", "connection_fingerprint":"connection",
         "adapter_id":"openai-responses/v1", "model_id":"fixture", "thinking_mode":"disabled", "timeout_seconds":30,
         "max_output_tokens_per_request":2000, "max_attempts":2,"output_token_ceiling":4000,
-        "evaluation_id":"music-tagging-quality-v1", "disclosure_version":"assistant-model-music-tagging-disclosure/v13",
+        "evaluation_id":"music-tagging-quality-v1", "disclosure_version":"assistant-model-music-tagging-disclosure/v14",
         "scope_fingerprint":"scope","evidence_fingerprint":"evidence","review_destination":"track_tag_review","queue_wait_seconds":0
     }))?;
     let mut usage = ProviderUsageAccumulator::for_run(manifest)
@@ -656,7 +656,7 @@ async fn partial_batch_results_preserve_missing_usage_and_reject_stale_inference
         remote_batch_id: None,
         document: json!({"parameters":{
             "inference_fingerprint":"old-inference", "role_fingerprint":"old-certification", "vocabulary_fingerprint":vocabulary.fingerprint,
-            "role_id":"music_tagger","quality_evaluation_id":"music-tagging-quality-v1","disclosure_version":"assistant-model-music-tagging-disclosure/v13","consent":true,
+            "role_id":"music_tagger","quality_evaluation_id":"music-tagging-quality-v1","disclosure_version":"assistant-model-music-tagging-disclosure/v14","consent":true,
             "scope":{"type":"all","path":"","recursive":false,"track_ids":[]},"context_policy":"include","force":false
         },"inputs":inputs,"templates":templates,"ranges":[{"start":0,"end":1},{"start":1,"end":2}],"submission_usage":usage}),
     };

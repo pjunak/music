@@ -49,8 +49,8 @@ to overwrite an existing file. Preserve the original frozen copy privately.
 
 In each selected row, record ordered `listened_intervals` as seconds, for example
 `[[0, 150]]`. Set `scope` to `whole_track` or `excerpt`; excerpt judgments cannot
-certify a whole recording. Record `blind: false` if predictions were visible or
-influenced the judgment. Mark `reviewed: true` only after listening.
+certify a whole recording. Set the initially unknown `blind` field explicitly: `true` only for independent
+listening, or `false` if predictions were visible or influenced the judgment. Mark `reviewed: true` only after listening.
 
 Use vocabulary IDs in `labels`, for example:
 

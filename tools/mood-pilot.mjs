@@ -54,7 +54,7 @@ export function createPilot(run, vocabulary) {
     session_requests: [], selection_notes: "", partition_fingerprint: null },
   ...[...results].sort(([a], [b]) => a - b).map(([track_id]) => ({ kind: "judgment", track_id,
     file_reference: "", recording_group: "", duplicate_group: null, album: null, composers: [],
-    split: null, scope: "whole_track", listened_intervals: [], blind: true, reviewed: false,
+    split: null, scope: "whole_track", listened_intervals: [], blind: null, reviewed: false,
     labels: {}, session_notes: "", notes: "" }))];
 }
 

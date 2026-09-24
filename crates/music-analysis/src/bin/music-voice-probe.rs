@@ -76,7 +76,7 @@ async fn run(arguments: Arguments) -> Result<(), ProbeError> {
                 "schema_version": "voice-probe/v1",
                 "index": index,
                 "status": document.summary.get("status").and_then(Value::as_str),
-                "voice_score": document.summary.get("voice_probability").and_then(Value::as_f64),
+                "voice_score": document.summary.get("voice_score").and_then(Value::as_f64),
                 "vocal_coverage": document.summary.get("vocal_coverage").and_then(Value::as_f64),
                 "prediction_windows": document.prediction_windows,
                 "model_sha256": document.stage.get("model_sha256").and_then(Value::as_str),

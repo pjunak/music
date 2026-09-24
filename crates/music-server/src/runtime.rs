@@ -4582,7 +4582,7 @@ mod tests {
                 .result
                 .as_ref()
                 .and_then(|result| result.get("analyzer")),
-            Some(&json!("local-context/v2"))
+            Some(&json!("local-context/v3"))
         );
 
         let context_summary = router
@@ -4596,7 +4596,7 @@ mod tests {
         assert_eq!(context_summary.status(), StatusCode::OK);
         let context_summary_json: Value =
             serde_json::from_slice(&to_bytes(context_summary.into_body(), 1024 * 1024).await?)?;
-        assert_eq!(context_summary_json["analyzer"], "local-context/v2");
+        assert_eq!(context_summary_json["analyzer"], "local-context/v3");
         assert_eq!(context_summary_json["analyzed_tracks"], 1);
         assert_eq!(context_summary_json["full_tracks"], 1);
         assert_eq!(context_summary_json["failed_tracks"], 0);
@@ -4623,7 +4623,7 @@ mod tests {
         assert_eq!(context_detail_json["status"], "full");
         assert_eq!(
             context_detail_json["summary"]["schema_version"],
-            "local-context/v2"
+            "local-context/v3"
         );
         assert_eq!(
             context_detail_json["stages"]["spectrum"]["implementation"],

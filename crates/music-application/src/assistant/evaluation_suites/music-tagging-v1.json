@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v8",
-  "id": "controlled-vocabulary-tagging-baseline-v24",
+  "id": "controlled-vocabulary-tagging-baseline-v25",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -138,13 +138,11 @@
         "length_s": 180.0,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "high",
           "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.8, "low": 0.65, "high": 0.92, "range": 0.27, "variability": 0.18, "slope": 0.0, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "high_fraction": 0.75, "shape": "steady"},
-            "intensity": {"typical": 0.86, "low": 0.72, "high": 0.95, "range": 0.23, "variability": 0.16, "slope": 0.0, "start": 0.84, "end": 0.86, "peak_at_fraction": 0.6, "high_fraction": 0.8, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.78, "low": 0.62, "high": 0.9, "range": 0.28, "variability": 0.2, "slope": 0.0, "start": 0.76, "end": 0.8, "peak_at_fraction": 0.7, "high_fraction": 0.7, "shape": "steady"},
             "brightness": {"typical": 0.71, "low": 0.55, "high": 0.84, "range": 0.29, "variability": 0.18, "slope": 0.0, "start": 0.7, "end": 0.72, "peak_at_fraction": 0.4, "high_fraction": 0.6, "shape": "steady"},
             "density": {"typical": 0.76, "low": 0.61, "high": 0.88, "range": 0.27, "variability": 0.17, "slope": 0.0, "start": 0.74, "end": 0.78, "peak_at_fraction": 0.6, "high_fraction": 0.7, "shape": "steady"},
@@ -152,8 +150,8 @@
           },
           "tempo": {"status": "measured", "typical_bpm": 132.0, "low_bpm": 128.0, "high_bpm": 136.0, "variability": 0.13, "points": []},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
-          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.86, "rhythmic_drive": 0.78, "brightness": 0.71, "density": 0.76, "tempo_bpm": 132.0, "tempo_confidence": 0.8, "changes_from_previous": [], "repeats_section_ids": []}],
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "rhythmic_drive": 0.78, "brightness": 0.71, "density": 0.76, "tempo_bpm": 132.0, "tempo_confidence": 0.8, "changes_from_previous": [], "repeats_section_ids": []}],
           "evidence": ["High intensity remains steady throughout the track."]
         }
       },
@@ -723,13 +721,11 @@
         "length_s": 240.0,
         "bpm": 132,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "high",
           "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.62, "low": 0.16, "high": 0.93, "range": 0.77, "variability": 0.55, "slope": 0.8, "start": 0.14, "end": 0.91, "peak_at_fraction": 0.94, "high_fraction": 0.32, "shape": "stepped_build"},
-            "intensity": {"typical": 0.68, "low": 0.12, "high": 0.96, "range": 0.84, "variability": 0.62, "slope": 0.92, "start": 0.1, "end": 0.95, "peak_at_fraction": 0.96, "high_fraction": 0.38, "shape": "stepped_build"},
             "rhythmic_drive": {"typical": 0.7, "low": 0.08, "high": 0.94, "range": 0.86, "variability": 0.6, "slope": 0.88, "start": 0.06, "end": 0.93, "peak_at_fraction": 0.9, "high_fraction": 0.4, "shape": "gradual_rise"},
             "brightness": {"typical": 0.48, "low": 0.28, "high": 0.69, "range": 0.41, "variability": 0.25, "slope": 0.2, "start": 0.3, "end": 0.61, "peak_at_fraction": 0.84, "high_fraction": 0.18, "shape": "gradual_rise"},
             "density": {"typical": 0.66, "low": 0.15, "high": 0.94, "range": 0.79, "variability": 0.58, "slope": 0.85, "start": 0.13, "end": 0.92, "peak_at_fraction": 0.92, "high_fraction": 0.36, "shape": "stepped_build"},
@@ -737,11 +733,11 @@
           },
           "tempo": {"status": "measured", "typical_bpm": 132.0, "low_bpm": 68.0, "high_bpm": 138.0, "variability": 0.72, "points": []},
           "structure": {"section_count": 3, "major_change_count": 2, "repeated_section_count": 0, "development": "sectional"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
           "sections": [
-            {"id": "s1", "start_fraction": 0.0, "end_fraction": 0.28, "intensity": 0.12, "rhythmic_drive": 0.08, "brightness": 0.3, "density": 0.14, "tempo_bpm": 68.0, "tempo_confidence": 0.45, "changes_from_previous": [], "repeats_section_ids": []},
-            {"id": "s2", "start_fraction": 0.28, "end_fraction": 0.68, "intensity": 0.62, "rhythmic_drive": 0.69, "brightness": 0.48, "density": 0.61, "tempo_bpm": 128.0, "tempo_confidence": 0.75, "changes_from_previous": ["more_intense", "more_rhythmic", "denser"], "repeats_section_ids": []},
-            {"id": "s3", "start_fraction": 0.68, "end_fraction": 1.0, "intensity": 0.94, "rhythmic_drive": 0.92, "brightness": 0.61, "density": 0.91, "tempo_bpm": 138.0, "tempo_confidence": 0.88, "changes_from_previous": ["more_intense", "more_rhythmic", "denser"], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0.0, "end_fraction": 0.28, "rhythmic_drive": 0.08, "brightness": 0.3, "density": 0.14, "tempo_bpm": 68.0, "tempo_confidence": 0.45, "changes_from_previous": [], "repeats_section_ids": []},
+            {"id": "s2", "start_fraction": 0.28, "end_fraction": 0.68, "rhythmic_drive": 0.69, "brightness": 0.48, "density": 0.61, "tempo_bpm": 128.0, "tempo_confidence": 0.75, "changes_from_previous": ["more_rhythmic", "denser"], "repeats_section_ids": []},
+            {"id": "s3", "start_fraction": 0.68, "end_fraction": 1.0, "rhythmic_drive": 0.92, "brightness": 0.61, "density": 0.91, "tempo_bpm": 138.0, "tempo_confidence": 0.88, "changes_from_previous": ["more_rhythmic", "denser"], "repeats_section_ids": []}
           ],
           "evidence": ["The restrained opening develops into a sustained high-intensity pursuit."]
         }
@@ -763,13 +759,11 @@
         "length_s": 286.0,
         "bpm": 58,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "high",
           "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.84, "low": 0.75, "high": 0.94, "range": 0.19, "variability": 0.12, "slope": 0.0, "start": 0.82, "end": 0.86, "peak_at_fraction": 0.72, "high_fraction": 0.86, "shape": "steady"},
-            "intensity": {"typical": 0.88, "low": 0.78, "high": 0.97, "range": 0.19, "variability": 0.13, "slope": 0.0, "start": 0.86, "end": 0.9, "peak_at_fraction": 0.78, "high_fraction": 0.9, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.72, "low": 0.62, "high": 0.82, "range": 0.2, "variability": 0.14, "slope": 0.0, "start": 0.7, "end": 0.74, "peak_at_fraction": 0.65, "high_fraction": 0.64, "shape": "steady"},
             "brightness": {"typical": 0.34, "low": 0.25, "high": 0.46, "range": 0.21, "variability": 0.12, "slope": 0.0, "start": 0.33, "end": 0.35, "peak_at_fraction": 0.45, "high_fraction": 0.02, "shape": "steady"},
             "density": {"typical": 0.9, "low": 0.8, "high": 0.97, "range": 0.17, "variability": 0.1, "slope": 0.0, "start": 0.88, "end": 0.91, "peak_at_fraction": 0.7, "high_fraction": 0.92, "shape": "steady"},
@@ -777,8 +771,8 @@
           },
           "tempo": {"status": "measured", "typical_bpm": 58.0, "low_bpm": 56.0, "high_bpm": 60.0, "variability": 0.07, "points": []},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
-          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.88, "rhythmic_drive": 0.72, "brightness": 0.34, "density": 0.9, "tempo_bpm": 58.0, "tempo_confidence": 0.9, "changes_from_previous": [], "repeats_section_ids": []}],
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "rhythmic_drive": 0.72, "brightness": 0.34, "density": 0.9, "tempo_bpm": 58.0, "tempo_confidence": 0.9, "changes_from_previous": [], "repeats_section_ids": []}],
           "evidence": ["Slow pulse accompanies sustained high intensity and density."]
         }
       },
@@ -799,13 +793,11 @@
         "length_s": 174.0,
         "bpm": 154,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "high",
           "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.48, "low": 0.38, "high": 0.61, "range": 0.23, "variability": 0.15, "slope": 0.0, "start": 0.46, "end": 0.5, "peak_at_fraction": 0.62, "high_fraction": 0.08, "shape": "steady"},
-            "intensity": {"typical": 0.46, "low": 0.35, "high": 0.58, "range": 0.23, "variability": 0.14, "slope": 0.0, "start": 0.44, "end": 0.47, "peak_at_fraction": 0.56, "high_fraction": 0.04, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.86, "low": 0.74, "high": 0.94, "range": 0.2, "variability": 0.12, "slope": 0.0, "start": 0.84, "end": 0.87, "peak_at_fraction": 0.5, "high_fraction": 0.85, "shape": "steady"},
             "brightness": {"typical": 0.72, "low": 0.61, "high": 0.83, "range": 0.22, "variability": 0.13, "slope": 0.0, "start": 0.7, "end": 0.73, "peak_at_fraction": 0.46, "high_fraction": 0.62, "shape": "steady"},
             "density": {"typical": 0.44, "low": 0.32, "high": 0.56, "range": 0.24, "variability": 0.15, "slope": 0.0, "start": 0.42, "end": 0.45, "peak_at_fraction": 0.6, "high_fraction": 0.02, "shape": "steady"},
@@ -813,8 +805,8 @@
           },
           "tempo": {"status": "measured", "typical_bpm": 154.0, "low_bpm": 151.0, "high_bpm": 157.0, "variability": 0.1, "points": []},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 1, "development": "repetitive"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
-          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.46, "rhythmic_drive": 0.86, "brightness": 0.72, "density": 0.44, "tempo_bpm": 154.0, "tempo_confidence": 0.92, "changes_from_previous": [], "repeats_section_ids": []}],
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null, "note": "No voice classifier is configured."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "rhythmic_drive": 0.86, "brightness": 0.72, "density": 0.44, "tempo_bpm": 154.0, "tempo_confidence": 0.92, "changes_from_previous": [], "repeats_section_ids": []}],
           "evidence": ["Fast steady pulse remains light in intensity and density."]
         }
       },
@@ -938,13 +930,11 @@
         "length_s": 204.0,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "high",
           "measurement_reliability": {"loudness":"medium","intensity":"medium","rhythmic_drive":"medium","brightness":"medium","density":"medium","spectral_flux":"medium","tempo":"medium","structure":"medium","voice":"low"},
           "trajectories": {
             "loudness": {"typical": 0.52, "low": 0.4, "high": 0.64, "range": 0.24, "variability": 0.12, "slope": 0.0, "start": 0.51, "end": 0.52, "peak_at_fraction": 0.48, "high_fraction": 0.2, "shape": "steady"},
-            "intensity": {"typical": 0.48, "low": 0.36, "high": 0.6, "range": 0.24, "variability": 0.11, "slope": 0.0, "start": 0.47, "end": 0.49, "peak_at_fraction": 0.55, "high_fraction": 0.15, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.44, "low": 0.31, "high": 0.56, "range": 0.25, "variability": 0.13, "slope": 0.0, "start": 0.43, "end": 0.44, "peak_at_fraction": 0.58, "high_fraction": 0.12, "shape": "steady"},
             "brightness": {"typical": 0.5, "low": 0.38, "high": 0.63, "range": 0.25, "variability": 0.12, "slope": 0.0, "start": 0.49, "end": 0.5, "peak_at_fraction": 0.5, "high_fraction": 0.18, "shape": "steady"},
             "density": {"typical": 0.46, "low": 0.34, "high": 0.58, "range": 0.24, "variability": 0.11, "slope": 0.0, "start": 0.45, "end": 0.47, "peak_at_fraction": 0.52, "high_fraction": 0.14, "shape": "steady"},
@@ -952,8 +942,8 @@
           },
           "tempo": {"status": "unresolved", "typical_bpm": null, "low_bpm": null, "high_bpm": null, "variability": null, "points": []},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "classified", "voice_probability": 0.91, "vocal_coverage": 0.84, "note": "Normalized pretrained classifier score; not a calibrated probability."},
-          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "intensity": 0.48, "rhythmic_drive": 0.44, "brightness": 0.5, "density": 0.46, "tempo_bpm": null, "tempo_confidence": 0.0, "changes_from_previous": [], "repeats_section_ids": []}],
+          "voice": {"status": "classified", "voice_score": 0.91, "vocal_coverage": 0.84, "note": "Normalized pretrained classifier score; not a calibrated probability."},
+          "sections": [{"id": "s1", "start_fraction": 0.0, "end_fraction": 1.0, "rhythmic_drive": 0.44, "brightness": 0.5, "density": 0.46, "tempo_bpm": null, "tempo_confidence": 0.0, "changes_from_previous": [], "repeats_section_ids": []}],
           "evidence": ["The local classifier reported a high normalized voice score with broad coverage."]
         }
       },
@@ -1102,13 +1092,11 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "medium",
-          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "measurement_reliability": {"loudness": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.3, "low": 0.26, "high": 0.33999999999999997, "start": 0.3, "end": 0.3, "peak_at_fraction": 0.5, "shape": "steady"},
-            "intensity": {"typical": 0.226, "low": 0.186, "high": 0.266, "start": 0.226, "end": 0.226, "peak_at_fraction": 0.5, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.12, "low": 0.07999999999999999, "high": 0.16, "start": 0.12, "end": 0.12, "peak_at_fraction": 0.5, "shape": "steady"},
             "brightness": {"typical": 0.25, "low": 0.21, "high": 0.29, "start": 0.25, "end": 0.25, "peak_at_fraction": 0.5, "shape": "steady"},
             "density": {"typical": 0.2, "low": 0.16, "high": 0.24000000000000002, "start": 0.2, "end": 0.2, "peak_at_fraction": 0.5, "shape": "steady"},
@@ -1116,9 +1104,9 @@
           },
           "tempo": {"status": "estimated", "typical_bpm": 70, "low_bpm": 68, "high_bpm": 72, "variability": 0.03},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.226, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
           ]
         }
       },
@@ -1152,13 +1140,11 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "medium",
-          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "measurement_reliability": {"loudness": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.88, "low": 0.84, "high": 0.92, "start": 0.88, "end": 0.88, "peak_at_fraction": 0.5, "shape": "steady"},
-            "intensity": {"typical": 0.516, "low": 0.476, "high": 0.556, "start": 0.516, "end": 0.516, "peak_at_fraction": 0.5, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.12, "low": 0.07999999999999999, "high": 0.16, "start": 0.12, "end": 0.12, "peak_at_fraction": 0.5, "shape": "steady"},
             "brightness": {"typical": 0.25, "low": 0.21, "high": 0.29, "start": 0.25, "end": 0.25, "peak_at_fraction": 0.5, "shape": "steady"},
             "density": {"typical": 0.2, "low": 0.16, "high": 0.24000000000000002, "start": 0.2, "end": 0.2, "peak_at_fraction": 0.5, "shape": "steady"},
@@ -1166,9 +1152,9 @@
           },
           "tempo": {"status": "estimated", "typical_bpm": 70, "low_bpm": 68, "high_bpm": 72, "variability": 0.03},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.516, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
           ]
         }
       },
@@ -1202,13 +1188,11 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "medium",
-          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "measurement_reliability": {"loudness": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
-            "intensity": {"typical": 0.677, "low": 0.637, "high": 0.717, "start": 0.677, "end": 0.677, "peak_at_fraction": 0.5, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.89, "low": 0.85, "high": 0.93, "start": 0.89, "end": 0.89, "peak_at_fraction": 0.5, "shape": "steady"},
             "brightness": {"typical": 0.58, "low": 0.5399999999999999, "high": 0.62, "start": 0.58, "end": 0.58, "peak_at_fraction": 0.5, "shape": "steady"},
             "density": {"typical": 0.8, "low": 0.76, "high": 0.8400000000000001, "start": 0.8, "end": 0.8, "peak_at_fraction": 0.5, "shape": "steady"},
@@ -1216,9 +1200,9 @@
           },
           "tempo": {"status": "estimated", "typical_bpm": 145, "low_bpm": 140, "high_bpm": 150, "variability": 0.03},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.677, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []}
           ]
         }
       },
@@ -1251,13 +1235,11 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "medium",
-          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "low", "structure": "medium", "voice": "low"},
+          "measurement_reliability": {"loudness": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "low", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "volatile"},
-            "intensity": {"typical": 0.73, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"},
             "rhythmic_drive": {"typical": 0.79, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"},
             "brightness": {"typical": 0.7, "low": 0.6599999999999999, "high": 0.74, "start": 0.7, "end": 0.7, "peak_at_fraction": 0.5, "shape": "volatile"},
             "density": {"typical": 0.83, "low": 0.1, "high": 0.95, "start": 0.2, "end": 0.9, "peak_at_fraction": 0.5, "shape": "volatile"},
@@ -1265,11 +1247,11 @@
           },
           "tempo": {"status": "unresolved", "typical_bpm": null, "low_bpm": null, "high_bpm": null, "variability": null},
           "structure": {"section_count": 3, "major_change_count": 2, "repeated_section_count": 0, "development": "varied"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0.0, "end_fraction": 0.3333333333333333, "intensity": 0.3, "rhythmic_drive": 0.3, "brightness": 0.7, "density": 0.3, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": [], "repeats_section_ids": []},
-            {"id": "s2", "start_fraction": 0.3333333333333333, "end_fraction": 0.6666666666666666, "intensity": 0.91, "rhythmic_drive": 0.91, "brightness": 0.7, "density": 0.91, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": ["intensity", "rhythmic_drive", "density"], "repeats_section_ids": []},
-            {"id": "s3", "start_fraction": 0.6666666666666666, "end_fraction": 1.0, "intensity": 0.6, "rhythmic_drive": 0.6, "brightness": 0.7, "density": 0.6, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": ["intensity", "rhythmic_drive", "density"], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0.0, "end_fraction": 0.3333333333333333, "rhythmic_drive": 0.3, "brightness": 0.7, "density": 0.3, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": [], "repeats_section_ids": []},
+            {"id": "s2", "start_fraction": 0.3333333333333333, "end_fraction": 0.6666666666666666, "rhythmic_drive": 0.91, "brightness": 0.7, "density": 0.91, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": ["rhythmic_drive", "density"], "repeats_section_ids": []},
+            {"id": "s3", "start_fraction": 0.6666666666666666, "end_fraction": 1.0, "rhythmic_drive": 0.6, "brightness": 0.7, "density": 0.6, "tempo_bpm": null, "tempo_confidence": 0, "changes_from_previous": ["rhythmic_drive", "density"], "repeats_section_ids": []}
           ]
         }
       },
@@ -1302,13 +1284,11 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "medium",
-          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
+          "measurement_reliability": {"loudness": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "medium", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.3, "low": 0.26, "high": 0.33999999999999997, "start": 0.3, "end": 0.3, "peak_at_fraction": 0.5, "shape": "steady"},
-            "intensity": {"typical": 0.8, "low": 0.13999999999999999, "high": 0.9, "start": 0.18, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"},
             "rhythmic_drive": {"typical": 0.8, "low": 0.07999999999999999, "high": 0.9, "start": 0.12, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"},
             "brightness": {"typical": 0.25, "low": 0.21, "high": 0.29, "start": 0.25, "end": 0.25, "peak_at_fraction": 0.5, "shape": "steady"},
             "density": {"typical": 0.8, "low": 0.16, "high": 0.9, "start": 0.2, "end": 0.85, "peak_at_fraction": 0.85, "shape": "stepped_build"},
@@ -1316,10 +1296,10 @@
           },
           "tempo": {"status": "estimated", "typical_bpm": 70, "low_bpm": 68, "high_bpm": 72, "variability": 0.03},
           "structure": {"section_count": 2, "major_change_count": 1, "repeated_section_count": 0, "development": "building"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0, "end_fraction": 0.2, "intensity": 0.18, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []},
-            {"id": "s2", "start_fraction": 0.2, "end_fraction": 1, "intensity": 0.83, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": ["intensity", "rhythmic_drive", "density"], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0, "end_fraction": 0.2, "rhythmic_drive": 0.12, "brightness": 0.25, "density": 0.2, "tempo_bpm": 70, "tempo_confidence": 0.7, "changes_from_previous": [], "repeats_section_ids": []},
+            {"id": "s2", "start_fraction": 0.2, "end_fraction": 1, "rhythmic_drive": 0.89, "brightness": 0.58, "density": 0.8, "tempo_bpm": 145, "tempo_confidence": 0.7, "changes_from_previous": ["rhythmic_drive", "density"], "repeats_section_ids": []}
           ]
         }
       },
@@ -1351,13 +1331,11 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "full",
-          "confidence": "medium",
-          "measurement_reliability": {"loudness": "medium", "intensity": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "low", "structure": "medium", "voice": "low"},
+          "measurement_reliability": {"loudness": "medium", "rhythmic_drive": "medium", "brightness": "medium", "density": "medium", "spectral_flux": "medium", "tempo": "low", "structure": "medium", "voice": "low"},
           "trajectories": {
             "loudness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
-            "intensity": {"typical": 0.48, "low": 0.44, "high": 0.52, "start": 0.48, "end": 0.48, "peak_at_fraction": 0.5, "shape": "steady"},
             "rhythmic_drive": {"typical": 0.45, "low": 0.41000000000000003, "high": 0.49, "start": 0.45, "end": 0.45, "peak_at_fraction": 0.5, "shape": "steady"},
             "brightness": {"typical": 0.5, "low": 0.46, "high": 0.54, "start": 0.5, "end": 0.5, "peak_at_fraction": 0.5, "shape": "steady"},
             "density": {"typical": 0.48, "low": 0.44, "high": 0.52, "start": 0.48, "end": 0.48, "peak_at_fraction": 0.5, "shape": "steady"},
@@ -1365,9 +1343,9 @@
           },
           "tempo": {"status": "estimated", "typical_bpm": 40, "low_bpm": 39, "high_bpm": 41, "variability": 0.03},
           "structure": {"section_count": 1, "major_change_count": 0, "repeated_section_count": 0, "development": "continuous"},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": [
-            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "intensity": 0.48, "rhythmic_drive": 0.45, "brightness": 0.5, "density": 0.48, "tempo_bpm": 40, "tempo_confidence": 0.2, "changes_from_previous": [], "repeats_section_ids": []}
+            {"id": "s1", "start_fraction": 0, "end_fraction": 1, "rhythmic_drive": 0.45, "brightness": 0.5, "density": 0.48, "tempo_bpm": 40, "tempo_confidence": 0.2, "changes_from_previous": [], "repeats_section_ids": []}
           ]
         }
       },
@@ -1400,14 +1378,13 @@
         "length_s": 240,
         "bpm": null,
         "context_evidence": {
-          "analyzer_id": "local-context/v2",
+          "analyzer_id": "local-context/v3",
           "completeness": "partial",
-          "confidence": "low",
-          "measurement_reliability": {"loudness": "low", "intensity": "low", "rhythmic_drive": "low", "brightness": "low", "density": "low", "spectral_flux": "low", "tempo": "low", "voice": "low", "structure": "low"},
+          "measurement_reliability": {"loudness": "low", "rhythmic_drive": "low", "brightness": "low", "density": "low", "spectral_flux": "low", "tempo": "low", "voice": "low", "structure": "low"},
           "trajectories": {},
           "tempo": {"status": "unresolved", "typical_bpm": null, "low_bpm": null, "high_bpm": null, "variability": 0.03},
           "structure": {},
-          "voice": {"status": "not_classified", "voice_probability": null, "vocal_coverage": null},
+          "voice": {"status": "not_classified", "voice_score": null, "vocal_coverage": null},
           "sections": []
         }
       },

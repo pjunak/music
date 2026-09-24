@@ -261,6 +261,7 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
             &guard.role.inference_fingerprint,
             &vocabulary.fingerprint,
             None,
+            None,
         )?;
         let target = AnalysisReviewTarget {
             track_id: track.id,
@@ -311,7 +312,6 @@ async fn model_review_rechecks_configuration_and_evidence_inside_the_transaction
                         None,
                     )?,
                     completeness: "full".to_owned(),
-                    confidence: "medium".to_owned(),
                     summary: serde_json::json!({"schema_version":LOCAL_CONTEXT_ANALYZER_ID})
                         .as_object()
                         .cloned()

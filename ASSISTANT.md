@@ -308,7 +308,7 @@ Use a small, representative sample before running across the whole library.
    separate from local analysis and database mood tags.
 5. Inspect the disclosure: the model receives artist, album, origin, and genre metadata, the current full canonical
    ID/name/definition/alias list, and—when available—a bounded projection of locally measured
-   rounded whole-track trends and endpoints, tempo range, all ten bounded acoustic sections, repetition, coverage confidence, measurement reliability,
+   rounded whole-track trends and endpoints, relative signal level, all ten bounded acoustic sections, repetition, decoded duration/scope, measurement reliability,
    and optional local voice/instrumental classifier evidence or explicit unknown/unavailable voice
    status. It does not receive a local tag hypothesis or model-owned
    signal axes. Track titles, display titles, file and folder names, library paths, audio,
@@ -395,12 +395,22 @@ This update separates generated-result identity from model certification. Operat
 recertification, timeout and credential changes do not alone invalidate saved suggestions.
 Changes to the actual inference contract, model/Thinking/output allowance, vocabulary or
 input evidence do. New inference always requires current conformance and quality passes.
-The September 8 task change makes older AI profiles outdated and requires fresh tagging
-checks before new inference. Existing `local-context/v2` analysis is reusable: this rework
-does not require another algorithmic/voice pass. Accepted/manual tags remain intact and
-nothing runs automatically. Start with existing explanations, then a small selected sample.
-The updated quality report has an independent acoustic-context gate; a synthetic pass is
-not a claim of musical accuracy. See the [offline listening pilot](docs/MOOD_PILOT.md).
+The September 24 context cutover requires fresh analysis of every indexed source file.
+On upgrade, schema 15 creates a verified database backup and clears generated contexts,
+suggestions and proposal-bound reviews. Accepted/manual tags and playlists are preserved.
+Old active analysis jobs are superseded; paid-attempt history is preserved without replay.
+Start the whole-library audio-context job to rebuild, then rerun the tagging checks and
+review disclosure v14 before any provider work. Playback remains available during rebuild.
+
+Model input now separates recording loudness from within-track dynamics, reports coverage
+without a whole-track confidence label, and withholds the coarse local tempo estimate.
+Current enabled MusicBrainz/Last.fm observations can accompany it with source, recording
+scope and retrieval time; community labels are weak claims, not verified moods. The voice
+field is a score, not a probability. Generated suggestions still require review.
+
+No new music classifier has been adopted. Prepare independent judgments with the
+[grouped offline pilot](docs/MOOD_PILOT.md); development and confirmation recordings stay
+separate. Synthetic tests and native model compatibility do not establish musical accuracy.
 
 ### EQ assistance
 

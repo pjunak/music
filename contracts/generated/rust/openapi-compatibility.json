@@ -4,7 +4,7 @@
   "reference_operation_count": 144,
   "candidate_operation_count": 159,
   "matched_operation_count": 144,
-  "fully_compatible_operation_count": 120,
+  "fully_compatible_operation_count": 118,
   "missing_operations": [],
   "candidate_only_operations": [
     "DELETE /api/library/cleanup/rejections/{id}",
@@ -35,6 +35,8 @@
     "PUT /api/assistant/providers/roles/{role_id}"
   ],
   "response_mismatches": [
+    "GET /api/assistant/library-context/summary",
+    "GET /api/assistant/library-context/tracks/{track_id}",
     "GET /api/assistant/library-tags",
     "GET /api/assistant/library-tags/model-status",
     "GET /api/assistant/playlists/model-status",
@@ -62,10 +64,12 @@
   "difference_fingerprints": {
     "DELETE /api/library/cleanup/rejections/{id}#operation": "9527f07eddd1ce743833b15bf58b1bb95855f992bfd60a357f336db4e2ecdead",
     "DELETE /api/library/cleanup/sources/{source_id}/credential#operation": "82d00dc215cc191385670aa738c6f75cfe79e23c8f9c73fa4f41a7ca2d508cb3",
+    "GET /api/assistant/library-context/summary#responses": "96fa443a87fa391d2927c397f3df4354b6a5b3c357850b044805df87a3e5c991",
+    "GET /api/assistant/library-context/tracks/{track_id}#responses": "c3dcadff05140c67581facd1c3942e4b81e3150db0295372993954386d648692",
     "GET /api/assistant/library-tags#parameters": "f3a5f738cec551f529854906b9f3e89b9fd86a4ebafe1c79248f10d1aacb6e87",
     "GET /api/assistant/library-tags#responses": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
     "GET /api/assistant/library-tags/model-batches/{batch_id}#operation": "3635098b7aa1089dff47312339490e90b8b0eb9c13376580fd31da67eb7f5f38",
-    "GET /api/assistant/library-tags/model-status#responses": "befc94244672bcaa4a294fc5ed63325b524fa81bef4df4c3d9dedde179e4de71",
+    "GET /api/assistant/library-tags/model-status#responses": "e9c257eba4a0e226f71cc9ff0e4787fc2caf1d2f15c501734df93d9f5e7185d1",
     "GET /api/assistant/playlists/model-status#responses": "714cc661641bef1e52aea7664848a4f7e46bd6b395efaedf83756f13b4fcae83",
     "GET /api/assistant/providers/roles#responses": "25bf832fe5d3a100b3d3311baa906cc772bb57d8909f33690ae126cb36f43b9a",
     "GET /api/assistant/providers/status#responses": "29fd6d805b91a6398f95e30de36ccb4d14991fa52ef5c04bddbe9e3258afc5ba",
@@ -84,9 +88,9 @@
     "PATCH /api/library/tracks/{track_id}/metadata#request_body": "dbd8ebdaae9f1bc7c39c982954d39600b151a876a49b357701bc220e87977df1",
     "PATCH /api/library/tracks/{track_id}/metadata#responses": "7d9b26437356944d6a4c6f31e90fbc8f74aa0d649c25b3bf8f0797830846930e",
     "POST /api/assistant/library-tags/model-batches/{batch_id}/actions#operation": "cba94bd1c872217aa3f070e0e8ed92f0bc05d447d7331068ca8ed5a5d4b8b8bf",
-    "POST /api/assistant/library-tags/model-jobs#request_body": "cf131875f8d10d8ff31087caa78cb38db2aaa28f55b34be322f8266280c7f253",
+    "POST /api/assistant/library-tags/model-jobs#request_body": "d74e9421a95fbe783743ac9766a91d4bcf340159e901bdf8ef22125f446e516e",
     "POST /api/assistant/library-tags/model-plan#request_body": "ac3f0e0f870fe0738fd47f5e2a76594609c84bfd4c953a0a8c3c01b99cc5d3c2",
-    "POST /api/assistant/library-tags/model-plan#responses": "f71468091fddcd9b792af9cfb7591d66bc32842cb6720d76aa32366969550875",
+    "POST /api/assistant/library-tags/model-plan#responses": "38760be72585aef632d4f7e7655665d54d16a9a4d2adb18c8195540614073e2f",
     "POST /api/assistant/library-tags/query#responses": "e75cf764ea97415f93598ff3581478ef707cfe5fa7ab72777b73832aa6fd5952",
     "POST /api/assistant/playlists/model-suggestions/jobs#request_body": "85f087cc040a4b649beacee78b0f12da2a0462207816d85f01d49ca6da283387",
     "POST /api/assistant/providers/credential-storage/initialize#responses": "81fd7b62525316bb7c909bd4fe7c4c12cdf6ccbf897b5c721d19062fcaa098a6",

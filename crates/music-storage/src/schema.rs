@@ -9,7 +9,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 14;
+pub const CURRENT_SCHEMA_VERSION: i64 = 15;
 
 const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
 const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
@@ -32,6 +32,8 @@ const CLEANUP_REJECTIONS_SCHEMA_SQL: &str =
     include_str!("../migrations/0013_cleanup_rejections.sql");
 const RICH_TRACK_METADATA_SCHEMA_SQL: &str =
     include_str!("../migrations/0014_rich_track_metadata.sql");
+const SONG_EVIDENCE_REBUILD_SQL: &str =
+    include_str!("../migrations/0015_song_evidence_rebuild.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
 const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
@@ -259,7 +261,7 @@ pub(crate) async fn inspect_pool(
     pool: &SqlitePool,
     database_exists: bool,
 ) -> Result<SchemaReport, StorageError> {
-    let (expected, legacy_sessions) = expected_shape().await?;
+    let (expected, legacy_sessions, superseded_contexts) = expected_shape().await?;
     let actual = read_shape(pool).await?;
     let sqlite_version = sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
         .fetch_one(pool)
@@ -370,6 +372,20 @@ pub(crate) async fn inspect_pool(
                 SchemaIssueLevel::Warning,
                 "legacy_plaintext_sessions",
                 "migration revokes existing sessions; clients must sign in again",
+            );
+            continue;
+        }
+
+        if table_name == "track_contexts"
+            && actual_table == &superseded_contexts
+            && migration_version.is_none_or(|version| version < 15)
+        {
+            requires_migration = true;
+            issue(
+                &mut issues,
+                SchemaIssueLevel::Warning,
+                "song_evidence_rebuild",
+                "migration clears generated analysis and requires fresh audio analysis; authored tags are preserved",
             );
             continue;
         }
@@ -592,7 +608,7 @@ fn empty_report(database_exists: bool) -> SchemaReport {
     }
 }
 
-async fn expected_shape() -> Result<(DatabaseShape, TableShape), StorageError> {
+async fn expected_shape() -> Result<(DatabaseShape, TableShape, TableShape), StorageError> {
     let options = SqliteConnectOptions::new()
         .in_memory(true)
         .foreign_keys(true);
@@ -644,9 +660,19 @@ async fn expected_shape() -> Result<(DatabaseShape, TableShape), StorageError> {
     sqlx::raw_sql(RICH_TRACK_METADATA_SCHEMA_SQL)
         .execute(&pool)
         .await?;
+    let superseded_contexts = read_shape(&pool)
+        .await?
+        .tables
+        .remove("track_contexts")
+        .ok_or(StorageError::InvalidOption(
+            "baseline context table is missing",
+        ))?;
+    sqlx::raw_sql(SONG_EVIDENCE_REBUILD_SQL)
+        .execute(&pool)
+        .await?;
     let shape = read_shape(&pool).await;
     pool.close().await;
-    shape.map(|shape| (shape, legacy_sessions))
+    shape.map(|shape| (shape, legacy_sessions, superseded_contexts))
 }
 
 async fn read_shape(pool: &SqlitePool) -> Result<DatabaseShape, StorageError> {

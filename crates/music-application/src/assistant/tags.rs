@@ -94,6 +94,7 @@ pub struct StoredAnalysisReview {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssistantTrackEvidence {
+    pub catalog_evidence: Option<Value>,
     pub track: IndexedTrack,
     pub manual_tags: Vec<String>,
     pub analyses: Vec<StoredAnalysis>,
@@ -621,6 +622,7 @@ impl AssistantService {
                         &guard.role.inference_fingerprint,
                         &guard.vocabulary_fingerprint,
                         contexts.get(&track.track.id),
+                        track.catalog_evidence.as_ref(),
                     )
                     .ok()
                 });
@@ -1109,7 +1111,7 @@ fn view_for_track_with_model(
     let model = track
         .analyses
         .iter()
-        .filter(|analysis| analysis.analyzer_id.starts_with("model-context-tagger/"))
+        .filter(|analysis| analysis.analyzer_id == MODEL_TAG_ANALYZER_ID)
         .max_by_key(|analysis| {
             (
                 model_signature.is_some_and(|expected| {
@@ -1339,6 +1341,7 @@ mod tests {
             ..profile.clone()
         };
         let mut evidence = AssistantTrackEvidence {
+            catalog_evidence: None,
             track,
             manual_tags: vec!["calm".to_owned()],
             analyses: vec![profile, catalog],
@@ -1374,6 +1377,7 @@ mod tests {
     -> Result<(), Box<dyn Error>> {
         let signature = "fixture-signature";
         let mut evidence = AssistantTrackEvidence {
+            catalog_evidence: None,
             track: track()?,
             manual_tags: vec!["authored".to_owned()],
             reviews: Vec::new(),
@@ -1441,6 +1445,7 @@ mod tests {
     #[test]
     fn stale_profiles_are_not_exposed_as_current_suggestions() -> Result<(), Box<dyn Error>> {
         let evidence = AssistantTrackEvidence {
+            catalog_evidence: None,
             track: track()?,
             manual_tags: Vec::new(),
             analyses: vec![StoredAnalysis {

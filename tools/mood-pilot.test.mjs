@@ -11,7 +11,7 @@ const run = (tags = ["calm", "rest"]) => ({ schema_version: "assistant-mood-run-
 function draft() {
   const rows = createPilot(run(), vocabulary);
   Object.assign(rows[0], { annotator: "owner", core_tag_ids: ["m.calm", "m.urgent", "m.sad", "s.rest"] });
-  rows.slice(1).forEach((track) => Object.assign(track, { recording_group: `recording-${track.track_id}`, file_reference: `sha256-${track.track_id}`, reviewed: true, listened_intervals: [[0, 120]], labels: { "m.calm": "positive", "m.urgent": "negative", "m.sad": "uncertain", "s.rest": "positive" } }));
+  rows.slice(1).forEach((track) => Object.assign(track, { recording_group: `recording-${track.track_id}`, file_reference: `sha256-${track.track_id}`, reviewed: true, blind: true, listened_intervals: [[0, 120]], labels: { "m.calm": "positive", "m.urgent": "negative", "m.sad": "uncertain", "s.rest": "positive" } }));
   return rows;
 }
 const pilot = () => freezePilot(draft(), vocabulary);

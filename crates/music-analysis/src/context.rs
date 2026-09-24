@@ -38,7 +38,6 @@ pub struct AudioContextPerformance {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioContextDocument {
-    pub confidence: &'static str,
     pub completeness: &'static str,
     pub summary: Map<String, Value>,
     pub timeline: Vec<Map<String, Value>>,
@@ -223,15 +222,6 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
             json!(round_to(global.duration_s, 3)),
         );
 
-        let active_fraction =
-            rows.iter().filter(|row| row.loudness > 0.08).count() as f64 / rows.len().max(1) as f64;
-        let confidence = if global.duration_s >= 30.0 && active_fraction >= 0.25 {
-            "high"
-        } else if global.duration_s >= 5.0 {
-            "medium"
-        } else {
-            "low"
-        };
         let repeated_sections = sections
             .iter()
             .filter(|section| {
@@ -253,8 +243,8 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
                 "continuous"
             },
         });
-        let intensity = trajectories
-            .get("intensity")
+        let relative_level = trajectories
+            .get("relative_level")
             .and_then(Value::as_object)
             .cloned()
             .unwrap_or_default();
@@ -264,7 +254,7 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
             .cloned()
             .unwrap_or_default();
         let evidence = vec![
-            trajectory_evidence("Intensity", &intensity),
+            trajectory_evidence("Relative signal level", &relative_level),
             trajectory_evidence("Rhythmic drive", &rhythmic),
             tempo_evidence(&tempo_summary),
             format!(
@@ -278,14 +268,14 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
         let summary = object(json!({
             "schema_version": LOCAL_CONTEXT_ANALYZER_ID,
             "duration_s": round_to(global.duration_s, 3),
-            "confidence": confidence,
+            "coverage": {"decoded_seconds": round_to(global.duration_s, 3), "scope": "whole_track"},
             "trajectories": trajectories,
             "tempo": tempo_summary,
             "structure": structure,
             "voice": voice_summary,
             "measurement_reliability": {
                 "loudness": "medium",
-                "intensity": "medium",
+                "relative_level": "medium",
                 "rhythmic_drive": "medium",
                 "brightness": "medium",
                 "density": "medium",
@@ -316,7 +306,6 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
         );
         let elapsed_seconds = analysis_started.elapsed().as_secs_f64();
         Ok(AudioContextDocument {
-            confidence,
             completeness,
             summary,
             timeline,
@@ -936,7 +925,7 @@ struct TimelineRow {
     start_s: f64,
     duration_s: f64,
     loudness: f64,
-    intensity: f64,
+    relative_level: f64,
     rhythmic_drive: f64,
     brightness: f64,
     density: f64,
@@ -951,7 +940,7 @@ struct TimelineRow {
 #[derive(Debug, Clone, Copy)]
 enum TimelineMetric {
     Loudness,
-    Intensity,
+    RelativeLevel,
     RhythmicDrive,
     Brightness,
     Density,
@@ -961,7 +950,7 @@ enum TimelineMetric {
 impl TimelineMetric {
     const TRAJECTORIES: [Self; 6] = [
         Self::Loudness,
-        Self::Intensity,
+        Self::RelativeLevel,
         Self::RhythmicDrive,
         Self::Brightness,
         Self::Density,
@@ -971,7 +960,7 @@ impl TimelineMetric {
     const fn name(self) -> &'static str {
         match self {
             Self::Loudness => "loudness",
-            Self::Intensity => "intensity",
+            Self::RelativeLevel => "relative_level",
             Self::RhythmicDrive => "rhythmic_drive",
             Self::Brightness => "brightness",
             Self::Density => "density",
@@ -982,7 +971,7 @@ impl TimelineMetric {
     fn value(self, row: &TimelineRow) -> f64 {
         match self {
             Self::Loudness => row.loudness,
-            Self::Intensity => row.intensity,
+            Self::RelativeLevel => row.relative_level,
             Self::RhythmicDrive => row.rhythmic_drive,
             Self::Brightness => row.brightness,
             Self::Density => row.density,
@@ -996,6 +985,12 @@ impl TimelineMetric {
 }
 
 fn timeline_frames(frames: &[Frame], short_levels: &[f64]) -> Vec<TimelineRow> {
+    let typical_level = median(
+        &frames
+            .iter()
+            .map(|frame| frame.loudness_dbfs)
+            .collect::<Vec<_>>(),
+    );
     let strengths = onset_strengths(short_levels);
     let short_per_frame = python_round_usize(CONTEXT_FRAME_SECONDS / 0.05).max(1);
     let mut previous_profile = None;
@@ -1053,16 +1048,18 @@ fn timeline_frames(frames: &[Frame], short_levels: &[f64]) -> Vec<TimelineRow> {
                 0.0,
                 1.0,
             );
-            let intensity = clamp(
-                0.50 * loudness + 0.30 * rhythmic_drive + 0.20 * density,
-                0.0,
-                1.0,
+            // Level relative to this recording is invariant to a uniform mastering gain.
+            // It describes dynamic development, never emotional intensity.
+            let relative_level = normalize(
+                frame.loudness_dbfs,
+                typical_level - 20.0,
+                typical_level + 20.0,
             );
             TimelineRow {
                 start_s: round_to(frame.start_s, 3),
                 duration_s: round_to(frame.duration_s, 3),
                 loudness: round_to(loudness, 5),
-                intensity: round_to(intensity, 5),
+                relative_level: round_to(relative_level, 5),
                 rhythmic_drive: round_to(rhythmic_drive, 5),
                 brightness: round_to(brightness, 5),
                 density: round_to(density, 5),
@@ -1183,7 +1180,7 @@ fn downsample_timeline(rows: &[TimelineRow]) -> Vec<Map<String, Value>> {
                 "start_s": group[0].start_s,
                 "duration_s": round_to(group.iter().map(|row| row.duration_s).sum(), 3),
                 "loudness": round_to(mean(&group.iter().map(|row| row.loudness).collect::<Vec<_>>()), 5),
-                "intensity": round_to(mean(&group.iter().map(|row| row.intensity).collect::<Vec<_>>()), 5),
+                "relative_level": round_to(mean(&group.iter().map(|row| row.relative_level).collect::<Vec<_>>()), 5),
                 "rhythmic_drive": round_to(mean(&group.iter().map(|row| row.rhythmic_drive).collect::<Vec<_>>()), 5),
                 "brightness": round_to(mean(&group.iter().map(|row| row.brightness).collect::<Vec<_>>()), 5),
                 "density": round_to(mean(&group.iter().map(|row| row.density).collect::<Vec<_>>()), 5),
@@ -1209,7 +1206,7 @@ fn change_boundaries(rows: &[TimelineRow]) -> Vec<usize> {
     let windows = if windows.is_empty() { vec![4] } else { windows };
     let largest = windows.iter().copied().max().unwrap_or(4);
     let metrics = [
-        TimelineMetric::Intensity,
+        TimelineMetric::RelativeLevel,
         TimelineMetric::RhythmicDrive,
         TimelineMetric::Brightness,
         TimelineMetric::Density,
@@ -1305,7 +1302,7 @@ fn section_summary(
             "end_s": round_to(end_s, 3),
             "start_fraction": round_to(start_s / duration_s.max(0.001), 5),
             "end_fraction": round_to(end_s / duration_s.max(0.001), 5),
-            "intensity": round_to(median(&group.iter().map(|row| row.intensity).collect::<Vec<_>>()), 5),
+            "relative_level": round_to(median(&group.iter().map(|row| row.relative_level).collect::<Vec<_>>()), 5),
             "rhythmic_drive": round_to(median(&group.iter().map(|row| row.rhythmic_drive).collect::<Vec<_>>()), 5),
             "brightness": round_to(median(&group.iter().map(|row| row.brightness).collect::<Vec<_>>()), 5),
             "density": round_to(median(&group.iter().map(|row| row.density).collect::<Vec<_>>()), 5),
@@ -1317,7 +1314,11 @@ fn section_summary(
         if let Some(previous) = sections.last() {
             let mut changes = Vec::new();
             for (key, upward, downward) in [
-                ("intensity", "more_intense", "less_intense"),
+                (
+                    "relative_level",
+                    "louder_relative_to_track",
+                    "quieter_relative_to_track",
+                ),
                 ("rhythmic_drive", "more_rhythmic", "less_rhythmic"),
                 ("brightness", "brighter", "darker_spectrum"),
                 ("density", "denser", "sparser"),
@@ -1335,7 +1336,7 @@ fn section_summary(
             .iter()
             .take(sections.len().saturating_sub(1))
             .filter(|earlier| {
-                let sum = ["intensity", "rhythmic_drive", "brightness", "density"]
+                let sum = ["relative_level", "rhythmic_drive", "brightness", "density"]
                     .into_iter()
                     .map(|key| (number_value(&section, key) - number_value(earlier, key)).powi(2))
                     .sum::<f64>();
@@ -1629,14 +1630,14 @@ fn voice_placeholders(
         VoiceContextPreparation::Deferred => (
             json!({
                 "status": "not_classified",
-                "voice_probability": null,
+                "voice_score": null,
                 "vocal_coverage": null,
                 "note": "Voice detection is waiting for the separate second analysis pass.",
             }),
             json!({
                 "status": "pending",
                 "required": false,
-                "analyzer_id": "essentia-musicnn-voice/v1",
+                "analyzer_id": "essentia-musicnn-voice/v2",
             }),
             "pending",
             "partial",
@@ -1644,7 +1645,7 @@ fn voice_placeholders(
         VoiceContextPreparation::NotConfigured => (
             json!({
                 "status": "not_classified",
-                "voice_probability": null,
+                "voice_score": null,
                 "vocal_coverage": null,
                 "note": "Local voice classification is not enabled. Spectral measurements are retained, but they are not presented as voice detection.",
             }),
@@ -1658,14 +1659,14 @@ fn voice_placeholders(
         VoiceContextPreparation::Unavailable { reason } => (
             json!({
                 "status": "unavailable",
-                "voice_probability": null,
+                "voice_score": null,
                 "vocal_coverage": null,
                 "note": "The configured local voice classifier is unavailable. The remaining track context is still available.",
             }),
             json!({
                 "status": "unavailable",
                 "required": false,
-                "analyzer_id": "essentia-musicnn-voice/v1",
+                "analyzer_id": "essentia-musicnn-voice/v2",
                 "reason": reason,
                 "model_filename": "voice_instrumental-musicnn-msd-2.pb",
             }),
@@ -1865,6 +1866,39 @@ mod tests {
     }
 
     #[test]
+    fn relative_level_keeps_a_late_climax_but_ignores_mastering_gain() {
+        let frames = [-50.0, -44.0, -38.0, -26.0, -20.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, loudness_dbfs)| super::Frame {
+                start_s: index as f64 * 0.5,
+                duration_s: 0.5,
+                loudness_dbfs,
+                spectrum: super::Spectrum::silent(),
+            })
+            .collect::<Vec<_>>();
+        let louder = frames
+            .iter()
+            .cloned()
+            .map(|mut frame| {
+                frame.loudness_dbfs += 12.0;
+                frame
+            })
+            .collect::<Vec<_>>();
+        let original = timeline_frames(&frames, &[0.1; 50]);
+        let gained = timeline_frames(&louder, &[0.4; 50]);
+        for (left, right) in original.iter().zip(&gained) {
+            assert_eq!(left.relative_level, right.relative_level);
+        }
+        assert!(
+            original
+                .last()
+                .is_some_and(|last| last.relative_level > original[0].relative_level + 0.5)
+        );
+        assert!(gained[0].loudness > original[0].loudness);
+    }
+
+    #[test]
     fn v2_tempo_and_absolute_high_fraction_keep_their_semantics() {
         let levels = (0..600)
             .map(|index| {
@@ -1935,21 +1969,10 @@ mod tests {
             &AtomicBool::new(false),
             VoiceContextPreparation::NotConfigured,
         )?;
-        assert_eq!(document.summary["schema_version"], "local-context/v2");
+        assert_eq!(document.summary["schema_version"], "local-context/v3");
         assert_eq!(document.summary["duration_s"], 12.0);
-        assert_eq!(document.summary["confidence"], "medium");
-        assert_eq!(
-            document.summary["trajectories"]["intensity"]["typical"],
-            0.550_38
-        );
-        assert_eq!(
-            document.summary["trajectories"]["intensity"]["end"],
-            0.526_04
-        );
-        assert_eq!(
-            document.summary["trajectories"]["intensity"]["slope"],
-            0.445_91
-        );
+        assert!(document.summary.get("confidence").is_none());
+        assert_eq!(document.summary["coverage"]["decoded_seconds"], 12.0);
         assert_eq!(
             document.summary["trajectories"]["rhythmic_drive"]["typical"],
             0.312_6
@@ -1960,10 +1983,18 @@ mod tests {
             0.616_19
         );
         assert_eq!(document.sections.len(), 1);
-        assert_eq!(document.sections[0]["intensity"], 0.550_38);
+        assert_eq!(document.sections[0]["relative_level"], 0.5);
         assert_eq!(document.timeline.len(), 6);
         assert_eq!(document.timeline[3]["brightness"], 0.220_96);
-        assert_eq!(document.timeline[3]["intensity"], 0.572_93);
+        assert_eq!(document.timeline[3]["relative_level"], 0.5);
+        assert!(
+            document.timeline[3]["relative_level"]
+                .as_f64()
+                .ok_or("missing relative level")?
+                > document.timeline[0]["relative_level"]
+                    .as_f64()
+                    .ok_or("missing opening relative level")?
+        );
         assert_eq!(document.stages["voice"]["status"], "not_configured");
         assert_eq!(document.completeness, "full");
         Ok(())

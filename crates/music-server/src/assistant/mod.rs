@@ -1316,12 +1316,6 @@ struct LibraryContextSummaryResponse {
     failed_tracks: usize,
     #[schema(schema_with = nonnegative_integer_schema)]
     stale_tracks: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    high_confidence: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    medium_confidence: usize,
-    #[schema(schema_with = nonnegative_integer_schema)]
-    low_confidence: usize,
     #[schema(required = true, schema_with = openapi_nullable_datetime)]
     last_updated_at: Option<String>,
 }
@@ -1338,8 +1332,6 @@ struct TrackContextDetailResponse {
     status: String,
     #[schema(schema_with = context_analyzer_id_schema)]
     analyzer_id: String,
-    #[schema(required = true, schema_with = nullable_confidence_schema)]
-    confidence: Option<String>,
     #[schema(required = true, schema_with = openapi_nullable_datetime)]
     updated_at: Option<String>,
     #[schema(required = true, schema_with = nullable_object_schema)]
@@ -1958,7 +1950,7 @@ async fn start_model_tagging(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v13"
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v14"
         || !payload.consent
     {
         return Err(ApiError::validation());
@@ -2079,6 +2071,7 @@ async fn model_tagging_availability(
                 fingerprint,
                 &vocabulary.fingerprint,
                 contexts.get(&track.track.id),
+                track.catalog_evidence.as_ref(),
             )
             .map_err(|_| ApiError::internal())?;
             let is_current = track.analyses.iter().any(|analysis| {
@@ -2091,6 +2084,7 @@ async fn model_tagging_availability(
                 inputs.push(music_application::assistant::model_tag_track_input(
                     &track.track,
                     contexts.get(&track.track.id),
+                    track.catalog_evidence.as_ref(),
                 ));
             }
         }
@@ -2213,11 +2207,12 @@ async fn model_tagging_availability(
 
 fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
     ModelTaggingDisclosureResponse {
-        version: "assistant-model-music-tagging-disclosure/v13",
+        version: "assistant-model-music-tagging-disclosure/v14",
         shared_with_provider: vec![
             "Indexed artist, album, origin, and genre metadata",
             "Track durations and BPM values when available",
-            "Current bounded local track context when available: intensity, loudness, rhythmic drive, brightness, density and spectral-change trajectories; tempo development; major acoustic sections and transitions; structural repetition; analysis-coverage confidence and per-measurement reliability; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status)",
+            "Current bounded local track context when available: relative signal level, loudness, rhythmic drive, brightness, density and spectral-change trajectories; major acoustic sections and transitions; structural repetition; decoded duration/scope and per-measurement reliability; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status). The coarse local tempo estimate is withheld.",
+            "Current enabled catalog observations: MusicBrainz recording genres, composer credits and first-release date; up to twelve original Last.fm community labels/counts, explicitly weak claims; source, recording ID and retrieval time accompany the claims",
             "A batch-local numeric slot used only to match the response; database track IDs are not sent",
             "The full operator-managed canonical tag ID, name, group, definition, exact-alias, and bounded semantic context cue index; the model may return only IDs from this index",
             "In Batch mode, this same evidence is uploaded as a provider file: input expires after seven days and output after up to thirty days; the app deletes known files after collecting results. Completion may take twenty-four hours and completed requests remain chargeable after cancellation.",
@@ -3278,9 +3273,6 @@ fn library_context_summary_response(
         missing_tracks: summary.missing_tracks,
         failed_tracks: summary.failed_tracks,
         stale_tracks: summary.stale_tracks,
-        high_confidence: summary.high_confidence,
-        medium_confidence: summary.medium_confidence,
-        low_confidence: summary.low_confidence,
         last_updated_at: summary
             .last_updated_at_unix_seconds
             .map(UnixSeconds::new)
@@ -3333,7 +3325,6 @@ fn track_context_detail_response(
         artist: value.artist,
         status: value.status,
         analyzer_id: value.analyzer_id,
-        confidence: value.confidence,
         updated_at: value
             .updated_at_unix_seconds
             .map(UnixSeconds::new)
@@ -3736,7 +3727,7 @@ fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
         .into()
 }
 fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-model-music-tagging-disclosure/v13")
+    const_string_schema("assistant-model-music-tagging-disclosure/v14")
 }
 fn model_tagging_role_schema() -> RefOr<Schema> {
     const_string_schema("music_tagger")
@@ -3857,11 +3848,11 @@ fn context_track_ids_schema() -> RefOr<Schema> {
 }
 
 fn context_analyzer_id_schema() -> RefOr<Schema> {
-    const_string_schema("local-context/v2")
+    const_string_schema("local-context/v3")
 }
 
 fn voice_analyzer_id_schema() -> RefOr<Schema> {
-    const_string_schema("essentia-musicnn-voice/v1")
+    const_string_schema("essentia-musicnn-voice/v2")
 }
 
 fn voice_analyzer_status_schema() -> RefOr<Schema> {

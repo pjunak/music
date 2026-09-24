@@ -393,6 +393,12 @@ mod tests {
             .execute(&storage.pool)
             .await?;
         sqlx::raw_sql("ALTER TABLE tracks DROP COLUMN release_date; ALTER TABLE tracks DROP COLUMN original_release_date; ALTER TABLE tracks DROP COLUMN composer;").execute(&storage.pool).await?;
+        sqlx::query("DROP TABLE track_contexts")
+            .execute(&storage.pool)
+            .await?;
+        sqlx::raw_sql(include_str!("../migrations/0001_rust_baseline.sql"))
+            .execute(&storage.pool)
+            .await?;
         sqlx::query("DELETE FROM _sqlx_migrations WHERE version >= 13")
             .execute(&storage.pool)
             .await?;

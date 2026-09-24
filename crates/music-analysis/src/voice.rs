@@ -56,9 +56,8 @@ impl VoiceAnalysisDocument {
         Self {
             summary: object(json!({
                 "status": "classified",
-                // This key is retained for wire compatibility. The value is a
-                // normalized model score, not a calibrated probability.
-                "voice_probability": round_five(voice_score),
+                // A normalized model score, not a calibrated probability.
+                "voice_score": round_five(voice_score),
                 "vocal_coverage": round_five(vocal_coverage),
                 "note": classification_note(voice_score, vocal_coverage),
             })),
@@ -80,7 +79,7 @@ impl VoiceAnalysisDocument {
         Self {
             summary: object(json!({
                 "status": "unavailable",
-                "voice_probability": null,
+                "voice_score": null,
                 "vocal_coverage": null,
                 "note": if matches!(error, VoiceAnalysisError::WorkerUnavailable) {
                     "The supported voice model is configured, but its isolated inference worker is unavailable."
@@ -1022,7 +1021,7 @@ mod tests {
         assert!((score - 0.6).abs() < 1e-6);
         assert!((coverage - 2.0 / 3.0).abs() < 1e-6);
         let document = VoiceAnalysisDocument::classified(score, coverage, 3, 1.0);
-        assert_eq!(document.summary["voice_probability"], 0.6);
+        assert_eq!(document.summary["voice_score"], 0.6);
         assert_eq!(document.summary["vocal_coverage"], 0.666_67);
         assert!(
             document.summary["note"]

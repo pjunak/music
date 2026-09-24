@@ -87,11 +87,23 @@ impl AssistantRepository for SqliteStorage {
                         decision,
                     });
             }
+            let catalog = crate::catalog_evidence::song_catalog_rows(
+                &mut *self.pool.acquire().await.map_err(box_storage)?,
+                None,
+            )
+            .await
+            .map_err(box_storage)?
+            .into_iter()
+            .filter_map(|row| row.try_get::<i64, _>("track_id").ok().map(|id| (id, row)))
+            .collect::<BTreeMap<_, _>>();
             Ok(tracks
                 .into_iter()
                 .map(|track| {
                     let track_id = track.id.get();
                     AssistantTrackEvidence {
+                        catalog_evidence: catalog.get(&track_id).and_then(|row| {
+                            crate::catalog_evidence::song_catalog_projection(row, &track)
+                        }),
                         track,
                         manual_tags: manual.remove(&track_id).unwrap_or_default(),
                         analyses: analyses.remove(&track_id).unwrap_or_default(),

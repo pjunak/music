@@ -379,7 +379,7 @@ export interface EqPresetDraft {
 }
 
 export const MODEL_TAGGING_DISCLOSURE_VERSION =
-  "assistant-model-music-tagging-disclosure/v13" as const;
+  "assistant-model-music-tagging-disclosure/v14" as const;
 
 export type ModelTaggingScope =
   | { type: "all" }
@@ -480,10 +480,10 @@ export interface LibraryAnalysisSummary {
   last_updated_at: string | null;
 }
 
-export interface LibraryContextSummary extends LibraryAnalysisSummary {
-  analyzer: "local-context/v2";
+export interface LibraryContextSummary extends Omit<LibraryAnalysisSummary, "high_confidence" | "medium_confidence" | "low_confidence"> {
+  analyzer: "local-context/v3";
   voice_analyzer: {
-    analyzer_id: "essentia-musicnn-voice/v1";
+    analyzer_id: "essentia-musicnn-voice/v2";
     status: "not_configured" | "ready" | "unavailable";
     reason:
       | "model_missing"
@@ -516,8 +516,7 @@ export interface TrackContextDetail {
   title: string;
   artist: string;
   status: "full" | "partial" | "missing" | "stale" | "failed";
-  analyzer_id: "local-context/v2";
-  confidence: "high" | "medium" | "low" | null;
+  analyzer_id: "local-context/v3";
   updated_at: string | null;
   summary: Record<string, unknown> | null;
   timeline: Array<Record<string, number>>;

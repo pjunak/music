@@ -318,11 +318,16 @@ impl LocalAnalysisRepository for SqliteStorage {
                 };
                 let current_context =
                     current_model_context(&mut transaction, &track, voice_signature).await?;
+                let catalog =
+                    crate::catalog_evidence::current_song_catalog(&mut transaction, &track)
+                        .await
+                        .map_err(box_storage)?;
                 let current_signature = model_tag_source_signature(
                     &track,
                     role_fingerprint,
                     vocabulary_fingerprint,
                     current_context.as_ref(),
+                    catalog.as_ref(),
                 )
                 .map_err(|_| {
                     box_storage(StorageError::InvalidAssistantRecord(
@@ -437,7 +442,7 @@ impl LocalAnalysisRepository for SqliteStorage {
                 )));
             }
             let rows = sqlx::query(
-                "SELECT track_id, source_signature, job_id, completeness, confidence, \
+                "SELECT track_id, source_signature, job_id, completeness, \
                  summary_json, timeline_json, sections_json, technical_json, stages_json, \
                  CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
                  FROM track_contexts WHERE analyzer_id = ? ORDER BY track_id",
@@ -458,7 +463,6 @@ impl LocalAnalysisRepository for SqliteStorage {
                             .map_err(StorageError::from)?,
                         job_id: row.try_get("job_id").map_err(StorageError::from)?,
                         completeness: row.try_get("completeness").map_err(StorageError::from)?,
-                        confidence: row.try_get("confidence").map_err(StorageError::from)?,
                         summary_json: row.try_get("summary_json").map_err(StorageError::from)?,
                         timeline_json: row.try_get("timeline_json").map_err(StorageError::from)?,
                         sections_json: row.try_get("sections_json").map_err(StorageError::from)?,
@@ -521,13 +525,13 @@ impl LocalAnalysisRepository for SqliteStorage {
             let stages = context_json(&document.stages)?;
             sqlx::query(
                 "INSERT INTO track_contexts \
-                 (track_id, analyzer_id, source_signature, job_id, completeness, confidence, \
+                 (track_id, analyzer_id, source_signature, job_id, completeness, \
                   summary_json, timeline_json, sections_json, technical_json, stages_json, \
                   updated_at) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
                  ON CONFLICT(track_id, analyzer_id) DO UPDATE SET \
                    source_signature = excluded.source_signature, job_id = excluded.job_id, \
-                   completeness = excluded.completeness, confidence = excluded.confidence, \
+                   completeness = excluded.completeness, \
                    summary_json = excluded.summary_json, timeline_json = excluded.timeline_json, \
                    sections_json = excluded.sections_json, technical_json = excluded.technical_json, \
                    stages_json = excluded.stages_json, updated_at = CURRENT_TIMESTAMP",
@@ -537,7 +541,6 @@ impl LocalAnalysisRepository for SqliteStorage {
             .bind(&document.source_signature)
             .bind(job_id)
             .bind(&document.completeness)
-            .bind(&document.confidence)
             .bind(summary)
             .bind(timeline)
             .bind(sections)
@@ -664,7 +667,7 @@ pub(crate) async fn current_model_context(
             },
         )?;
     let row = sqlx::query(
-        "SELECT source_signature, job_id, completeness, confidence, summary_json, \
+        "SELECT source_signature, job_id, completeness, summary_json, \
          timeline_json, sections_json, technical_json, stages_json, \
          CAST(strftime('%s', updated_at) AS INTEGER) AS updated_at_unix_seconds \
          FROM track_contexts WHERE track_id = ? AND analyzer_id = ?",
@@ -693,7 +696,6 @@ fn context_state_from_row(
         source_signature: row.try_get("source_signature")?,
         job_id: row.try_get("job_id")?,
         completeness: row.try_get("completeness")?,
-        confidence: row.try_get("confidence")?,
         summary_json: row.try_get("summary_json")?,
         timeline_json: row.try_get("timeline_json")?,
         sections_json: row.try_get("sections_json")?,
@@ -728,7 +730,6 @@ fn valid_audio_profile(profile: &AnalysisWrite) -> bool {
 fn valid_context(document: &ContextWrite) -> bool {
     document.source_signature.len() == 64
         && matches!(document.completeness.as_str(), "full" | "partial")
-        && matches!(document.confidence.as_str(), "high" | "medium" | "low")
         && document
             .summary
             .get("schema_version")
@@ -1118,7 +1119,6 @@ mod tests {
             track_id: track.id,
             source_signature: signature,
             completeness: "full".to_owned(),
-            confidence: "medium".to_owned(),
             summary: serde_json::Map::from_iter([
                 (
                     "schema_version".to_owned(),
@@ -1195,7 +1195,6 @@ mod tests {
             track_id: track.id,
             source_signature: context_signature,
             completeness: "full".to_owned(),
-            confidence: "medium".to_owned(),
             summary: serde_json::Map::from_iter([(
                 "schema_version".to_owned(),
                 serde_json::json!(LOCAL_CONTEXT_ANALYZER_ID),
@@ -1234,6 +1233,7 @@ mod tests {
             &role_fingerprint,
             &vocabulary_fingerprint,
             Some(&current_context),
+            None,
         )?;
         let document = ModelAnalysisWrite {
             profile: AnalysisWrite {

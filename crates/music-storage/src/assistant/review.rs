@@ -96,11 +96,15 @@ pub(super) async fn review_in_transaction(
                 guard.voice_signature.as_deref(),
             )
             .await?;
+            let catalog = crate::catalog_evidence::current_song_catalog(transaction, &track)
+                .await
+                .map_err(box_storage)?;
             music_application::assistant::model_tag_source_signature(
                 &track,
                 &guard.role.inference_fingerprint,
                 &guard.vocabulary_fingerprint,
                 context.as_ref(),
+                catalog.as_ref(),
             )
         } else if target.analyzer_id == CATALOG_TAG_ANALYZER_ID {
             music_application::assistant::catalog_tag_source_signature(

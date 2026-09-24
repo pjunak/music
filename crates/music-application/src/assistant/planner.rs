@@ -1176,6 +1176,7 @@ mod tests {
         tags: &[&str],
     ) -> Result<AssistantTrackEvidence, Box<dyn Error>> {
         Ok(AssistantTrackEvidence {
+            catalog_evidence: None,
             track: IndexedTrack {
                 id: TrackId::new(id)?,
                 path: LibraryPath::parse(format!("{title}.mp3"))?,

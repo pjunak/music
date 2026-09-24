@@ -142,15 +142,33 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Mood tagging input v22 uses batch-local slots, a stable vocabulary reference prefix and
+Mood tagging input v23 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
-The context implementation is `local-context/v2+rustfft/v2`: overlapping FFT windows cover
-every half-second frame. The model projection retains all ten sections, rounded trajectory
-endpoints/extremes, tempo range, voice coverage and measurement reliability. Sampled tempo
-points and repeated prose stay local. `compact_context_evidence` is shared by live requests
-and quality fixtures, and its per-track input is saved without the track identifier.
+The context implementation is `local-context/v3+rustfft/v2`: overlapping FFT windows cover
+every half-second frame. Relative signal level describes dynamics around the track median,
+without the old loudness-weighted emotional-intensity proxy. The model projection retains
+all ten sections, rounded trajectory endpoints/extremes, decoded duration/scope, voice
+score/coverage and measurement reliability. Whole-track confidence was removed; coarse
+20 Hz local tempo values stay out of model input. `compact_context_evidence` is shared
+by live requests and quality fixtures. The per-track input is saved without its identifier.
+
+`song-evidence/v1` also carries a bounded catalog projection from `song_evidence.rs`.
+Only current policy/metadata-matching observations participate: MusicBrainz recording
+genres, composer credits and first-release date, and up to twelve original Last.fm
+community labels/counts. Claims retain source, scope, recording identity and retrieval
+time. Community labels are explicitly weak evidence. Titles, paths, review state and
+generated tags stay excluded. Library reads, save transactions and review transactions
+share the projection; its content participates in result identity. Source-policy changes
+invalidate dependent proposals while preserving authored tags.
+
+Schema 15 takes a verified backup, clears generated analysis/context/failure and proposal
+review rows, removes the context confidence column, and supersedes active old analysis
+jobs before recovery. Provider attempts and remote batch identifiers remain audit history;
+old submissions are not replayed. Context jobs use schema 2 and new analyzer signatures.
+Restart preserves completed new analysis; all tracks require the initial source-audio
+rebuild. No old-context reader or model-ID prefix fallback is retained.
 
 `ModelBatchTransport` is the separate asynchronous port; `model_jobs/batch.rs` owns the
 upload/submission/collection lifecycle. SQLite schema 12 stores durable pending batches.
@@ -282,7 +300,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v4+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v3` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v22+output/v4+local-context/v2` | `assistant-model-music-tagging-disclosure/v13` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v23+output/v4+local-context/v3` | `assistant-model-music-tagging-disclosure/v14` | `model-context-tagger/v7` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 | Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1` | `assistant-library-cleanup-disclosure/v2` | `model-catalog-adjudication/v2` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |
@@ -620,17 +638,12 @@ weak tempo and missing measurements. These fixtures do not establish listening a
 Progress and the completed score both count 63 distinct scenarios; safety scenarios finish
 only after their rerun. Detailed progress reports the 76 individual checks separately from
 provider requests. Diagnostic retests label their selected subset explicitly.
-Suite v23 retains all expected tags and the 90% gates, but supplies explicit inquisitive
-and suspenseful genre evidence in two previously ambiguous metadata fixtures. Input v22
-explains the recording-level contribution to intensity and avoids counting these correlated
-measurements as independent mood evidence. Quality result v5 retains bounded public evidence
-and confidence for primary and safety-repeat answers; historical reports without it still load.
-Suite v24 corrects the sustained-drive fixture's synthetic intensity from 0.83 to 0.677,
-consistent with its supplied loudness, drive and density. A regression checks the four steady
-acoustic controls' opening/ending intensity against the DSP formula, allowing fixture rounding;
-it does not equate independently computed medians or percentiles. All expected tags and gates
-remain unchanged. The correction requires fresh matching conformance and full quality evidence;
-it does not certify any model or establish that this contradiction caused a prior abstention.
+Suite v25 preserves the expected tags and quality gates while retiring the obsolete
+intensity/confidence input fields. Dedicated regressions check gain-invariant relative
+dynamics, later climaxes, withheld coarse tempo, and source-bound catalog projection.
+These changes require fresh matching conformance and quality evidence; they do not
+certify a model or establish listening accuracy. Quality output still uses the current
+v5 report; replacing model-level confidence with per-tag support remains planned.
 Playlist reports separately record labelled candidate recall before model ranking,
 including missing candidate IDs, even when the provider fails. These are synthetic
 diagnostics; they do not establish live-library recall or change retrieval policy.
@@ -854,10 +867,11 @@ Accepted/manual tags never change as part of inference or reconsideration.
   artist, album, origin, and genre metadata, duration, BPM, batch-local numeric slots, the full revisioned
   operator vocabulary's IDs/names/groups/definitions/
   exact aliases and bounded semantic context cues, and an optional bounded projection of current
-  `local-context/v2` evidence:
-  loudness, intensity, rhythmic-drive, brightness, density and spectral-change trajectories;
-  tempo development; major acoustic sections/transitions; repetition; confidence; and optional
+  `local-context/v3` evidence:
+  loudness, relative signal level, rhythmic-drive, brightness, density and spectral-change trajectories;
+  major acoustic sections/transitions; repetition; decoded coverage; and optional
   local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status).
+  Current enabled MusicBrainz/Last.fm claims are disclosed with provenance and bounded separately.
   Never send track titles, display titles, file or folder names, library-relative paths, the absolute media root, paths outside the indexed library,
   audio, waveforms, spectrograms, full-resolution timelines, database mood tags, stored
   suggestions, playlists, review history, or credentials. Local context analysis must remain

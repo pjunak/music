@@ -501,6 +501,7 @@ mod tests {
         title: &str,
     ) -> Result<AssistantTrackEvidence, Box<dyn std::error::Error>> {
         Ok(AssistantTrackEvidence {
+            catalog_evidence: None,
             track: IndexedTrack {
                 id: TrackId::new(id)?,
                 path: LibraryPath::parse(path)?,

@@ -69,13 +69,12 @@ const detail: TrackContextDetail = {
   title: "Quiet Road",
   artist: "Tabletop Ensemble",
   status: "full",
-  analyzer_id: "local-context/v2",
-  confidence: "high",
+  analyzer_id: "local-context/v3",
   updated_at: "2026-08-24T10:00:00Z",
   summary: {
     trajectories: {
       loudness: trajectory,
-      intensity: trajectory,
+      relative_level: trajectory,
       rhythmic_drive: trajectory,
       brightness: trajectory,
       density: trajectory,
@@ -97,15 +96,15 @@ const detail: TrackContextDetail = {
     },
   },
   timeline: [
-    { start_s: 0, duration_s: 2, intensity: 0.2, rhythmic_drive: 0.3, loudness: 0.2 },
-    { start_s: 178, duration_s: 2, intensity: 0.8, rhythmic_drive: 0.7, loudness: 0.75 },
+    { start_s: 0, duration_s: 2, relative_level: 0.2, rhythmic_drive: 0.3, loudness: 0.2 },
+    { start_s: 178, duration_s: 2, relative_level: 0.8, rhythmic_drive: 0.7, loudness: 0.75 },
   ],
   sections: [
     {
       id: "s1",
       start_s: 0,
       end_s: 180,
-      intensity: 0.5,
+      relative_level: 0.5,
       rhythmic_drive: 0.5,
       brightness: 0.5,
       density: 0.5,
@@ -145,7 +144,7 @@ describe("LibraryContextView", () => {
     expect(await screen.findByRole("heading", { name: "Quiet Road" })).toBeInTheDocument();
     expect(screen.queryByText("Development across the track")).not.toBeInTheDocument();
     expect(screen.getAllByText("gradual rise · 20%–80%")).toHaveLength(6);
-    const graph = screen.getByLabelText(/Intensity, rhythmic drive/);
+    const graph = screen.getByLabelText(/Relative level, rhythmic drive/);
     expect(graph).toHaveAttribute("preserveAspectRatio", "none");
     const player = container.querySelector("audio");
     expect(player).not.toBeNull();
@@ -156,7 +155,7 @@ describe("LibraryContextView", () => {
     expect(heading.parentElement).toHaveTextContent("Quiet RoadTabletop Ensemble");
     expect(
       container.querySelector(".assistant-context-detail-heading > .assistant-context-status"),
-    ).toHaveTextContent("full · high confidence");
+    ).toHaveTextContent("full · audio coverage");
     expect(screen.getByText("0:00 / 3:00")).toBeInTheDocument();
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 90 });
     fireEvent.timeUpdate(player);
@@ -239,7 +238,7 @@ describe("LibraryContextView", () => {
         ...detail.summary,
         voice: {
           status: "classified",
-          voice_probability: 0.82,
+          voice_score: 0.82,
           vocal_coverage: 0.75,
           note: "Voice is present across most analyzed windows.",
         },

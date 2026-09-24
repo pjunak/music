@@ -262,7 +262,7 @@ impl ModelFeatureJobHandler {
             &parameters.quality_evaluation_id,
             TAGGING_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v13",
+            "assistant-model-music-tagging-disclosure/v14",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;
@@ -326,6 +326,7 @@ impl ModelFeatureJobHandler {
                     &parameters.inference_fingerprint,
                     &parameters.vocabulary_fingerprint,
                     contexts.get(&track.track.id),
+                    track.catalog_evidence.as_ref(),
                 )
                 .map(|signature| (track.track.id, signature))
                 .map_err(|_| JobHandlerError::new("model_tag_source_invalid"))
@@ -349,7 +350,13 @@ impl ModelFeatureJobHandler {
         let total = work.len();
         let inputs = work
             .iter()
-            .map(|track| model_tag_track_input(&track.track, contexts.get(&track.track.id)))
+            .map(|track| {
+                model_tag_track_input(
+                    &track.track,
+                    contexts.get(&track.track.id),
+                    track.catalog_evidence.as_ref(),
+                )
+            })
             .collect::<Vec<_>>();
         let batches =
             crate::assistant::plan_model_tagger_batches(&inputs, &vocabulary, |request| {
@@ -367,7 +374,7 @@ impl ModelFeatureJobHandler {
                     metrics: json!({"contract":"assistant-music-tagger-output/v4", "input_contract":MODEL_TAGGER_INPUT_CONTRACT,
                         "context_status":contexts.get(&track.track.id).map_or("missing", |context| context.completeness.as_str()),
                         "role_fingerprint":parameters.role_fingerprint,"vocabulary_fingerprint":parameters.vocabulary_fingerprint,
-                        "input_snapshot":super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id)))}).as_object().cloned().unwrap_or_default(),
+                        "input_snapshot":super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id), track.catalog_evidence.as_ref()))}).as_object().cloned().unwrap_or_default(),
                 }
             }).collect();
             return self
@@ -514,7 +521,7 @@ impl ModelFeatureJobHandler {
                                 "context_status": context_status,
                                 "role_fingerprint": parameters.role_fingerprint,
                                 "vocabulary_fingerprint": parameters.vocabulary_fingerprint,
-                                "input_snapshot": super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id))),
+                                "input_snapshot": super::super::model_tagger::model_tag_input_snapshot(&model_tag_track_input(&track.track, contexts.get(&track.track.id), track.catalog_evidence.as_ref())),
                             })
                             .as_object()
                             .cloned()

@@ -22,10 +22,10 @@ use crate::library::LibraryRepository;
 pub const METADATA_ANALYSIS_JOB_KIND: &str = "assistant.library-analysis";
 pub const AUDIO_ANALYSIS_JOB_KIND: &str = "assistant.library-audio-analysis";
 pub const LIBRARY_CONTEXT_JOB_KIND: &str = "assistant.library-context-analysis";
-pub const LOCAL_CONTEXT_ANALYZER_ID: &str = "local-context/v2";
-pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v2+rustfft/v2";
+pub const LOCAL_CONTEXT_ANALYZER_ID: &str = "local-context/v3";
+pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v3+rustfft/v2";
 const METADATA_ANALYSIS_BATCH_SIZE: usize = 50;
-pub const VOICE_ANALYZER_ID: &str = "essentia-musicnn-voice/v1";
+pub const VOICE_ANALYZER_ID: &str = "essentia-musicnn-voice/v2";
 pub const VOICE_MODEL_FILENAME: &str = "voice_instrumental-musicnn-msd-2.pb";
 pub const VOICE_MODEL_SHA256: &str =
     "b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a";
@@ -83,7 +83,6 @@ pub struct ContextState {
     pub source_signature: String,
     pub job_id: String,
     pub completeness: String,
-    pub confidence: String,
     pub summary_json: String,
     pub timeline_json: String,
     pub sections_json: String,
@@ -97,7 +96,6 @@ pub struct ContextWrite {
     pub track_id: TrackId,
     pub source_signature: String,
     pub completeness: String,
-    pub confidence: String,
     pub summary: Map<String, Value>,
     pub timeline: Vec<Map<String, Value>>,
     pub sections: Vec<Map<String, Value>>,
@@ -110,7 +108,6 @@ pub struct CurrentTrackContext {
     pub analyzer_id: String,
     pub source_signature: String,
     pub completeness: String,
-    pub confidence: String,
     pub summary: Map<String, Value>,
     pub timeline: Vec<Map<String, Value>>,
     pub sections: Vec<Map<String, Value>>,
@@ -247,9 +244,6 @@ pub struct LibraryContextSummary {
     pub missing_tracks: usize,
     pub failed_tracks: usize,
     pub stale_tracks: usize,
-    pub high_confidence: usize,
-    pub medium_confidence: usize,
-    pub low_confidence: usize,
     pub last_updated_at_unix_seconds: Option<i64>,
 }
 
@@ -260,7 +254,6 @@ pub struct TrackContextDetail {
     pub artist: String,
     pub status: String,
     pub analyzer_id: String,
-    pub confidence: Option<String>,
     pub updated_at_unix_seconds: Option<i64>,
     pub summary: Option<Map<String, Value>>,
     pub timeline: Vec<Map<String, Value>>,
@@ -848,7 +841,6 @@ pub fn parse_context_state(state: &ContextState) -> Option<CurrentTrackContext> 
     if state.completeness != "full" && state.completeness != "partial" {
         return None;
     }
-    Confidence::parse(&state.confidence)?;
     let summary = serde_json::from_str::<Value>(&state.summary_json)
         .ok()?
         .as_object()?
@@ -877,7 +869,6 @@ pub fn parse_context_state(state: &ContextState) -> Option<CurrentTrackContext> 
         analyzer_id: LOCAL_CONTEXT_ANALYZER_ID.to_owned(),
         source_signature: state.source_signature.clone(),
         completeness: state.completeness.clone(),
-        confidence: state.confidence.clone(),
         summary,
         timeline,
         sections,
@@ -942,18 +933,6 @@ fn summarize_context(
         .iter()
         .filter(|(_, context)| context.completeness == "partial")
         .count();
-    let high_confidence = current
-        .iter()
-        .filter(|(_, context)| context.confidence == "high")
-        .count();
-    let medium_confidence = current
-        .iter()
-        .filter(|(_, context)| context.confidence == "medium")
-        .count();
-    let low_confidence = current
-        .iter()
-        .filter(|(_, context)| context.confidence == "low")
-        .count();
     let voice_complete = current
         .iter()
         .filter(|(_, context)| {
@@ -994,9 +973,6 @@ fn summarize_context(
             .saturating_sub(current_failures.len()),
         failed_tracks: current_failures.len(),
         stale_tracks,
-        high_confidence,
-        medium_confidence,
-        low_confidence,
         last_updated_at_unix_seconds: current
             .iter()
             .map(|(state, _)| state.updated_at_unix_seconds)
@@ -1033,7 +1009,6 @@ fn context_detail(
             artist: track.metadata.artist.clone(),
             status: parsed.completeness.clone(),
             analyzer_id: LOCAL_CONTEXT_ANALYZER_ID.to_owned(),
-            confidence: Some(parsed.confidence),
             updated_at_unix_seconds: state.map(|state| state.updated_at_unix_seconds),
             summary: Some(parsed.summary),
             timeline: parsed.timeline,
@@ -1061,7 +1036,6 @@ fn context_detail(
         artist: track.metadata.artist.clone(),
         status: status.to_owned(),
         analyzer_id: LOCAL_CONTEXT_ANALYZER_ID.to_owned(),
-        confidence: None,
         updated_at_unix_seconds: updated_at,
         summary: None,
         timeline: Vec::new(),
@@ -1147,12 +1121,12 @@ mod tests {
         let with_voice = context_source_signature(
             &track,
             LOCAL_CONTEXT_IMPLEMENTATION_ID,
-            Some("essentia-musicnn-voice/v1:model:runtime"),
+            Some("essentia-musicnn-voice/v2:model:runtime"),
         )?;
         assert_eq!(without_voice.len(), 64);
         assert_ne!(with_voice, without_voice);
         assert_ne!(
-            context_source_signature(&track, "local-context/v2+other/v1", None)?,
+            context_source_signature(&track, "local-context/v3+other/v1", None)?,
             without_voice
         );
         Ok(())
@@ -1166,7 +1140,6 @@ mod tests {
             source_signature: "a".repeat(64),
             job_id: "job".to_owned(),
             completeness: "full".to_owned(),
-            confidence: "medium".to_owned(),
             summary_json: serde_json::json!({
                 "schema_version": LOCAL_CONTEXT_ANALYZER_ID,
             })

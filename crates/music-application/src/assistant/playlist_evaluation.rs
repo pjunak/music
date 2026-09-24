@@ -916,6 +916,7 @@ fn evaluation_track_evidence(
         });
     }
     Ok(AssistantTrackEvidence {
+        catalog_evidence: None,
         track,
         manual_tags: fixture.manual_tags.clone(),
         analyses,

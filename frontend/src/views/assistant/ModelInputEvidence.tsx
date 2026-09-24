@@ -19,13 +19,13 @@ export function ModelInputEvidence({ input }: { input: Record<string, unknown> }
     <p>Saved with this result. Track identifiers and the shared vocabulary are omitted here.</p>
     {metadata.length ? <ul>{metadata.map((key) => <li key={key}>{key}: {String(input[key])}</li>)}</ul> : <p>No descriptive metadata was supplied.</p>}
     {input.context_evidence ? <>
-      <p>Pulse: {number(tempo.typical_bpm)} BPM; reliability {label(reliability.tempo)}. Development: {label(structure.development)} across {number(structure.section_count)} sections.</p>
-      <p>Voice: {label(voice.status)}{voice.status === "classified" ? `; score ${number(voice.voice_probability)}, coverage ${number(voice.vocal_coverage)}` : ""}. Voice presence does not identify mood or lyrics.</p>
-      <ul>{["intensity", "rhythmic_drive", "density"].filter((key) => trajectories[key]).map((key) => {
+      <p>Local tempo: {label(tempo.status)}. Development: {label(structure.development)} across {number(structure.section_count)} sections.</p>
+      <p>Voice: {label(voice.status)}{voice.status === "classified" ? `; score ${number(voice.voice_score)}, coverage ${number(voice.vocal_coverage)}` : ""}. Voice presence does not identify mood or lyrics.</p>
+      <ul>{["relative_level", "rhythmic_drive", "density"].filter((key) => trajectories[key]).map((key) => {
         const axis = object(trajectories[key]);
         return <li key={key}>{label(key)}: {number(axis.start)} at the start → {number(axis.end)} at the end; {label(axis.shape)}, reliability {label(reliability[key])}.</li>;
       })}</ul>
-      <p>These are acoustic proxies on a 0–1 scale, not emotion scores. No music mood classifier was included in this input.</p>
+      <p>These are acoustic proxies on a 0–1 scale, not emotion scores. Relative level shows changes within this recording; absolute loudness depends on mastering. No music mood classifier was included in this input.</p>
     </> : <p>No local audio context was supplied.</p>}
     <details><summary>Inspect the exact saved fields</summary><pre className="assistant-input-snapshot">{JSON.stringify(input, null, 2)}</pre></details>
   </details>;

@@ -3784,7 +3784,7 @@
             "type": "integer"
           },
           "analyzer": {
-            "const": "local-context/v2",
+            "const": "local-context/v3",
             "type": "string"
           },
           "failed_tracks": {
@@ -3792,10 +3792,6 @@
             "type": "integer"
           },
           "full_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "high_confidence": {
             "minimum": 0,
             "type": "integer"
           },
@@ -3811,14 +3807,6 @@
             ]
           },
           "library_tracks": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "low_confidence": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "medium_confidence": {
             "minimum": 0,
             "type": "integer"
           },
@@ -3852,9 +3840,6 @@
           "missing_tracks",
           "failed_tracks",
           "stale_tracks",
-          "high_confidence",
-          "medium_confidence",
-          "low_confidence",
           "last_updated_at"
         ],
         "type": "object"
@@ -5516,7 +5501,7 @@
             "type": "integer"
           },
           "version": {
-            "const": "assistant-model-music-tagging-disclosure/v13",
+            "const": "assistant-model-music-tagging-disclosure/v14",
             "type": "string"
           }
         },
@@ -5685,7 +5670,7 @@
             "type": "string"
           },
           "disclosure_version": {
-            "const": "assistant-model-music-tagging-disclosure/v13",
+            "const": "assistant-model-music-tagging-disclosure/v14",
             "type": "string"
           },
           "execution_mode": {
@@ -7691,26 +7676,11 @@
         "additionalProperties": false,
         "properties": {
           "analyzer_id": {
-            "const": "local-context/v2",
+            "const": "local-context/v3",
             "type": "string"
           },
           "artist": {
             "type": "string"
-          },
-          "confidence": {
-            "anyOf": [
-              {
-                "enum": [
-                  "high",
-                  "medium",
-                  "low"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "error": {
             "anyOf": [
@@ -7806,7 +7776,6 @@
           "artist",
           "status",
           "analyzer_id",
-          "confidence",
           "updated_at",
           "summary",
           "timeline",
@@ -8383,7 +8352,7 @@
         "additionalProperties": false,
         "properties": {
           "analyzer_id": {
-            "const": "essentia-musicnn-voice/v1",
+            "const": "essentia-musicnn-voice/v2",
             "type": "string"
           },
           "model_filename": {

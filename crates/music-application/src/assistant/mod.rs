@@ -24,6 +24,7 @@ mod provider_profiles;
 mod provider_usage;
 mod providers;
 mod runtime_contract;
+mod song_evidence;
 mod structured_harness;
 mod tagging_evaluation;
 mod tags;
@@ -68,6 +69,7 @@ pub use runtime_contract::{
     ASSISTANT_RUNTIME_CONTRACT_VERSION, assistant_role_runtime_contract_digest,
     assistant_runtime_contract_digest,
 };
+pub use song_evidence::song_catalog_evidence;
 pub use structured_harness::ModelTaskError;
 pub use tagging_evaluation::*;
 pub use tags::{

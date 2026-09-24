@@ -76,7 +76,7 @@ async fn model_tag_review_routes_expose_current_proposals_and_preserve_manual_de
     let vocabulary = runtime.assistant.vocabulary().await?;
     let track = runtime.assistant.tracks().await?.remove(0).track;
     let signature =
-        model_tag_source_signature(&track, &fingerprint, &vocabulary.fingerprint, None)?;
+        model_tag_source_signature(&track, &fingerprint, &vocabulary.fingerprint, None, None)?;
     assert_eq!(
         runtime
             .storage

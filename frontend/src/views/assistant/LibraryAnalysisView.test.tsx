@@ -42,9 +42,9 @@ import { toast } from "@/core/toast";
 import { LibraryAnalysisView } from "./LibraryAnalysisView";
 
 const summary: LibraryContextSummary = {
-  analyzer: "local-context/v2",
+  analyzer: "local-context/v3",
   voice_analyzer: {
-    analyzer_id: "essentia-musicnn-voice/v1",
+    analyzer_id: "essentia-musicnn-voice/v2",
     status: "unavailable",
     reason: "model_missing",
     model_filename: "voice_instrumental-musicnn-msd-2.pb",
@@ -73,9 +73,6 @@ const summary: LibraryContextSummary = {
   missing_tracks: 34,
   failed_tracks: 2,
   stale_tracks: 1,
-  high_confidence: 35,
-  medium_confidence: 33,
-  low_confidence: 15,
   last_updated_at: "2026-08-24T10:00:00Z",
 };
 
@@ -100,7 +97,7 @@ const unavailableTagger: ModelTaggingAvailability = {
   tracks_needing_tags: 120,
   estimated_provider_requests: 6,
   disclosure: {
-    version: "assistant-model-music-tagging-disclosure/v13",
+    version: "assistant-model-music-tagging-disclosure/v14",
     shared_with_provider: [],
     never_shared: [],
     allowed_tags: ["calm"],

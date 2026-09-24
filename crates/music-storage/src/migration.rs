@@ -38,6 +38,9 @@ const CLEANUP_REJECTIONS_MIGRATION_SQL: &str =
 const RICH_TRACK_METADATA_MIGRATION_SQL: &str =
     include_str!("../migrations/0014_rich_track_metadata.sql");
 
+const SONG_EVIDENCE_REBUILD_SQL: &str =
+    include_str!("../migrations/0015_song_evidence_rebuild.sql");
+
 const BACKUP_KIND: &str = "pre-rust-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
 const BACKUP_NAME_ATTEMPTS: u16 = 100;
@@ -308,6 +311,13 @@ fn migrator() -> Migrator {
             "rich track metadata".into(),
             MigrationType::Simple,
             RICH_TRACK_METADATA_MIGRATION_SQL.into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            15,
+            "song evidence rebuild".into(),
+            MigrationType::Simple,
+            SONG_EVIDENCE_REBUILD_SQL.into_sql_str(),
             false,
         ),
     ])
@@ -596,7 +606,7 @@ mod tests {
             sqlx::query_scalar::<_, i64>("SELECT MAX(version) FROM _sqlx_migrations")
                 .fetch_one(&storage.pool)
                 .await?,
-            14
+            crate::CURRENT_SCHEMA_VERSION
         );
         let backups = std::fs::read_dir(directory.path())?
             .filter_map(Result::ok)
@@ -796,6 +806,125 @@ mod tests {
                 Err(crate::StorageError::IncompatibleSchema(_))
             ));
         }
+        Ok(())
+    }
+    #[tokio::test]
+    async fn song_evidence_cutover_clears_only_generated_state_once()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("app.db");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true)
+                    .foreign_keys(true),
+            )
+            .await?;
+        let old = sqlx::migrate::Migrator::with_migrations(
+            migrator()
+                .iter()
+                .filter(|migration| migration.version <= 14)
+                .cloned()
+                .collect(),
+        );
+        old.run(&pool).await?;
+        sqlx::raw_sql("INSERT INTO tracks (id,path,title,artist,album_artist,album,genre,length_s,display_title,origin,size_bytes,mtime,added_at) VALUES (1,'kept.flac','Kept','Artist','','Album','',120,'Kept','',10,20,CURRENT_TIMESTAMP);
+            INSERT INTO track_user_tags VALUES (1,'accepted-calm',CURRENT_TIMESTAMP);
+            INSERT INTO playlists (id,name,automatic_rule_json,created_at,updated_at) VALUES (1,'Kept playlist','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+            INSERT INTO playlist_items (playlist_id,track_id,position,added_at) VALUES (1,1,0,CURRENT_TIMESTAMP);
+            INSERT INTO track_contexts VALUES (1,'local-context/v2','old','job','full','high','{}','[]','[]','{}','{}',CURRENT_TIMESTAMP);
+            INSERT INTO track_analyses VALUES (1,'model-context-tagger/v7','old','job',0.2,0.3,0.4,'[\"calm\"]','[]','{}','high',CURRENT_TIMESTAMP);
+            INSERT INTO track_analysis_tag_reviews VALUES (1,'model-context-tagger/v7','calm','old','accepted',CURRENT_TIMESTAMP);
+            INSERT INTO track_analysis_failures VALUES (1,'local-context/v2','old','job','old error',CURRENT_TIMESTAMP);
+            INSERT INTO background_jobs (id,kind,status,parameters_json,result_json,progress_current,progress_phase,progress_message,attempts,created_at,updated_at)
+            VALUES ('job','assistant.library-context-analysis','running','{}','{\"old_checkpoint\":true}',1,'Old','Old',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);")
+            .execute(&pool).await?;
+        sqlx::query("INSERT INTO background_jobs (id,kind,status,lane,parameters_json,result_json,progress_current,progress_phase,progress_message,attempts,created_at,updated_at) VALUES ('paid','assistant.model-music-tagging','running','provider','{}','{\"provider_attempt\":\"uncertain\"}',1,'Submitted','Submitted',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)").execute(&pool).await?;
+        pool.close().await;
+        let before = crate::inspect_database(&path).await?;
+        assert!(before.is_compatible(), "{before:?}");
+        let storage = crate::SqliteStorage::open(crate::SqliteStorageOptions::new(&path)).await?;
+        assert!(storage.migration_outcome().backup.is_some());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM track_contexts")
+                .fetch_one(&storage.pool)
+                .await?,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM track_analyses")
+                .fetch_one(&storage.pool)
+                .await?,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM track_analysis_tag_reviews")
+                .fetch_one(&storage.pool)
+                .await?,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM track_analysis_failures")
+                .fetch_one(&storage.pool)
+                .await?,
+            0
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT tag FROM track_user_tags")
+                .fetch_one(&storage.pool)
+                .await?,
+            "accepted-calm"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM playlist_items")
+                .fetch_one(&storage.pool)
+                .await?,
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT status FROM background_jobs WHERE id='job'")
+                .fetch_one(&storage.pool)
+                .await?,
+            "cancelled"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT result_json FROM background_jobs WHERE id='job'"
+            )
+            .fetch_one(&storage.pool)
+            .await?,
+            None
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT result_json FROM background_jobs WHERE id='paid'"
+            )
+            .fetch_one(&storage.pool)
+            .await?,
+            "{\"provider_attempt\":\"uncertain\"}"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT status FROM background_jobs WHERE id='paid'")
+                .fetch_one(&storage.pool)
+                .await?,
+            "cancelled"
+        );
+        sqlx::query("INSERT INTO track_contexts VALUES (1,'local-context/v3','new','new-job','full','{}','[]','[]','{}','{}',CURRENT_TIMESTAMP)").execute(&storage.pool).await?;
+        storage.close().await;
+        drop(storage);
+        let reopened = crate::SqliteStorage::open(crate::SqliteStorageOptions::new(&path)).await?;
+        assert!(!reopened.migration_outcome().migration_applied);
+        assert!(reopened.migration_outcome().backup.is_none());
+        assert_eq!(
+            sqlx::query_scalar::<_, String>("SELECT source_signature FROM track_contexts")
+                .fetch_one(&reopened.pool)
+                .await?,
+            "new"
+        );
+        reopened.close().await;
         Ok(())
     }
 }

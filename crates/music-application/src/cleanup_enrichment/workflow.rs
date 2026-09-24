@@ -524,6 +524,7 @@ impl CleanupEnrichmentJobHandler {
         let choices = editions.choices;
         let mut partial = resolution.partial || editions.partial || credit.partial;
         let mut tag_suggestions = Vec::new();
+        let mut community_observations = json!({"source_id":"lastfm", "status":if catalog.lastfm_enabled {"unavailable"} else {"disabled"}});
         let mut notes = resolution.notes;
         notes.extend(recording.lookup_notes.iter().cloned());
         notes.extend(credit.notes);
@@ -548,6 +549,8 @@ impl CleanupEnrichmentJobHandler {
                 .await
             {
                 Ok(tags) => {
+                    community_observations =
+                        community_tag_observations(&tags, &recording_id, catalog.evidence_revision);
                     let mut suggestions = map_community_tags(&tags, vocabulary);
                     let source_signature =
                         catalog_tag_source_signature(track, catalog.evidence_revision)
@@ -613,6 +616,7 @@ impl CleanupEnrichmentJobHandler {
             "release_choices": choices,
             "recording_observations": {"first_release_date": recording.first_release_date, "genres": recording.genres, "credits": recording.credits, "composers": recording.composers},
             "ops": operations,
+            "community_observations": community_observations,
             "tag_suggestions": tag_suggestions,
             "notes": notes,
         })
@@ -1114,6 +1118,34 @@ pub(super) fn select_acoustic_candidate(
     let best = matches.first()?;
     let margin = matches.get(1).map_or(1.0, |next| best.1 - next.1);
     (best.1 >= ACOUSTID_MIN_SCORE && margin >= ACOUSTID_MIN_MARGIN).then(|| best.clone())
+}
+
+// Preserve bounded source observations before vocabulary mapping; counts are community
+// salience, never musical truth or calibrated probabilities.
+fn community_tag_observations(
+    tags: &[CommunityTag],
+    recording_id: &str,
+    evidence_revision: i64,
+) -> Value {
+    let mut unique = BTreeMap::<&str, u64>::new();
+    for tag in tags.iter().take(MAX_LASTFM_TAGS) {
+        if tag.name.trim().is_empty()
+            || tag.name.chars().count() > 128
+            || tag.name.chars().any(char::is_control)
+        {
+            continue;
+        }
+        unique
+            .entry(&tag.name)
+            .and_modify(|count| *count = (*count).max(tag.count))
+            .or_insert(tag.count);
+    }
+    let mut observations = unique.into_iter().collect::<Vec<_>>();
+    observations.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    json!({"source_id":"lastfm", "status":"available", "claim_kind":"community_tag", "entity_scope":"recording",
+        "recording_mbid":recording_id, "retrieved_at":now_seconds(), "evidence_revision":evidence_revision,
+        "policy_contract":super::CATALOG_EVIDENCE_POLICY_CONTRACT,
+        "tags":observations.into_iter().map(|(name,count)| json!({"name":name,"count":count})).collect::<Vec<_>>()})
 }
 
 fn map_community_tags(tags: &[CommunityTag], vocabulary: &TagVocabularySnapshot) -> Vec<Value> {
@@ -1746,6 +1778,43 @@ mod tests {
             "retrieved_at".into(),
             json!(now_seconds())
         )])));
+    }
+
+    #[test]
+    fn raw_community_claims_preserve_weak_and_unmapped_tags_with_source_identity() {
+        let tags = [
+            ("Dream Pop", 90),
+            ("unmapped musical phrase", 10),
+            ("calm", 1),
+            ("Dream Pop", 20),
+            ("bad\nclaim", 99),
+        ]
+        .into_iter()
+        .map(|(name, count)| CommunityTag {
+            name: name.into(),
+            count,
+        })
+        .collect::<Vec<_>>();
+        let result = community_tag_observations(&tags, "recording-1", 7);
+        assert_eq!(result["recording_mbid"], "recording-1");
+        assert_eq!(result["evidence_revision"], 7);
+        assert_eq!(result["claim_kind"], "community_tag");
+        assert_eq!(
+            result["tags"],
+            json!([{"name":"Dream Pop","count":90},{"name":"unmapped musical phrase","count":10},{"name":"calm","count":1}])
+        );
+        let many = (0..500)
+            .map(|i| CommunityTag {
+                name: format!("tag-{i}"),
+                count: 1,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            community_tag_observations(&many, "recording-1", 7)["tags"]
+                .as_array()
+                .map(Vec::len),
+            Some(50)
+        );
     }
 
     #[test]
