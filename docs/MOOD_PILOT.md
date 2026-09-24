@@ -1,92 +1,110 @@
 # Offline mood listening pilot
 
-The September 8 rework makes empty results diagnosable and limits wasted requests.
-It does not establish musical accuracy. Use one fixed sample before selecting an
-additional local music classifier or scaling text-model tagging.
+This private pilot measures whether suggestions help the owner find music for
+ordinary listening and tabletop sessions. Software conformance is a separate gate.
+No commands below call a provider, change a library, or accept generated tags.
 
-## Prepare once, without provider calls
+## Prepare and freeze the sample
 
-Choose 30 varied tracks with current local context: several artists/styles, voice
-states, quiet/loud mastering, steady/changing sections and sparse/rich metadata.
-Do not use an alphabetical slice of one artist. Store private pilot files outside
-Git. Put the selected numeric track IDs in a JSON array, then run from the repo:
+Choose roughly 60-100 varied recordings, including known failures and a random
+library sample. Include sparse/rich metadata, quiet/loud masters, vocals, and
+tracks with changing endings. Two independent groups are the minimum the tool
+can score, not a useful accuracy sample. Keep audio and judgments outside Git.
+
+Export a selected run using **Export retained run results**, and export the exact
+Mood vocabulary. The run is only an inventory for initialization: the template
+contains no predictions or explanations. Its IDs must refer to the same library.
 
 ```powershell
-node tools/mood-pilot.mjs init ids.json cohort.json
+node tools/mood-pilot.mjs init run.json vocabulary.json draft.jsonl
 ```
 
-The command creates a new file, refusing to overwrite an existing one. It assigns
-20 development and 10 holdout tracks deterministically, independent of input order.
-Listen before viewing model output. For each track, fill `expected_tags` with all
-canonical tags you would find useful, and set `reviewed` to `true`. An empty array
-is a valid reviewed negative example; an unreviewed track cannot be scored. Keep
-the holdout judgments and split fixed while tuning on development tracks.
+The first JSONL line is the `song-mood-judgments/v1` manifest; subsequent lines are
+judgments. There is one current format, with no old 30-track cohort parser. Edit:
 
-## Compare retained results
+- Manifest: set `annotator`, choose a small `core_tag_ids` set, describe actual
+  `session_requests` and sampling in `selection_notes`. Keep the initial seed fixed.
+- Each recording: set a stable `file_reference` (prefer a content hash, otherwise
+  an unchanged private file reference) and `recording_group`. Related editions,
+  duplicates and excerpts must share that group; use `duplicate_group` to connect
+  independently identified copies. The tool cannot discover unidentified duplicates.
+- Record stable album and composer identities where known. `separate_by` can contain
+  `album` and/or `composer` to keep those together too. Groups combine transitively;
+  if everything becomes one group, add independent recordings. Do not split related
+  recordings just to obtain a larger apparent sample.
 
-Use **Export retained run results** in the tagging result panel or Batch panel.
-The export contains returned track IDs, tags, public explanations, source signatures
-and recorded usage. It contains neither audio nor credentials. Returned rows can
-include tracks whose changed evidence prevented saving; compare the intended
-source signatures and preserve the run context. Older runs without retained rows
-cannot be reconstructed by this export. It does not make a provider request.
-
-Use the vocabulary document used for that run, exported from Mood vocabulary. For
-an unchanged default vocabulary, the checked-in document works:
+Freeze the membership before tuning or inspecting confirmation predictions:
 
 ```powershell
-node tools/mood-pilot.mjs score cohort.json run.json crates/music-application/src/default_vocabulary.json > score.json
+node tools/mood-pilot.mjs freeze draft.jsonl vocabulary.json pilot.jsonl
+```
+
+The seed assigns about 30% of independent groups to confirmation and the rest to
+development. Track counts may differ. Grouping, core tags, vocabulary and partitions
+are fingerprinted. Scoring rejects accidental changes; this is an audit mechanism,
+not protection against someone deliberately rewriting the manifest. Commands refuse
+to overwrite an existing file. Preserve the original frozen copy privately.
+
+## Listen independently
+
+In each selected row, record ordered `listened_intervals` as seconds, for example
+`[[0, 150]]`. Set `scope` to `whole_track` or `excerpt`; excerpt judgments cannot
+certify a whole recording. Record `blind: false` if predictions were visible or
+influenced the judgment. Mark `reviewed: true` only after listening.
+
+Use vocabulary IDs in `labels`, for example:
+
+```json
+{"mood.calm":"positive","mood.tense":"negative","scene.rest":"uncertain"}
+```
+
+Use the IDs from your actual exported vocabulary. Each label is `positive`,
+`negative`, `uncertain` or `unjudged`; omission also means unjudged. Judge every core
+tag where possible. Unselected tags are never silently treated as negatives.
+Evaluate perceived mood separately from scene/setting suitability, and use
+`session_notes` to record useful candidates, auditioning time and review effort.
+Record ambiguity in `notes`; do not overwrite disagreement to match the model.
+
+## Score development; open confirmation once
+
+```powershell
+node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json > development-score.json
+node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json --confirmation > confirmation-score.json
 node --test tools/mood-pilot.test.mjs
 ```
 
-The scorer rejects missing judgments, duplicate IDs/tags and unknown vocabulary
-names. Reports separate development/holdout results and moods, session uses,
-periods and custom groups. They include proposed/useful/false-positive tag counts,
-eligible/covered tracks, empty results and missing results. Precision is unknown
-when no tags were proposed, not 100%. Missing responses are not abstentions.
-Usage covers the whole exported run, even if it contains extra tracks.
+Normal scoring does not read confirmation judgments into its metrics or require
+them to be completed. Use the explicit confirmation switch only after freezing
+candidate settings. Repeated tuning against it makes it development data.
 
-The proposed pilot targets are 80% useful-tag precision and 60% coverage of tracks
-with a supported target tag. `meets_proposed_targets: null` means insufficient
-evidence to assess that group, not a pass. Check mood and session-use results
-separately, listen to false positives, and inspect holdout results before scaling.
-This sample is a practical decision aid, not a general accuracy estimate.
+Reports contain per-tag counts and separate mood, session-use, period and custom
+results. Precision uses judged positive/negative proposals only. Judgment coverage,
+uncertain/unjudged proposals and proposals outside the chosen core are reported
+separately, so a high score with little judging is visible. Missing responses are
+not abstentions; an explicitly empty result is. Precision without judged proposals
+is unknown. Group bootstrap intervals resample whole independent groups 1,000 times;
+intervals with too few defined replicates remain unknown. Small samples and rare tags
+cannot establish general accuracy. Album/composer overlap and assisted/excerpt
+judgments are reported, including when those identities were not used for splitting.
 
-## Controlled comparison and responsibility
+The report retains candidate source signatures for audit. These signatures include
+analysis/provider configuration and can legitimately differ between candidates;
+they are not audio hashes. **Verify that the run used the frozen file references**
+before comparing. The tool cannot verify remote file contents from a run export.
+Usage totals cover the whole exported run, including extra tracks.
 
-Keep vocabulary, tracks, text model and Thinking fixed. Compare retained original
-evidence with compact evidence first, then one local musical-evidence candidate
-if needed. Preserve contract/model/source identities and record local elapsed
-time, peak RSS and provider-reported input/output tokens; missing measurements
-remain unknown. Include any recertification/correction requests in the budget.
-The scorer performs no inference or installation and changes no library tags.
+Keep an initial baseline as a static private report; the runtime does not need its
+old reader. Compare one change at a time with fixed vocabulary and listening groups.
+An initial 80% precision / 60% useful-track coverage can guide investigation, but
+selection time, disruptive misses and actual review effort decide adoption. There
+is deliberately no automatic pass badge for incomplete listening data.
 
-Engineering owns model compatibility/profiling, integration and cache correctness.
-The operator supplies listening judgments and decides whether suggested uses are
-helpful. Paid comparisons and larger library runs remain explicit operator actions.
-No local analysis rerun or cleanup certification is needed to inspect old results.
+## Native model gate
 
-## First candidate compatibility review — 2026-09-08
-
-The established candidate is `mtg_jamendo_moodtheme-discogs-effnet-1`. Its published
-head consumes 1,280-dimensional Discogs-EffNet embeddings and produces 56 mood/theme
-scores. Its published test PR-AUC is 0.14 and ROC-AUC 0.76 on its own dataset; these
-are not accuracy figures for this library. [Exact head metadata](https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.json).
-
-It requires the separate Discogs-EffNet encoder and its preprocessing. The current
-voice detector is MusiCNN with two selected outputs; its scores cannot feed this
-head, and its internal features are not interchangeable with Discogs embeddings.
-The encoder catalog also documents a fixed TensorFlow batch of 64 and an ONNX
-alternative. A Rust runtime/preprocessing compatibility and CPU/RSS probe is needed
-before proposing a production dependency. [Encoder metadata](https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.json),
-[current voice metadata](https://essentia.upf.edu/models/classifiers/voice_instrumental/voice_instrumental-musicnn-msd-2.json),
-[encoder catalog](https://essentia.upf.edu/models.html#discogs-effnet).
-
-MTG publishes its models under CC BY-NC-SA 4.0, with proprietary licensing available.
-The application must not silently bundle weights under its own code license.
-[Model licensing](https://essentia.upf.edu/models.html).
-
-Decision: retain this as the first bounded experiment, not an accepted runtime
-dependency. No weights, new runtime service or classifier predictions were added
-by this workflow change. Adoption and scaling depend on compatibility/resource
-measurements and useful listening results; neither has been demonstrated yet.
+Discogs-EffNet with matching mood/theme and instrument heads remains an optional
+experiment. Adoption needs exact preprocessing/output parity, bounded CPU/RAM and
+cancellation, and a useful improvement on development recordings. MTG model weights
+have their own license and must be installed explicitly; they are not bundled with
+the application. See the [implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
+for the current probe evidence and remaining gates. Jev is an optional comparison
+using the same evidence; paid/live comparisons require normal operator consent.
