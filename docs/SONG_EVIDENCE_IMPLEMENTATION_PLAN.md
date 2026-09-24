@@ -27,6 +27,10 @@ The status below identifies delivered contracts; conditional stages remain propo
   and fixed executor, with repeated passes, explicit cancellation outcomes, coverage,
   stage timings and process-local memory observations. It adds no model or dependency;
   production container totals and concurrent playback still need separate measurement.
+- **Implemented:** bounded final loudness-report capture survives verbose embedded notes;
+  factual decode/loudness codec and filter pools are limited. The acceptance probe exposes
+  numeric measurements. The direct ebur128 substitution failed end-of-file/short-signal
+  checks and was rejected; no faster loudness algorithm has been adopted.
 - **Native probe:** exact published ONNX encoder and both heads run with Tract 0.23.7
   at batch size one. Full preprocessing/output parity, cancellation, production resource
   bounds and listening usefulness remain unproven; no new model runtime/weights are bundled.
@@ -44,9 +48,10 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Windows GNU validation passed: 497 Rust tests, 342 frontend tests and 48 pilot/policy
-checks; workspace and fuzz Clippy, formatting, architecture, generated contracts,
-doctor/migration coverage, frontend production build and the headless release build.
+Across completed batches, Windows GNU validation passed: 502 Rust tests, 342 frontend
+tests and 48 pilot/policy checks; workspace and fuzz Clippy, formatting, architecture,
+generated contracts, doctor/migration coverage, frontend production build and the
+headless release build.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -59,21 +64,30 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** added `music-context-probe`, a read-only operator/developer CLI
-that exercises the real FFmpeg/RustFFT extractor on one fixed worker. It reports
-coverage, stage timings, repeated passes, typed cancellation and process-local memory
-without writing a library or adding models/dependencies. Six focused regression tests
-pass, including final-frame coverage and reusing the worker after cancellation.
-The [acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md) documents commands, scope and
-remaining whole-container and listening gates. The paired listening comparison from
-the previous batch remains available. A release-mode local smoke run retained all
-15 synthetic duration/tail checks; six cancellations completed cleanup within 49 ms.
-The ten-minute fixture took 8.04–8.08 s, with roughly 97% in the existing loudness pass.
-These are unconstrained Windows observations, not production or listening acceptance.
-This batch passed 497 Rust tests, 48 pilot/policy checks, strict Clippy, formatting,
-architecture, doc tests, contract verification and the release probe build. Frontend,
-fuzz, dependency graphs and application packaging are unchanged; their earlier gates
-were not rerun.
+**Latest batch:** fixed lost loudness measurements when long embedded notes filled
+the subprocess log buffer. The extractor now retains the bounded final report and
+explicitly limits factual decode/loudness codec and filter pools. The same loudnorm
+algorithm and parameters remain in use. Context implementation identity advances;
+old generated contexts become stale through the existing guards, without a legacy
+reader or changes to accepted/manual tags. The read-only probe emits current-only
+`context-probe/v2` records with numeric, allowlisted loudness fields.
+
+A direct measurement-only ebur128 substitution was investigated and rejected after
+a missed final-sample peak and material short-signal/range differences. Faster processing
+does not pass a correctness gate by itself. The
+[acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md#loudness-reliability-and-optimization-decision--24-september-2026)
+records commands, primary sources, observed differences and the remaining reference
+validation. No new model/runtime/dependency was added. The paired listening pilot
+remains available; no owner judgments or production data were invented.
+
+Validation for this batch: 502 Rust tests, strict workspace Clippy, formatting,
+architecture, workspace check, doc tests, generated contracts and the release probe
+build passed. Forty-eight before/after release passes retained coverage across
+PCM, FLAC and MP3; all 18 measured new runs matched the original command's four
+loudness values exactly. The metadata case recovered valid EBU results, and six
+cancellations completed cleanup within 49 ms. The ten-minute fixture remains about
+7.9 s: no speedup is claimed. Frontend, Node pilot/policy, fuzz, dependencies and
+application packaging are unchanged; their earlier gates were not rerun.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -85,8 +99,9 @@ options survey; this plan determines the narrower implementation scope.
 |---|---|---|---|---|
 | Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
-| FFmpeg / ffprobe | Decode and technical inspection | Reused | Keep | Core: existing bounded decoding avoids a second audio pipeline. |
-| music-context-probe | No factual extractor acceptance CLI | Read-only repeated extraction, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
+| FFmpeg / ffprobe | Decode and technical inspection | Bounded codec/filter pools; reliable final loudness capture | Keep | Core: original-audio facts; verbose metadata must not silently reduce evidence quality. |
+| FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
+| music-context-probe | No factual extractor acceptance CLI | Current v2 reports with numeric loudness, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
 | MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Optional voice score and coverage | Keep optional | Useful: audible vocals matter for quiet session beds; scores remain uncalibrated and do not produce mood tags. |

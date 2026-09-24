@@ -1,4 +1,5 @@
 use std::cmp::Ordering as CmpOrdering;
+use std::collections::VecDeque;
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fmt::{self, Display, Formatter};
@@ -674,6 +675,8 @@ fn decode_context(
         .arg("-v")
         .arg("error")
         .arg("-nostdin")
+        .arg("-filter_threads")
+        .arg("1")
         .arg("-threads")
         .arg("1")
         .arg("-i")
@@ -689,6 +692,8 @@ fn decode_context(
         .arg("s16le")
         .arg("-acodec")
         .arg("pcm_s16le")
+        .arg("-threads")
+        .arg("1")
         .arg("pipe:1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1466,12 +1471,26 @@ fn ebu_loudness(
     path: &Path,
     cancelled: &AtomicBool,
 ) -> Result<Option<EbuLoudness>, AudioContextError> {
-    let arguments = ["-hide_banner", "-nostats", "-v", "info", "-nostdin", "-i"];
+    // Codec thread limits do not limit the filter pool; bound both independently.
+    let arguments = [
+        "-hide_banner",
+        "-nostats",
+        "-v",
+        "info",
+        "-nostdin",
+        "-filter_threads",
+        "1",
+        "-threads",
+        "1",
+        "-i",
+    ];
     let trailing = [
         "-map",
         "0:a:0",
         "-af",
         "loudnorm=I=-24:LRA=7:TP=-2:print_format=json",
+        "-threads",
+        "1",
         "-f",
         "null",
         "-",
@@ -1488,21 +1507,19 @@ fn ebu_loudness(
         Err(AudioContextError::Cancelled) => return Err(AudioContextError::Cancelled),
         _ => return Ok(None),
     };
-    let text = String::from_utf8_lossy(&output.stderr);
-    let Some(start) = text
+    Ok(parse_ebu_loudness(&output.stderr))
+}
+
+fn parse_ebu_loudness(stderr: &[u8]) -> Option<EbuLoudness> {
+    let text = String::from_utf8_lossy(stderr);
+    let start = text
         .rfind("{\n\t\"input_i\"")
-        .or_else(|| text.rfind("{\r\n\t\"input_i\""))
-    else {
-        return Ok(None);
-    };
-    let Some(relative_end) = text[start..].find('}') else {
-        return Ok(None);
-    };
-    let parsed = serde_json::from_str::<Value>(&text[start..=start + relative_end]).ok();
+        .max(text.rfind("{\r\n\t\"input_i\""))?;
+    let relative_end = text[start..].find('}')?;
+    let parsed = serde_json::from_str::<Value>(&text[start..=start + relative_end]).ok()?;
     let number = |key| {
         parsed
-            .as_ref()
-            .and_then(|value| value.get(key))
+            .get(key)
             .and_then(|value| match value {
                 Value::String(value) => value.parse::<f64>().ok(),
                 Value::Number(value) => value.as_f64(),
@@ -1510,24 +1527,12 @@ fn ebu_loudness(
             })
             .filter(|value| value.is_finite())
     };
-    let Some(integrated_lufs) = number("input_i") else {
-        return Ok(None);
-    };
-    let Some(loudness_range_lu) = number("input_lra") else {
-        return Ok(None);
-    };
-    let Some(true_peak_dbtp) = number("input_tp") else {
-        return Ok(None);
-    };
-    let Some(relative_threshold_lufs) = number("input_thresh") else {
-        return Ok(None);
-    };
-    Ok(Some(EbuLoudness {
-        integrated_lufs,
-        loudness_range_lu,
-        true_peak_dbtp,
-        relative_threshold_lufs,
-    }))
+    Some(EbuLoudness {
+        integrated_lufs: number("input_i")?,
+        loudness_range_lu: number("input_lra")?,
+        true_peak_dbtp: number("input_tp")?,
+        relative_threshold_lufs: number("input_thresh")?,
+    })
 }
 
 struct CapturedOutput {
@@ -1574,7 +1579,7 @@ fn capture_child(
     let stdout = child.stdout.take().ok_or(AudioContextError::Decode)?;
     let stderr = child.stderr.take().ok_or(AudioContextError::Decode)?;
     let stdout_thread = thread::spawn(move || read_bounded(stdout));
-    let stderr_thread = thread::spawn(move || read_bounded(stderr));
+    let stderr_thread = thread::spawn(move || read_bounded_tail(stderr));
     let deadline = Instant::now() + timeout;
     let status = loop {
         if cancelled.load(Ordering::Relaxed) {
@@ -1618,6 +1623,24 @@ fn read_bounded(mut reader: impl Read) -> Vec<u8> {
             Ok(read) => {
                 let remaining = CAPTURE_LIMIT.saturating_sub(output.len());
                 output.extend_from_slice(&buffer[..read.min(remaining)]);
+            }
+        }
+    }
+}
+
+fn read_bounded_tail(mut reader: impl Read) -> Vec<u8> {
+    // FFmpeg prints measurements at EOF, after potentially large embedded metadata.
+    // Keep the end of stderr while continuing to drain it so the child cannot block.
+    let mut output = VecDeque::with_capacity(CAPTURE_LIMIT);
+    let mut buffer = [0_u8; 4_096];
+    loop {
+        match reader.read(&mut buffer) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Ok(0) | Err(_) => return output.into(),
+            Ok(read) => {
+                let overflow = (output.len() + read).saturating_sub(CAPTURE_LIMIT);
+                output.drain(..overflow);
+                output.extend(&buffer[..read]);
             }
         }
     }
@@ -1998,6 +2021,176 @@ mod tests {
         assert_eq!(document.stages["voice"]["status"], "not_configured");
         assert_eq!(document.completeness, "full");
         Ok(())
+    }
+
+    #[test]
+    fn bounded_capture_drains_both_streams_and_retains_the_correct_end() {
+        let source = (0..super::CAPTURE_LIMIT * 3 + 731)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        let mut stdout = std::io::Cursor::new(&source);
+        let mut stderr = std::io::Cursor::new(&source);
+        assert_eq!(
+            super::read_bounded(&mut stdout),
+            source[..super::CAPTURE_LIMIT]
+        );
+        assert_eq!(
+            super::read_bounded_tail(&mut stderr),
+            source[source.len() - super::CAPTURE_LIMIT..]
+        );
+        assert_eq!(stdout.position(), source.len() as u64);
+        assert_eq!(stderr.position(), source.len() as u64);
+        assert!(super::read_bounded_tail(&[][..]).is_empty());
+        assert_eq!(super::read_bounded_tail(&b"short"[..]), b"short");
+    }
+
+    #[test]
+    fn loudness_parser_requires_complete_finite_input_measurements()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let report = "{\n\t\"input_i\": \"-20.00\", \"input_lra\": 0.0, \"input_tp\": \"-17.00\", \"input_thresh\": \"-30.00\"\n}";
+        let later = report.replace("-20.00", "-21.00").replace('\n', "\r\n");
+        let mixed = format!("{report}\n{later}");
+        assert_eq!(
+            super::parse_ebu_loudness(mixed.as_bytes())
+                .ok_or("missing latest report")?
+                .integrated_lufs,
+            -21.0
+        );
+        for report in [report.to_owned(), report.replace('\n', "\r\n")] {
+            let parsed = super::parse_ebu_loudness(report.as_bytes()).ok_or("invalid report")?;
+            assert_eq!(parsed.integrated_lufs, -20.0);
+            assert_eq!(parsed.loudness_range_lu, 0.0);
+            assert_eq!(parsed.true_peak_dbtp, -17.0);
+            assert_eq!(parsed.relative_threshold_lufs, -30.0);
+            for invalid in [
+                report.replace("-20.00", "-inf"),
+                report.replace("-17.00", "NaN"),
+                report.replace("input_thresh", "output_thresh"),
+                report.replace('}', ""),
+            ] {
+                assert!(super::parse_ebu_loudness(invalid.as_bytes()).is_none());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn loudness_keeps_measurements_after_large_multiline_metadata()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let clean = directory.path().join("clean.wav");
+        let tagged = directory.path().join("tagged.wav");
+        let comment = "embedded note\n".repeat(8_000);
+        write_loudness_wav(&clean, 48_000, 2, 2.125, "", false)?;
+        write_loudness_wav(&tagged, 48_000, 2, 2.125, &comment, false)?;
+        let ffmpeg = std::env::var_os("MUSIC_TEST_FFMPEG").unwrap_or_else(|| "ffmpeg".into());
+        let ffmpeg = std::path::Path::new(&ffmpeg);
+        let cancelled = AtomicBool::new(false);
+        let clean =
+            super::ebu_loudness(ffmpeg, &clean, &cancelled)?.ok_or("clean audio lost loudness")?;
+        let tagged = super::ebu_loudness(ffmpeg, &tagged, &cancelled)?
+            .ok_or("metadata displaced the final loudness report")?;
+        assert_eq!(clean.integrated_lufs, tagged.integrated_lufs);
+        assert_eq!(clean.loudness_range_lu, tagged.loudness_range_lu);
+        assert_eq!(clean.true_peak_dbtp, tagged.true_peak_dbtp);
+        assert_eq!(
+            clean.relative_threshold_lufs,
+            tagged.relative_threshold_lufs
+        );
+        // Opposite-phase stereo must be measured before the mono DSP downmix.
+        assert!((clean.integrated_lufs + 20.0).abs() < 0.2, "{clean:?}");
+        assert!((clean.true_peak_dbtp + 20.0).abs() < 0.2, "{clean:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn loudness_retains_a_peak_at_eof_and_keeps_silence_unmeasured()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let clean = directory.path().join("tone.wav");
+        let tail = directory.path().join("tail.wav");
+        let silence = directory.path().join("silence.wav");
+        write_loudness_wav(&clean, 44_100, 1, 2.125, "", false)?;
+        write_loudness_wav(&tail, 44_100, 1, 2.125, "", true)?;
+        // Clear only the PCM bytes in the generated fixture.
+        let mut bytes = std::fs::read(&clean)?;
+        bytes[44..].fill(0);
+        std::fs::write(&silence, bytes)?;
+        let ffmpeg = std::env::var_os("MUSIC_TEST_FFMPEG").unwrap_or_else(|| "ffmpeg".into());
+        let ffmpeg = std::path::Path::new(&ffmpeg);
+        let cancelled = AtomicBool::new(false);
+        let clean =
+            super::ebu_loudness(ffmpeg, &clean, &cancelled)?.ok_or("missing tone measurement")?;
+        let tail = super::ebu_loudness(ffmpeg, &tail, &cancelled)?
+            .ok_or("missing final peak measurement")?;
+        assert!(
+            tail.true_peak_dbtp > clean.true_peak_dbtp + 15.0,
+            "{tail:?}"
+        );
+        assert!(tail.true_peak_dbtp > -2.0, "{tail:?}");
+        assert!(super::ebu_loudness(ffmpeg, &silence, &cancelled)?.is_none());
+        assert!(matches!(
+            super::ebu_loudness(
+                ffmpeg,
+                &directory.path().join("tone.wav"),
+                &AtomicBool::new(true)
+            ),
+            Err(super::AudioContextError::Cancelled)
+        ));
+        Ok(())
+    }
+
+    fn write_loudness_wav(
+        path: &std::path::Path,
+        sample_rate: u32,
+        channels: u16,
+        seconds: f64,
+        comment: &str,
+        final_peak: bool,
+    ) -> Result<(), std::io::Error> {
+        let frames = (f64::from(sample_rate) * seconds).round() as u32;
+        let data_bytes = frames * u32::from(channels) * 2;
+        let mut metadata = Vec::new();
+        if !comment.is_empty() {
+            let mut comment = comment.as_bytes().to_vec();
+            comment.push(0);
+            let size = u32::try_from(comment.len()).map_err(std::io::Error::other)?;
+            if !comment.len().is_multiple_of(2) {
+                comment.push(0);
+            }
+            metadata.extend_from_slice(b"LIST");
+            metadata.extend_from_slice(&(12 + comment.len() as u32).to_le_bytes());
+            metadata.extend_from_slice(b"INFOICMT");
+            metadata.extend_from_slice(&size.to_le_bytes());
+            metadata.extend_from_slice(&comment);
+        }
+        let mut output = std::io::BufWriter::new(std::fs::File::create(path)?);
+        output.write_all(b"RIFF")?;
+        output.write_all(&(36 + data_bytes + metadata.len() as u32).to_le_bytes())?;
+        output.write_all(b"WAVEfmt ")?;
+        output.write_all(&16_u32.to_le_bytes())?;
+        output.write_all(&1_u16.to_le_bytes())?;
+        output.write_all(&channels.to_le_bytes())?;
+        output.write_all(&sample_rate.to_le_bytes())?;
+        output.write_all(&(sample_rate * u32::from(channels) * 2).to_le_bytes())?;
+        output.write_all(&(channels * 2).to_le_bytes())?;
+        output.write_all(&16_u16.to_le_bytes())?;
+        output.write_all(&metadata)?;
+        output.write_all(b"data")?;
+        output.write_all(&data_bytes.to_le_bytes())?;
+        for index in 0..frames {
+            let value = if final_peak && index == frames - 1 {
+                0.95
+            } else {
+                0.1 * (TAU * 1_000.0 * f64::from(index) / f64::from(sample_rate)).sin()
+            };
+            let sample = (value * 32_767.0).round_ties_even() as i16;
+            for channel in 0..channels {
+                let sample = if channel % 2 == 0 { sample } else { -sample };
+                output.write_all(&sample.to_le_bytes())?;
+            }
+        }
+        output.flush()
     }
 
     fn write_developing_wav(path: &std::path::Path) -> Result<(), std::io::Error> {

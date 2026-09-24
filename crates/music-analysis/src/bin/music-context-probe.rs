@@ -210,7 +210,7 @@ fn probe_record(
     expected_cancel: bool,
 ) -> Value {
     let mut record = json!({
-        "schema_version": "context-probe/v1",
+        "schema_version": "context-probe/v2",
         "index": index,
         "iteration": iteration,
         "analyzer_id": analyzer.analyzer_id(),
@@ -248,12 +248,7 @@ fn probe_record(
                 .and_then(|section| section.get("end_s"))
                 .cloned()
                 .unwrap_or(Value::Null);
-            record["loudness_status"] = document
-                .technical
-                .get("loudness")
-                .and_then(|loudness| loudness.get("status"))
-                .cloned()
-                .unwrap_or(Value::Null);
+            record["loudness"] = loudness_observation(document.technical.get("loudness"));
         }
         Err(error) => {
             record["status"] = json!(if matches!(error, AudioContextError::Cancelled) {
@@ -273,6 +268,35 @@ fn probe_record(
         }
     }
     record
+}
+
+fn loudness_observation(value: Option<&Value>) -> Value {
+    let status = value
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str);
+    let (status, fields): (&str, &[&str]) = match status {
+        Some("ebu_r128") => (
+            "ebu_r128",
+            &[
+                "integrated_lufs",
+                "loudness_range_lu",
+                "true_peak_dbtp",
+                "relative_threshold_lufs",
+            ],
+        ),
+        Some("dbfs_proxy") => ("dbfs_proxy", &["rms_dbfs", "peak_dbfs"]),
+        _ => return json!({"status": "unavailable"}),
+    };
+    let mut observation = json!({"status": status});
+    for field in fields {
+        observation[*field] = json!(
+            value
+                .and_then(|value| value.get(*field))
+                .and_then(Value::as_f64)
+                .filter(|number| number.is_finite())
+        );
+    }
+    observation
 }
 
 fn read_tracks(reader: impl Read) -> Result<Vec<PathBuf>, ProbeError> {
@@ -352,7 +376,7 @@ fn bounded_number(value: &OsString, min: u32, max: u32, flag: &str) -> Result<u3
 fn usage() -> &'static str {
     "usage: music-context-probe --ffmpeg <path> --ffprobe <path> [--repeat 1..20] [--cancel-after-ms 1..1800000]\n\
      Reads 1-512 private audio paths as a JSON array from stdin. Runs the real factual extractor on one fixed worker.\n\
-     Emits path-free prefixed JSON for coverage, stage timing and process-local memory. Never writes a library.\n\
+     Emits path-free prefixed JSON for coverage, numeric loudness, stage timing and process-local memory. Never writes a library.\n\
      Cancellation mode succeeds only when every input returns the typed cancelled result. Voice has its separate probe."
 }
 
@@ -439,6 +463,41 @@ mod tests {
     }
 
     #[test]
+    fn loudness_observations_include_only_numeric_measurements_and_known_status() {
+        let measured = json!({
+            "status": "ebu_r128",
+            "integrated_lufs": -20.0,
+            "loudness_range_lu": 3.2,
+            "true_peak_dbtp": -1.3,
+            "relative_threshold_lufs": -30.0,
+            "path": "private/source.wav",
+            "rms_dbfs": -10.0,
+        });
+        assert_eq!(
+            loudness_observation(Some(&measured)),
+            json!({
+                "status": "ebu_r128",
+                "integrated_lufs": -20.0,
+                "loudness_range_lu": 3.2,
+                "true_peak_dbtp": -1.3,
+                "relative_threshold_lufs": -30.0,
+            })
+        );
+        assert_eq!(
+            loudness_observation(Some(&json!({
+                "status": "dbfs_proxy", "rms_dbfs": -23.0, "peak_dbfs": "private/source.wav",
+                "integrated_lufs": -20.0,
+            }))),
+            json!({"status": "dbfs_proxy", "rms_dbfs": -23.0, "peak_dbfs": null})
+        );
+        assert_eq!(loudness_observation(None), json!({"status": "unavailable"}));
+        assert_eq!(
+            loudness_observation(Some(&json!({"status": "private/source.wav"}))),
+            json!({"status": "unavailable"})
+        );
+    }
+
+    #[test]
     fn failure_records_are_path_free_and_never_contain_completed_coverage() {
         let analyzer = FfmpegContextAnalyzer::new("unused", "unused");
         let result = Err(AudioContextError::Io(io::Error::other(
@@ -448,6 +507,7 @@ mod tests {
         assert_eq!(record["error_code"], "read_failed");
         assert!(!record.to_string().contains("private"));
         assert!(record.get("coverage").is_none());
+        assert!(record.get("loudness").is_none());
         let cancelled = probe_record(
             2,
             1,
@@ -460,6 +520,7 @@ mod tests {
         assert_eq!(cancelled["status"], "cancelled");
         assert_eq!(cancelled["cancellation_latency_seconds"], 0.01);
         assert!(cancelled.get("audio_seconds").is_none());
+        assert!(cancelled.get("loudness").is_none());
     }
 
     #[test]
@@ -477,6 +538,10 @@ mod tests {
             VoiceContextPreparation::NotConfigured,
         )?;
         let record = probe_record(0, 0, &analyzer, &Ok(document.clone()), 0.1, None, false);
+        assert_eq!(record["schema_version"], "context-probe/v2");
+        assert!(record.get("loudness_status").is_none());
+        assert_eq!(record["loudness"]["status"], "ebu_r128");
+        assert!(record["loudness"]["integrated_lufs"].as_f64().is_some());
         assert_eq!(record["audio_seconds"], 0.625);
         assert_eq!(record["last_section_end_s"], 0.625);
         assert_eq!(record["coverage"]["scope"], "whole_track");

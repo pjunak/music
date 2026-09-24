@@ -13,7 +13,7 @@ use crate::library::LibraryRepository;
 
 pub const LIBRARY_CONTEXT_JOB_KIND: &str = "assistant.library-context-analysis";
 pub const LOCAL_CONTEXT_ANALYZER_ID: &str = "local-context/v3";
-pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v3+rustfft/v2";
+pub const LOCAL_CONTEXT_IMPLEMENTATION_ID: &str = "local-context/v3+rustfft/v2+loudness/v2";
 pub const VOICE_ANALYZER_ID: &str = "essentia-musicnn-voice/v2";
 pub const VOICE_MODEL_FILENAME: &str = "voice_instrumental-musicnn-msd-2.pb";
 pub const VOICE_MODEL_SHA256: &str =

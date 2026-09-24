@@ -147,8 +147,13 @@ Mood tagging input v24 uses batch-local slots, a stable vocabulary reference pre
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
-The context implementation is `local-context/v3+rustfft/v2`: overlapping FFT windows cover
-every half-second frame. Relative signal level describes dynamics around the track median,
+The context implementation is `local-context/v3+rustfft/v2+loudness/v2`.
+Loudness capture retains the bounded end of FFmpeg stderr so long embedded notes cannot
+displace the final measurement. Decode/loudness codec and filter pools are explicitly
+limited; the loudnorm measurement algorithm is unchanged. This identity change expires
+prior generated contexts through the existing freshness checks; it adds no legacy reader.
+Overlapping FFT windows cover every half-second frame. Relative signal level describes
+dynamics around the track median,
 without the old loudness-weighted emotional-intensity proxy. The model projection retains
 all ten sections, rounded trajectory endpoints/extremes, decoded duration/scope, voice
 score/coverage and measurement reliability. Whole-track confidence was removed; coarse

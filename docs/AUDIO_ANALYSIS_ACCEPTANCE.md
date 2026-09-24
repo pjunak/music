@@ -36,7 +36,7 @@ Get-Content -Raw ./private-context-paths.json |
 ```
 
 For a POSIX shell, redirect the same JSON file to standard input. Each stdout line
-starts with `CONTEXT_PROBE_JSON `, followed by one JSON record. The zero-based
+starts with `CONTEXT_PROBE_JSON `, followed by one `context-probe/v2` JSON record. The zero-based
 `index` maps to the manifest and `iteration` distinguishes repeated passes.
 No paths, filenames, embedded metadata or raw error messages are emitted.
 
@@ -45,8 +45,12 @@ Reports include:
 - Analyzer/implementation identity, platform, audio duration and wall time.
 - Time spent in each extractor stage, plus processing seconds per audio second
   (smaller is faster). Stage timings are observations, not quality scores.
-- Decoded coverage, timeline/section counts, the last section's ending and whether
-  loudness used EBU R128 or the explicitly labeled proxy.
+- Decoded coverage, timeline/section counts and the last section's ending.
+- Numeric `loudness`: `status: ebu_r128` carries `integrated_lufs`,
+  `loudness_range_lu`, `true_peak_dbtp` and `relative_threshold_lufs`;
+  `status: dbfs_proxy` carries only `rms_dbfs` and `peak_dbfs`.
+  Unknown measurements are null. The report copies only these approved fields;
+  it never copies arbitrary technical metadata. Error/cancelled records have no loudness.
 - Process RSS before/after a recording and lifetime peak RSS where available.
 - Typed errors; failed/cancelled records never carry completed coverage.
 
@@ -111,6 +115,84 @@ Windows process RSS is unavailable through this probe; the Linux counter parser
 has unit coverage but was not exercised against a live Linux process here. No
 container CPU/RAM budget, concurrent playback, voice/model parity or musical
 accuracy claim follows from these results.
+
+## Loudness reliability and optimization decision — 24 September 2026
+
+The extractor still uses `loudnorm` input measurements with its original parameters.
+FFmpeg describes this filter as a normalizer and notes its 192 kHz dynamic-mode
+processing; the normalized output is discarded by our null sink. A measurement-only
+scanner could avoid work, but it must pass numerical acceptance first.
+See the [FFmpeg filter reference](https://ffmpeg.org/ffmpeg-filters.html#loudnorm).
+
+A reproduced capture defect is fixed: an 80 kB multiline embedded comment generated
+about 308 kB of stderr. The previous first-64-KiB buffer discarded the final report,
+silently selecting `dbfs_proxy` for otherwise measurable audio. Capture now drains
+both pipes, retaining only the last 64 KiB of stderr and the first 64 KiB of ffprobe
+stdout. A real-FFmpeg regression compares a clean stereo fixture and a copy with long
+notes: their four loudness measurements must match exactly. Other regressions cover
+bounded capture, finite/complete JSON, mono/stereo levels, silence and a final-sample peak.
+
+Codec and filter pools are explicitly set to one in both factual decode and loudness
+passes. FFmpeg's filter pool has its own setting and otherwise defaults to available
+CPUs; setting codec threads alone does not bound it.
+See [FFmpeg advanced options](https://ffmpeg.org/ffmpeg.html#Advanced-options).
+This is a pool limit, not a claim that the whole child process has only one thread,
+nor a cgroup CPU/RAM acceptance result. Thread settings alone showed no material
+speed improvement on the long synthetic PCM fixture.
+
+`local-context/v3+rustfft/v2+loudness/v2` marks the revised capture/execution behavior.
+Existing freshness rules require regeneration of earlier contexts; no migration,
+legacy reader or automatic paid rerun is added. Accepted/manual tags remain authored state.
+The probe now emits only its current v2 shape, with numeric loudness in a nested object.
+
+### Release verification of the capture fix
+
+The same unconstrained Windows host ran eight generated cases three times each through
+the previous release probe and the rebuilt probe: 48 complete passes in total. The five
+original PCM cases were joined by the multiline-comment case and FLAC/MP3 encodings of
+the changing-ending fixture. All pairs retained matching coverage/section/timeline counts;
+known PCM durations and section endings remained within 1 ms.
+
+All 18 measured runs from the rebuilt probe matched all four numeric input measurements
+from the original FFmpeg command exactly. Six silence/isolated-impulse runs retained the
+explicit proxy because no finite integrated measurement was available. The metadata case
+changed from proxy to valid EBU measurements in all three pairs. The ten-minute fixture
+took 7.893–7.936 s before and 7.926–7.941 s after: no meaningful speedup is claimed.
+Six cancellations requested after 100 or 500 ms completed with typed cancelled results;
+the longest observed cleanup latency was 48.57 ms. No cancelled record contained
+completed loudness or coverage.
+
+The final batch passed 502 Rust tests, strict workspace Clippy, formatting, architecture,
+workspace check, doc tests, generated contracts and the release probe build. These tests
+protect extraction mechanics and current numerical behavior; they do not certify loudness
+standards compliance, musical usefulness or production resource limits.
+
+### Rejected direct scanner substitution
+
+On the installed Windows FFmpeg 9.0.2, `ebur128=peak=true:framelog=verbose` was faster
+but failed these comparisons. These observations are a reason to reject a drop-in
+replacement, **not** a certification that either filter is the measurement reference.
+
+| Generated signal | Existing loudnorm report | Direct ebur128 report |
+|---|---|---|
+| Impulse at the final sample, 16 kHz | True peak +0.70 dBTP | Peak -86.2 dBFS |
+| Constant opposite-phase stereo tone, 3.25 s | LRA 0.00 LU | LRA 20.0 LU |
+| Quiet ten-minute tone with a louder final four seconds | Integrated -19.09 LUFS | Integrated -20.8 LUFS |
+
+An explicit 192 kHz resampler before the scanner retained the final impulse, but did
+not resolve the other differences. Its default text summary also prints one decimal
+place versus two in loudnorm JSON; display precision must not be confused with
+measurement accuracy. The upstream implementations differ, so a future replacement
+needs independent reference signals for integration/gating, loudness range and true peaks,
+including short clips and endings. Relevant primary sources:
+[scanner documentation](https://ffmpeg.org/ffmpeg-filters.html#ebur128),
+[scanner source](https://ffmpeg.org/doxygen/trunk/f__ebur128_8c_source.html) and
+[normalizer source](https://ffmpeg.org/doxygen/trunk/af__loudnorm_8c_source.html).
+
+No replacement scanner, new audio library, alternate fallback algorithm or model was
+added. Absolute loudness remains local technical evidence, outside mood-tagger input.
+A separate loudness pass remains the measured bottleneck; its optimization is open,
+with correctness acceptance required before adoption.
 
 ## Resource boundary and production acceptance
 
