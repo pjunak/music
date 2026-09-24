@@ -85,8 +85,12 @@ workspace gates; private-corpus and container measurements remain separately rep
 The [MusiCNN reference fixtures](../crates/music-analysis/tests/fixtures/README.md) run
 in the normal Rust suite without external packages or model weights. Regenerate them
 with the pinned developer-only reference when changing the frontend; verify the fixed
-numerical tolerance before accepting new fixtures. Optional voice graph/worker tests
-still require the separately supplied licensed model.
+numerical tolerance before accepting new fixtures. Voice decoder regressions also run when
+FFmpeg is available on PATH or explicitly set by `MUSIC_TEST_FFMPEG`; invalid explicit paths
+fail. The optional graph/worker tests require the separately supplied checksum-pinned
+licensed model in `MUSIC_TEST_VOICE_MODEL` and, for the worker, `MUSIC_TEST_FFMPEG`.
+The [dated reference notes](../crates/music-analysis/tests/fixtures/README.md#voice-decoding-and-ending-acceptance-25-september-2026)
+record which tests actually exercised those tools and their remaining acceptance limits.
 
 ## Frontend
 

@@ -662,10 +662,13 @@ service state retains only the path-free readiness identity, not the compiled gr
 working set. The active thread creates and owns the model state, processes requests sequentially through a
 capacity-one channel, runs overlapping windows without duplicating the graph, and exposes a
 path-free model/runtime/preprocessor identity. FFmpeg decoding, 512-sample frames, 96-band features,
-and 187-frame patches are streamed through fixed-size buffers. Cancellation is checked while
-decoding and between patches; a 30-minute per-track deadline terminates the decoder and preserves a
-typed timeout failure. A panic closes the response channel, marks the worker dead, and makes
-subsequent optional work unavailable without taking down the server.
+and 187-frame patches are streamed through fixed-size buffers. The decoder explicitly normalizes
+its mono/stereo mixing matrix before 16 kHz resampling; codec and filter pools are limited to one
+thread each. Cancellation and the 30-minute per-track deadline are checked while decoding and
+before/after every prediction, including the ending. Expiry terminates the decoder and returns
+a typed timeout failure; a single in-process Tract call cannot be interrupted midway. A panic
+closes the response channel, marks the worker dead, and makes subsequent optional work unavailable
+without taking down the server.
 
 The exact pinned graph is loaded directly as TF1 rather than converted to NNEF. Its checksum permits
 a deliberately narrow in-memory importer compatibility layer: all four graph `Pad` constants are
@@ -687,18 +690,33 @@ frames. The reference tools are separately installed for development; ordinary t
 and production require neither Essentia.js nor ONNX Runtime Web. This extraction
 preserves the preprocessing definition and identity.
 
+When the regular patch grid misses the ending, one full patch is anchored at the final retained
+frame. It uses actual preceding frames, never repeats a short tail, and never duplicates an
+already aligned patch. Audio too short for one complete patch remains unavailable. The decoder
+and patch policy are identified by `+decode/v2+windows/v2` in the runtime signature;
+existing freshness checks reject older generated contexts without a compatibility reader.
+
+Prediction aggregation keeps scalar totals/counts and one reusable patch buffer. Invalid PCM or
+non-finite/out-of-range model scores fail the result rather than silently omitting a window.
+`voice_score` remains the mean normalized model score; `vocal_coverage` remains the fraction
+of voice-leading windows. The summary also exposes `analyzed_windows`. These overlapping-window
+statistics are not calibrated probabilities, independent observations or measured vocal time.
+
 This thread boundary is conditional on evidence. If the selected backend contains unsafe native
 code, leaks, wedges, cannot bound an inference call, or cannot meet shutdown deadlines, the same
-`VoiceBackend` runs in a supervised Rust subprocess using versioned length-prefixed IPC. Process
-isolation is therefore a tested fallback, not a Python-era default.
+`VoiceBackend` must move to a supervised Rust subprocess using versioned length-prefixed IPC.
+That implementation must pass the same gates before adoption; process isolation is a conditional
+follow-up, not an already implemented inference path.
 
 The implementation gate verifies the official model checksum, exact graph output shape and
 fixed zero-input output, end-to-end FFmpeg-to-worker inference, bounded score aggregation, frame and
 patch counts, and cancellation-aware streaming. A normal full-library context build after rollout
 exercises the actual media, model mount, and durable job path. The pinned frame fixtures
-cover controlled numerical preprocessing; full decoded-audio comparison and a long
-repeated-run RSS/cancellation soak remain separate acceptance work. If that evidence
-fails, the same interface moves to the documented Rust subprocess. There is no Python fallback.
+cover controlled numerical preprocessing; basic mono/stereo level/count, ending and real-graph
+checks also passed on Windows GNU on 25 September 2026. Full resampling/multichannel reference
+comparison and a long repeated-run RSS/cancellation soak remain separate acceptance work.
+If that evidence fails, the same interface moves to the documented Rust subprocess.
+There is no Python fallback.
 
 ## Assistant and provider boundary
 

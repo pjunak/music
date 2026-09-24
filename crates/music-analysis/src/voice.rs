@@ -32,7 +32,8 @@ const MAX_AUDIO_SECONDS: u64 = 24 * 60 * 60;
 const FRAMES_PER_CHUNK: usize = 8_192;
 const VOICE_REQUEST_CAPACITY: usize = 1;
 const VOICE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-const TRACT_RUNTIME_ID: &str = "tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1";
+const TRACT_RUNTIME_ID: &str =
+    "tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoiceAnalysisDocument {
@@ -55,6 +56,7 @@ impl VoiceAnalysisDocument {
                 // A normalized model score, not a calibrated probability.
                 "voice_score": round_five(voice_score),
                 "vocal_coverage": round_five(vocal_coverage),
+                "analyzed_windows": prediction_windows,
                 "note": classification_note(voice_score, vocal_coverage),
             })),
             stage: object(json!({
@@ -347,11 +349,11 @@ fn analyze_voice_file(
 ) -> Result<VoiceAnalysisDocument, VoiceAnalysisError> {
     let started = Instant::now();
     let output = decode_and_predict(model, ffmpeg, path, cancelled)?;
-    let (voice_score, vocal_coverage) = summarize_predictions(&output.predictions)?;
+    let (voice_score, vocal_coverage) = output.summary.means()?;
     Ok(VoiceAnalysisDocument::classified(
         voice_score,
         vocal_coverage,
-        output.predictions.len(),
+        output.summary.windows,
         started.elapsed().as_secs_f64(),
     ))
 }
@@ -386,6 +388,10 @@ fn decode_and_predict_until(
         .arg("-v")
         .arg("error")
         .arg("-nostdin")
+        .arg("-filter_threads")
+        .arg("1")
+        .arg("-filter_complex_threads")
+        .arg("1")
         .arg("-threads")
         .arg("1")
         .arg("-i")
@@ -393,6 +399,12 @@ fn decode_and_predict_until(
         .arg("-map")
         .arg("0:a:0")
         .arg("-vn")
+        // Floating-point FFmpeg downmix otherwise boosts in-phase stereo by 3 dB.
+        // Normalize the matrix to match the reference MonoMixer for mono/stereo.
+        .arg("-af")
+        .arg(format!(
+            "aresample={SAMPLE_RATE}:out_chlayout=mono:rematrix_maxval=1"
+        ))
         .arg("-ac")
         .arg("1")
         .arg("-ar")
@@ -401,6 +413,8 @@ fn decode_and_predict_until(
         .arg("f32le")
         .arg("-acodec")
         .arg("pcm_f32le")
+        .arg("-threads")
+        .arg("1")
         .arg("pipe:1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -411,7 +425,7 @@ fn decode_and_predict_until(
     let error_thread = thread::spawn(move || drain(stderr));
     let (sender, receiver) = sync_channel(2);
     let audio_thread = thread::spawn(move || read_audio(stdout, sender));
-    let mut pipeline = VoicePipeline::new();
+    let mut pipeline = VoicePipeline::new(deadline);
     let mut pending = Vec::with_capacity(3);
     let stream_result = 'stream: loop {
         if cancelled.load(Ordering::Relaxed) {
@@ -501,7 +515,7 @@ fn drain(mut stderr: impl Read) {
 }
 
 struct PipelineOutput {
-    predictions: Vec<[f32; 2]>,
+    summary: PredictionSummary,
     #[cfg(test)]
     emitted_frames: usize,
 }
@@ -512,25 +526,39 @@ struct VoicePipeline {
     frame_start: i64,
     total_samples: u64,
     emitted_frames: usize,
+    last_predicted_frame: usize,
     mel_frames: VecDeque<[f32; MEL_BANDS]>,
-    predictions: Vec<[f32; 2]>,
+    patch: Vec<f32>,
+    summary: PredictionSummary,
     preprocessor: MusicNnPreprocessor,
+    deadline: Instant,
 }
 
 impl VoicePipeline {
-    fn new() -> Self {
+    fn new(deadline: Instant) -> Self {
         Self {
             frame: [0.0; FRAME_SIZE],
-            // MusiCNN's centered first frame begins 256 samples before the
-            // stream. Deterministic zero padding replaces Essentia's optional
-            // random silence dither; frame-level silence is tested explicitly.
+            // Center the first frame before the stream with deterministic zero padding.
             filled: FRAME_SIZE / 2,
             frame_start: -(FRAME_SIZE as i64 / 2),
             total_samples: 0,
             emitted_frames: 0,
+            last_predicted_frame: 0,
             mel_frames: VecDeque::with_capacity(PATCH_FRAMES),
-            predictions: Vec::new(),
+            patch: Vec::with_capacity(PATCH_FRAMES * MEL_BANDS),
+            summary: PredictionSummary::default(),
             preprocessor: MusicNnPreprocessor::new(),
+            deadline,
+        }
+    }
+
+    fn check_control(&self, cancelled: &AtomicBool) -> Result<(), VoiceAnalysisError> {
+        if cancelled.load(Ordering::Relaxed) {
+            Err(VoiceAnalysisError::Cancelled)
+        } else if Instant::now() >= self.deadline {
+            Err(VoiceAnalysisError::DeadlineExceeded)
+        } else {
+            Ok(())
         }
     }
 
@@ -543,8 +571,11 @@ impl VoicePipeline {
         if self.total_samples >= u64::from(SAMPLE_RATE).saturating_mul(MAX_AUDIO_SECONDS) {
             return Err(VoiceAnalysisError::TooLong);
         }
-        if self.total_samples.is_multiple_of(4_096) && cancelled.load(Ordering::Relaxed) {
-            return Err(VoiceAnalysisError::Cancelled);
+        if !sample.is_finite() {
+            return Err(VoiceAnalysisError::Decode);
+        }
+        if self.total_samples.is_multiple_of(4_096) {
+            self.check_control(cancelled)?;
         }
         self.frame[self.filled] = sample;
         self.filled = self.filled.saturating_add(1);
@@ -561,6 +592,7 @@ impl VoicePipeline {
         model: &mut impl VoicePredictor,
         cancelled: &AtomicBool,
     ) -> Result<PipelineOutput, VoiceAnalysisError> {
+        self.check_control(cancelled)?;
         if self.total_samples == 0 {
             return Err(VoiceAnalysisError::Inference);
         }
@@ -574,11 +606,18 @@ impl VoicePipeline {
             }
             self.advance_frame();
         }
-        if self.predictions.is_empty() {
+        if self.mel_frames.len() == PATCH_FRAMES && self.last_predicted_frame != self.emitted_frames
+        {
+            // Anchor one full window at the ending. Retain actual preceding frames
+            // rather than repeating a short tail, and never duplicate an aligned window.
+            self.predict_window(model, cancelled)?;
+        }
+        if self.summary.windows == 0 {
             return Err(VoiceAnalysisError::Inference);
         }
+        self.check_control(cancelled)?;
         Ok(PipelineOutput {
-            predictions: self.predictions,
+            summary: self.summary,
             #[cfg(test)]
             emitted_frames: self.emitted_frames,
         })
@@ -589,22 +628,36 @@ impl VoicePipeline {
         model: &mut impl VoicePredictor,
         cancelled: &AtomicBool,
     ) -> Result<(), VoiceAnalysisError> {
-        if cancelled.load(Ordering::Relaxed) {
-            return Err(VoiceAnalysisError::Cancelled);
-        }
-        let mel = self.preprocessor.transform(&self.frame);
-        self.mel_frames.push_back(mel);
-        self.emitted_frames = self.emitted_frames.saturating_add(1);
+        self.check_control(cancelled)?;
         if self.mel_frames.len() == PATCH_FRAMES {
-            let mut patch = Vec::with_capacity(PATCH_FRAMES.saturating_mul(MEL_BANDS));
-            for frame in &self.mel_frames {
-                patch.extend_from_slice(frame);
-            }
-            self.predictions.push(model.predict(&patch)?);
-            for _ in 0..PATCH_HOP {
-                let _ = self.mel_frames.pop_front();
-            }
+            let _ = self.mel_frames.pop_front();
         }
+        self.mel_frames
+            .push_back(self.preprocessor.transform(&self.frame));
+        self.emitted_frames = self.emitted_frames.saturating_add(1);
+        if self.emitted_frames >= PATCH_FRAMES
+            && (self.emitted_frames - PATCH_FRAMES).is_multiple_of(PATCH_HOP)
+        {
+            self.predict_window(model, cancelled)?;
+        }
+        Ok(())
+    }
+
+    fn predict_window(
+        &mut self,
+        model: &mut impl VoicePredictor,
+        cancelled: &AtomicBool,
+    ) -> Result<(), VoiceAnalysisError> {
+        self.check_control(cancelled)?;
+        self.patch.clear();
+        for frame in &self.mel_frames {
+            self.patch.extend_from_slice(frame);
+        }
+        let prediction = model.predict(&self.patch)?;
+        // Cancellation or expiry during inference cannot produce a complete result.
+        self.check_control(cancelled)?;
+        self.summary.add(prediction)?;
+        self.last_predicted_frame = self.emitted_frames;
         Ok(())
     }
 
@@ -773,34 +826,43 @@ fn fixed_musicnn_pad(
     ))
 }
 
-fn summarize_predictions(predictions: &[[f32; 2]]) -> Result<(f64, f64), VoiceAnalysisError> {
-    let mut score_total = 0.0_f64;
-    let mut voice_leading = 0_usize;
-    let mut valid = 0_usize;
-    for [instrumental, voice] in predictions {
+#[derive(Default)]
+struct PredictionSummary {
+    score_total: f64,
+    voice_leading: usize,
+    windows: usize,
+}
+
+impl PredictionSummary {
+    fn add(&mut self, [instrumental, voice]: [f32; 2]) -> Result<(), VoiceAnalysisError> {
         if !instrumental.is_finite()
             || !voice.is_finite()
-            || !(0.0..=1.0).contains(instrumental)
-            || !(0.0..=1.0).contains(voice)
+            || !(0.0..=1.0).contains(&instrumental)
+            || !(0.0..=1.0).contains(&voice)
         {
-            continue;
+            return Err(VoiceAnalysisError::Inference);
         }
-        let total = f64::from(*instrumental) + f64::from(*voice);
+        let total = f64::from(instrumental) + f64::from(voice);
         if total <= 1e-9 {
-            continue;
+            return Err(VoiceAnalysisError::Inference);
         }
-        let score = f64::from(*voice) / total;
-        score_total += score;
-        voice_leading = voice_leading.saturating_add(usize::from(score >= 0.5));
-        valid = valid.saturating_add(1);
+        let score = f64::from(voice) / total;
+        self.score_total += score;
+        self.voice_leading = self.voice_leading.saturating_add(usize::from(score >= 0.5));
+        self.windows = self.windows.saturating_add(1);
+        Ok(())
     }
-    if valid == 0 {
-        return Err(VoiceAnalysisError::Inference);
+
+    fn means(&self) -> Result<(f64, f64), VoiceAnalysisError> {
+        if self.windows == 0 {
+            return Err(VoiceAnalysisError::Inference);
+        }
+        // These remain window statistics, not calibrated probabilities or vocal seconds.
+        Ok((
+            self.score_total / self.windows as f64,
+            self.voice_leading as f64 / self.windows as f64,
+        ))
     }
-    Ok((
-        score_total / valid as f64,
-        voice_leading as f64 / valid as f64,
-    ))
 }
 
 fn classification_note(voice_score: f64, vocal_coverage: f64) -> String {
@@ -889,18 +951,17 @@ mod tests {
             .as_deref()
             .ok_or("configured unavailable backend has no source signature")?;
         assert!(!signature.contains(&unsupported_path.display().to_string()));
+        assert!(signature.contains("+windows/v2:"));
         Ok(())
     }
 
     #[test]
     fn predictions_use_the_bounded_normalization_contract() -> Result<(), VoiceAnalysisError> {
-        let (score, coverage) = summarize_predictions(&[
-            [0.1, 0.9],
-            [0.3, 0.7],
-            [0.8, 0.2],
-            [0.0, 0.0],
-            [f32::NAN, 0.5],
-        ])?;
+        let mut summary = PredictionSummary::default();
+        for prediction in [[0.1, 0.9], [0.3, 0.7], [0.8, 0.2]] {
+            summary.add(prediction)?;
+        }
+        let (score, coverage) = summary.means()?;
         assert!((score - 0.6).abs() < 1e-6);
         assert!((coverage - 2.0 / 3.0).abs() < 1e-6);
         let document = VoiceAnalysisDocument::classified(score, coverage, 3, 1.0);
@@ -912,6 +973,341 @@ mod tests {
                 .is_some_and(|note| note.contains("Mean normalized voice score 60%"))
         );
         assert_eq!(document.stage["prediction_windows"], 3);
+        assert_eq!(document.summary["analyzed_windows"], 3);
+        Ok(())
+    }
+
+    #[derive(Default)]
+    struct RecordingPredictor {
+        patches: Vec<Vec<f32>>,
+    }
+
+    impl VoicePredictor for RecordingPredictor {
+        fn predict(&mut self, patch: &[f32]) -> Result<[f32; 2], VoiceAnalysisError> {
+            assert_eq!(patch.len(), PATCH_FRAMES * MEL_BANDS);
+            self.patches.push(patch.to_vec());
+            Ok([0.75, 0.25])
+        }
+    }
+
+    #[test]
+    fn the_ending_reaches_a_final_full_prediction_window() -> Result<(), VoiceAnalysisError> {
+        let cancelled = AtomicBool::new(false);
+        let mut model = RecordingPredictor::default();
+        let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
+        let sample_count = 64_000;
+        for index in 0..sample_count {
+            let sample = if index < 48_000 {
+                0.0
+            } else {
+                0.5 * (TAU * 4_000.0 * index as f32 / SAMPLE_RATE as f32).sin()
+            };
+            pipeline.add_sample(sample, &mut model, &cancelled)?;
+        }
+        pipeline.finish(&mut model, &cancelled)?;
+        assert_eq!(
+            model.patches.len(),
+            2,
+            "the regular window misses the final second"
+        );
+        assert!(model.patches[0].iter().all(|value| *value == 0.0));
+        let expected_final_frame = std::array::from_fn(|index| {
+            if index < FRAME_HOP {
+                let sample_index = sample_count - FRAME_HOP + index;
+                0.5 * (TAU * 4_000.0 * sample_index as f32 / SAMPLE_RATE as f32).sin()
+            } else {
+                0.0
+            }
+        });
+        let expected = MusicNnPreprocessor::new().transform(&expected_final_frame);
+        let actual = &model.patches[1][(PATCH_FRAMES - 1) * MEL_BANDS..];
+        assert_eq!(actual, expected);
+        assert!(actual.iter().any(|value| *value > 1.0));
+        Ok(())
+    }
+
+    #[test]
+    fn tail_windows_are_complete_and_not_duplicated_at_patch_boundaries()
+    -> Result<(), VoiceAnalysisError> {
+        let cancelled = AtomicBool::new(false);
+        // Fixed expectations include the centered first/last frames.
+        for (samples, windows) in [
+            (0, 0),
+            (256, 0),
+            (47_360, 0),
+            (47_361, 1),
+            (47_616, 1),
+            (47_617, 2),
+            (64_000, 2),
+            (71_424, 2),
+            (71_425, 3),
+            (95_232, 3),
+            (95_233, 4),
+        ] {
+            let mut model = FixedPredictor::default();
+            let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
+            for _ in 0..samples {
+                pipeline.add_sample(0.25, &mut model, &cancelled)?;
+                assert!(pipeline.mel_frames.len() <= PATCH_FRAMES);
+            }
+            let result = pipeline.finish(&mut model, &cancelled);
+            assert_eq!(model.calls, windows, "sample count {samples}");
+            if windows == 0 {
+                assert!(matches!(result, Err(VoiceAnalysisError::Inference)));
+            } else {
+                result?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_predictions_never_become_a_partial_voice_summary() -> Result<(), VoiceAnalysisError>
+    {
+        for invalid in [
+            [f32::NAN, 0.5],
+            [0.5, f32::INFINITY],
+            [-0.1, 0.5],
+            [0.5, 1.1],
+            [0.0, 0.0],
+            [1e-12, 1e-12],
+        ] {
+            let mut summary = PredictionSummary::default();
+            summary.add([0.2, 0.8])?;
+            assert!(matches!(
+                summary.add(invalid),
+                Err(VoiceAnalysisError::Inference)
+            ));
+            assert_eq!(summary.windows, 1);
+        }
+        assert!(matches!(
+            PredictionSummary::default().means(),
+            Err(VoiceAnalysisError::Inference)
+        ));
+
+        struct InvalidTail {
+            calls: usize,
+        }
+        impl VoicePredictor for InvalidTail {
+            fn predict(&mut self, _: &[f32]) -> Result<[f32; 2], VoiceAnalysisError> {
+                self.calls += 1;
+                Ok(if self.calls == 1 {
+                    [0.8, 0.2]
+                } else {
+                    [f32::NAN, 0.5]
+                })
+            }
+        }
+        let cancelled = AtomicBool::new(false);
+        let mut model = InvalidTail { calls: 0 };
+        let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
+        for _ in 0..64_000 {
+            pipeline.add_sample(0.0, &mut model, &cancelled)?;
+        }
+        let error = pipeline
+            .finish(&mut model, &cancelled)
+            .err()
+            .ok_or(VoiceAnalysisError::Inference)?;
+        assert!(matches!(error, VoiceAnalysisError::Inference));
+        assert_eq!(model.calls, 2);
+        let unavailable = VoiceAnalysisDocument::unavailable(&error, 1.0);
+        assert_eq!(unavailable.summary["status"], "unavailable");
+        assert!(unavailable.summary["voice_score"].is_null());
+        assert_eq!(unavailable.prediction_windows, 0);
+        Ok(())
+    }
+
+    struct CancellingPredictor<'a> {
+        calls: usize,
+        cancel_on: usize,
+        cancelled: &'a AtomicBool,
+    }
+
+    impl VoicePredictor for CancellingPredictor<'_> {
+        fn predict(&mut self, _: &[f32]) -> Result<[f32; 2], VoiceAnalysisError> {
+            self.calls += 1;
+            if self.calls == self.cancel_on {
+                self.cancelled.store(true, Ordering::Relaxed);
+            }
+            Ok([0.2, 0.8])
+        }
+    }
+
+    #[test]
+    fn cancellation_during_the_tail_and_expiry_before_it_cannot_complete()
+    -> Result<(), VoiceAnalysisError> {
+        let cancelled = AtomicBool::new(false);
+        let mut model = CancellingPredictor {
+            calls: 0,
+            cancel_on: 2,
+            cancelled: &cancelled,
+        };
+        let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
+        for _ in 0..64_000 {
+            pipeline.add_sample(0.0, &mut model, &cancelled)?;
+        }
+        assert_eq!(model.calls, 1);
+        assert!(matches!(
+            pipeline.finish(&mut model, &cancelled),
+            Err(VoiceAnalysisError::Cancelled)
+        ));
+        assert_eq!(model.calls, 2);
+
+        let cancelled = AtomicBool::new(false);
+        let mut model = FixedPredictor::default();
+        let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
+        for _ in 0..64_000 {
+            pipeline.add_sample(0.0, &mut model, &cancelled)?;
+        }
+        pipeline.deadline = Instant::now();
+        assert!(matches!(
+            pipeline.finish(&mut model, &cancelled),
+            Err(VoiceAnalysisError::DeadlineExceeded)
+        ));
+        assert_eq!(model.calls, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn non_finite_decoded_audio_is_rejected() {
+        for sample in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
+            let mut model = FixedPredictor::default();
+            assert!(matches!(
+                pipeline.add_sample(sample, &mut model, &AtomicBool::new(false)),
+                Err(VoiceAnalysisError::Decode)
+            ));
+            assert_eq!(model.calls, 0);
+        }
+    }
+
+    fn test_ffmpeg() -> Option<PathBuf> {
+        if let Some(path) = std::env::var_os("MUSIC_TEST_FFMPEG") {
+            return Some(path.into());
+        }
+        if Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            Some(PathBuf::from("ffmpeg"))
+        } else {
+            eprintln!("FFmpeg decoder acceptance was not exercised: executable unavailable");
+            None
+        }
+    }
+
+    #[test]
+    fn decoder_preserves_native_samples_and_the_ending_when_available() -> Result<(), Box<dyn Error>>
+    {
+        let Some(ffmpeg) = test_ffmpeg() else {
+            return Ok(());
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("ending.wav");
+        let samples: Vec<i16> = (0..64_000)
+            .map(|index| {
+                if index < 48_000 {
+                    0
+                } else {
+                    (16_384.0 * (TAU * 4_000.0 * index as f32 / SAMPLE_RATE as f32).sin()).round()
+                        as i16
+                }
+            })
+            .collect();
+        write_pcm_wav(&path, SAMPLE_RATE, 1, &samples)?;
+        let mut model = RecordingPredictor::default();
+        let output = decode_and_predict(&mut model, &ffmpeg, &path, &AtomicBool::new(false))?;
+        assert_eq!(output.emitted_frames, 251);
+        assert_eq!(output.summary.windows, 2);
+        assert!(model.patches[0].iter().all(|value| *value == 0.0));
+        let frame = std::array::from_fn(|index| {
+            if index < FRAME_HOP {
+                f32::from(samples[samples.len() - FRAME_HOP + index]) / 32_768.0
+            } else {
+                0.0
+            }
+        });
+        let expected = MusicNnPreprocessor::new().transform(&frame);
+        assert_eq!(
+            &model.patches[1][(PATCH_FRAMES - 1) * MEL_BANDS..],
+            expected
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn decoder_downmixes_and_resamples_stereo_when_available() -> Result<(), Box<dyn Error>> {
+        let Some(ffmpeg) = test_ffmpeg() else {
+            return Ok(());
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("stereo.wav");
+        let expected_dc = MusicNnPreprocessor::new().transform(&[0.25; FRAME_SIZE]);
+        for (rate, opposite_phase) in [(48_000, false), (44_100, false), (44_100, true)] {
+            let samples: Vec<i16> = (0..rate * 4)
+                .flat_map(|_| [8_192, if opposite_phase { -8_192 } else { 8_192 }])
+                .collect();
+            write_pcm_wav(&path, rate, 2, &samples)?;
+            let mut model = RecordingPredictor::default();
+            let output = decode_and_predict(&mut model, &ffmpeg, &path, &AtomicBool::new(false))?;
+            assert_eq!(output.emitted_frames, 251, "rate {rate}");
+            assert_eq!(output.summary.windows, 2);
+            if opposite_phase {
+                assert!(
+                    model
+                        .patches
+                        .iter()
+                        .flatten()
+                        .all(|value| value.abs() < 0.000_1)
+                );
+            } else {
+                let interior = &model.patches[0][50 * MEL_BANDS..51 * MEL_BANDS];
+                for (actual, expected) in interior.iter().zip(expected_dc) {
+                    assert!(
+                        (actual - expected).abs() < 0.000_1,
+                        "rate {rate}: {actual} versus {expected}"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn decoder_cleans_up_after_cancellation_when_available() -> Result<(), Box<dyn Error>> {
+        let Some(ffmpeg) = test_ffmpeg() else {
+            return Ok(());
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("cancel.wav");
+        write_tone_wav(&path, 30)?;
+        let cancelled = AtomicBool::new(false);
+        let mut model = CancellingPredictor {
+            calls: 0,
+            cancel_on: 1,
+            cancelled: &cancelled,
+        };
+        let started = Instant::now();
+        assert!(matches!(
+            decode_and_predict(&mut model, &ffmpeg, &path, &cancelled),
+            Err(VoiceAnalysisError::Cancelled)
+        ));
+        assert_eq!(model.calls, 1);
+        assert!(started.elapsed() < Duration::from_secs(5));
+
+        let mut model = FixedPredictor::default();
+        assert!(matches!(
+            decode_and_predict_until(
+                &mut model,
+                &ffmpeg,
+                &path,
+                &AtomicBool::new(false),
+                Instant::now()
+            ),
+            Err(VoiceAnalysisError::DeadlineExceeded)
+        ));
+        assert_eq!(model.calls, 0);
         Ok(())
     }
 
@@ -930,19 +1326,18 @@ mod tests {
         let expected_frames = sample_count.div_ceil(FRAME_HOP).saturating_add(1);
         let expected_patches = expected_frames
             .saturating_sub(PATCH_FRAMES)
-            .checked_div(PATCH_HOP)
-            .unwrap_or_default()
+            .div_ceil(PATCH_HOP)
             .saturating_add(1);
         let cancelled = AtomicBool::new(false);
         let mut model = FixedPredictor::default();
-        let mut pipeline = VoicePipeline::new();
+        let mut pipeline = VoicePipeline::new(Instant::now() + VOICE_ANALYSIS_TIMEOUT);
         for index in 0..sample_count {
             let sample = (TAU * 440.0 * index as f32 / SAMPLE_RATE as f32).sin() * 0.2;
             pipeline.add_sample(sample, &mut model, &cancelled)?;
         }
         let output = pipeline.finish(&mut model, &cancelled)?;
         assert_eq!(output.emitted_frames, expected_frames);
-        assert_eq!(output.predictions.len(), expected_patches);
+        assert_eq!(output.summary.windows, expected_patches);
         assert_eq!(model.calls, expected_patches);
         Ok(())
     }
@@ -1010,7 +1405,8 @@ mod tests {
             .await?;
         assert_eq!(document.summary["status"], "classified");
         assert_eq!(document.stage["status"], "complete");
-        assert!(document.prediction_windows >= 1);
+        assert_eq!(document.prediction_windows, 2);
+        assert_eq!(document.summary["analyzed_windows"], 2);
         assert!(document.elapsed_seconds > 0.0);
         let shutdown_started = Instant::now();
         drop(worker);
@@ -1196,26 +1592,43 @@ mod tests {
 
     fn write_tone_wav(path: &Path, seconds: u32) -> io::Result<()> {
         let sample_count = seconds.saturating_mul(SAMPLE_RATE);
-        let data_bytes = sample_count.saturating_mul(2);
+        let samples: Vec<i16> = (0..sample_count)
+            .map(|index| {
+                (0.2 * (TAU * 440.0 * index as f32 / SAMPLE_RATE as f32).sin()
+                    * f32::from(i16::MAX))
+                .round() as i16
+            })
+            .collect();
+        write_pcm_wav(path, SAMPLE_RATE, 1, &samples)
+    }
+
+    fn write_pcm_wav(
+        path: &Path,
+        sample_rate: u32,
+        channels: u16,
+        samples: &[i16],
+    ) -> io::Result<()> {
+        let data_bytes = (samples.len() as u32).saturating_mul(2);
+        let block_align = channels.saturating_mul(2);
         let mut output = File::create(path)?;
         output.write_all(b"RIFF")?;
         output.write_all(&(36_u32.saturating_add(data_bytes)).to_le_bytes())?;
         output.write_all(b"WAVEfmt ")?;
         output.write_all(&16_u32.to_le_bytes())?;
         output.write_all(&1_u16.to_le_bytes())?;
-        output.write_all(&1_u16.to_le_bytes())?;
-        output.write_all(&SAMPLE_RATE.to_le_bytes())?;
-        output.write_all(&SAMPLE_RATE.saturating_mul(2).to_le_bytes())?;
-        output.write_all(&2_u16.to_le_bytes())?;
+        output.write_all(&channels.to_le_bytes())?;
+        output.write_all(&sample_rate.to_le_bytes())?;
+        output.write_all(
+            &sample_rate
+                .saturating_mul(u32::from(block_align))
+                .to_le_bytes(),
+        )?;
+        output.write_all(&block_align.to_le_bytes())?;
         output.write_all(&16_u16.to_le_bytes())?;
         output.write_all(b"data")?;
         output.write_all(&data_bytes.to_le_bytes())?;
-        for index in 0..sample_count {
-            let value = (0.2
-                * (TAU * 440.0 * index as f32 / SAMPLE_RATE as f32).sin()
-                * f32::from(i16::MAX))
-            .round() as i16;
-            output.write_all(&value.to_le_bytes())?;
+        for sample in samples {
+            output.write_all(&sample.to_le_bytes())?;
         }
         Ok(())
     }

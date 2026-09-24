@@ -90,19 +90,81 @@ Local scripts, raw tensors and model artifacts remain ignored research output un
 `target/`; this is a dated feasibility result, not a supported EffNet application
 command or an additional production runtime.
 
+## Voice decoding and ending acceptance, 25 September 2026
+
+The optional voice path now normalizes FFmpeg's stereo-to-mono matrix before
+resampling to 16 kHz. The existing pinned Essentia.js MonoMixer independently
+returned 0.25 for identical 0.25 channels, zero for opposite-phase 0.25 channels,
+and 0.25 for a 0.5 left channel plus a silent right channel. FFmpeg's previous default
+floating-point downmix returned approximately 0.35355 for the first case. The
+`aresample=16000:out_chlayout=mono:rematrix_maxval=1` filter restores the expected
+level. Both codec and filter pools are explicitly bounded. See the upstream
+[MonoLoader contract](https://essentia.upf.edu/reference/std_MonoLoader.html) and
+[FFmpeg resampler options](https://ffmpeg.org/ffmpeg-resampler.html).
+
+Regression tests exercised FFmpeg 9.0.2 on Windows GNU:
+
+- Native 16 kHz mono PCM preserves sample levels and the final centered frame.
+  A four-second recording with sound only in its final second reaches two windows;
+  previously only the first, silent window reached inference.
+- Four-second 44.1/48 kHz in-phase stereo signals produce 251 frames and two windows,
+  with interior mel values within 0.0001 of the arithmetic-mean reference.
+  Opposite-phase stereo cancels to zero. These are basic level/count/resampling checks.
+- Short signals and lengths around patch boundaries verify complete windows, bounded
+  buffering and no duplicate aligned ending. Invalid PCM or model values fail the
+  entire result. Cancellation during prediction and expiry before the ending cannot
+  publish a completed summary; FFmpeg cleanup returned within five seconds locally.
+
+The regular voice patch remains 187 frames with a 93-frame hop. One additional full
+patch uses the actual final 187 retained frames when the regular grid misses the
+ending; it does not repeat the last partial patch. This deliberate policy differs
+from upstream [discard/repeat options](https://essentia.upf.edu/reference/std_TensorflowPredictMusiCNN.html).
+Very short audio without 187 centered frames remains unavailable. Summaries retain
+only scalar counts and totals, plus a reusable patch buffer; no prediction list grows
+with recording length. The mean normalized score and voice-leading window fraction
+remain uncalibrated window statistics. Overlapping windows are not independent
+observations or measurements of vocal seconds.
+
+The existing [official model metadata](https://essentia.upf.edu/models/classifiers/voice_instrumental/voice_instrumental-musicnn-msd-2.json)
+identifies `voice_instrumental-musicnn-msd-2.pb`, input `[1,187,96]` and
+instrumental/voice output order. The downloaded graph's SHA-256 matched the existing
+pin: `b734bca3fc99257cf0088211b44bd36e8a26fbb1f9ce67e1e97d39f188094b0a`.
+The fixed zero-input output matched `[0.378066, 0.33894423]` within 0.0001.
+The real FFmpeg-to-worker test classified both windows, handled an already-cancelled
+request without killing the worker, and shut down within five seconds. Weights remain
+ignored developer artifacts, separately licensed and never installed by the application.
+
+The source identity is now
+`tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2`.
+Older generated voice contexts become stale through the existing identity check.
+No legacy reader or data migration is needed; accepted/manual tags are preserved.
+
+To exercise these checks with an explicitly installed model and FFmpeg:
+
+```powershell
+$env:MUSIC_TEST_VOICE_MODEL = 'path/to/voice_instrumental-musicnn-msd-2.pb'
+$env:MUSIC_TEST_FFMPEG = 'path/to/ffmpeg'
+cargo test --locked -p music-analysis --lib -- --nocapture
+```
+
+Decoder regressions can use FFmpeg from PATH without model weights; graph/worker
+checks need both explicit variables. An invalid supplied executable or model fails
+the check rather than silently skipping it.
+
 ## Remaining acceptance
 
-This establishes controlled numerical parity for one frontend build and the same
-ONNX exports on two runtimes. It does not establish equivalence to the original
-TensorFlow exports, correct decoding/downmixing/resampling, final-patch policy,
-long-file memory/cancellation behavior, Linux container cost or usefulness on music.
+The 24 September EffNet comparison establishes controlled frontend and same-export
+ONNX graph parity. The 25 September voice checks establish basic mono/stereo decoding,
+resampling counts, ending coverage and actual pinned-graph execution on this host.
+Neither establishes original TensorFlow/ONNX encoder equivalence, full resampling
+spectral parity, multichannel downmix parity, or usefulness on independently judged music.
 Separate short/partial-hop constant-signal checks matched upstream frame counts and
-centering; they did not exercise a complete model wrapper.
+centering; they did not exercise a complete EffNet wrapper.
 
-The ordinary voice framing and inference contracts remain unchanged. The optional
-licensed voice-graph and FFmpeg-to-voice tests require operator-supplied weights;
-they were unavailable for this batch and were not exercised. No new model was
+Long-file repeated-run RSS/cancellation, production Linux container cost and concurrent
+playback remain open. Cancellation/expiry is checked before and after each Tract call;
+a wedged in-process inference call cannot be interrupted midway. No new model was
 enabled, no production rebuild ran, and no owner listening labels were invented.
-A useful candidate still needs development recordings, a bounded extraction/tail
-check and the production resource gate before integration. Keep only the heads that
+An EffNet candidate still needs development recordings, its own bounded extraction/tail
+checks and the production resource gate before integration. Keep only the heads that
 improve the owner's listening/session decisions.

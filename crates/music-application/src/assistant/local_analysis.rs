@@ -709,10 +709,16 @@ mod tests {
         let with_voice = context_source_signature(
             &track,
             LOCAL_CONTEXT_IMPLEMENTATION_ID,
-            Some("essentia-musicnn-voice/v2:model:runtime"),
+            Some("essentia-musicnn-voice/v2:model:preprocess/v1+decode/v2+windows/v2"),
+        )?;
+        let previous_voice = context_source_signature(
+            &track,
+            LOCAL_CONTEXT_IMPLEMENTATION_ID,
+            Some("essentia-musicnn-voice/v2:model:preprocess/v1"),
         )?;
         assert_eq!(without_voice.len(), 64);
         assert_ne!(with_voice, without_voice);
+        assert_ne!(with_voice, previous_voice);
         assert_ne!(
             context_source_signature(&track, "local-context/v3+other/v1", None)?,
             without_voice

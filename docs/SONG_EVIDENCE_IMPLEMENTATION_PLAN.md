@@ -7,7 +7,7 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
-## Implementation status — 24 September 2026
+## Implementation status — 25 September 2026
 
 - **Implemented:** grouped JSONL pilot tooling with frozen recording groups, four-state
   labels, separate development/confirmation scoring, per-tag counts, known-positive
@@ -33,7 +33,11 @@ The status below identifies delivered contracts; conditional stages remain propo
   checks and was rejected; no faster loudness algorithm has been adopted.
 - **Implemented:** shared MusiCNN frame preprocessing with independently generated,
   checksum-pinned numerical fixtures and reusable FFT scratch. All 1,152 synthetic
-  frame features pass the fixed tolerance; voice preprocessing semantics are unchanged.
+  frame features pass the fixed tolerance; the frame transform definition is unchanged.
+- **Implemented:** complete ending windows and constant-storage voice summaries, strict
+  invalid-value/cancellation handling, normalized stereo input and bounded FFmpeg pools.
+  The exact pinned graph and real FFmpeg/worker tests now run; decoder/window identities
+  make older generated contexts stale without changing accepted/manual tags.
 - **Native probe:** five synthetic patches pass frontend and ONNX graph parity against
   pinned Essentia.js and ONNX Runtime Web references. Real-audio decoding/tails,
   original TensorFlow-export equivalence, cancellation, production resource bounds
@@ -52,7 +56,7 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Across completed batches, Windows GNU validation passed: 503 Rust tests, 342 frontend
+Across completed batches, Windows GNU validation passed: 511 Rust tests, 342 frontend
 tests and 48 pilot/policy checks; workspace and fuzz Clippy, formatting, architecture,
 generated contracts, doctor/migration coverage, frontend production build and the
 headless release build.
@@ -68,31 +72,33 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** extracted the already-correct MusiCNN frame calculation into one
-shared module used by voice inference and the isolated EffNet probe. A pinned upstream
-reference generates twelve synthetic frame fixtures; the normal Rust suite verifies
-all 1,152 mel values without downloading tools or models. Maximum absolute error is
-0.0000290871 against a fixed 0.0001 limit. FFT scratch now persists across frames;
-preprocessing meaning and identity remain unchanged.
+**Latest batch:** repaired the optional voice path's ending coverage and stereo input.
+A four-second fixture with sound only in its final second previously produced one
+silent prediction window. The analyzer now adds one full, ending-aligned window when
+needed, using actual retained frames; it never repeats a short tail or duplicates an
+already aligned window. Recordings too short for one complete patch remain unavailable.
 
-Five controlled patches also pass Tract-versus-ONNX-Runtime graph comparison, including
-the Rust frontend: embedding cosine exceeds 0.99999999999 and every head-score difference
-is below 0.00000090. The
-[numerical reference notes](../crates/music-analysis/tests/fixtures/README.md)
-record provenance, reproducible fixture generation, the synthetic probe's exact scope
-and remaining gates. This does not establish music-label accuracy or production cost.
-Essentia.js and ONNX Runtime Web are isolated development references, not application
-dependencies. No legacy support, new feature store, production runtime, provider calls or live
-rebuild was added.
+Real FFmpeg checks also exposed a roughly 3 dB stereo gain mismatch against the pinned
+Essentia MonoMixer. Explicit matrix normalization corrects it, with codec/filter pools
+bounded. Prediction summaries now use constant storage and a reused input buffer.
+Invalid PCM/scores, cancellation and expiry fail explicitly instead of producing a
+partial complete result. Window counts reach the existing evidence projection.
+The changed decoder/window identities invalidate older generated voice contexts;
+the frame transform and authored state retain their existing contracts.
 
-Validation for this batch: 503 Rust tests, strict workspace Clippy, formatting,
-architecture, workspace check, doc tests and generated-contract checks passed.
-Reference regeneration reproduces all 1,152 features exactly; six negative generator
-checks and 41 documentation links/anchors pass. Five synthetic patches meet the
-independent frontend and graph gates. Optional licensed voice weights are unavailable,
-so the two graph/worker tests requiring them returned early and remain unexercised.
-Frontend, pilot, fuzz and production dependency graphs are unchanged; their prior
-gates were not rerun. The listening pilot is ready; owner judgments remain outstanding.
+The exact official voice model was downloaded only to ignored developer test output
+and its existing SHA-256 pin verified. Both the graph golden-output test and the real
+FFmpeg/worker test now ran successfully. The [dated acceptance notes](../crates/music-analysis/tests/fixtures/README.md)
+record the decoder checks, model identity and remaining limits. No application model
+download, new dependency, legacy reader or production rebuild was introduced.
+
+Validation for this batch: all 511 Rust tests passed with FFmpeg and the pinned voice
+model explicitly configured, including both previously unexercised graph/worker checks.
+Strict workspace Clippy, formatting, architecture, workspace check, doc-test and
+generated-contract gates passed. The pinned reference reproduced all 1,152 features;
+42 local documentation links/anchors passed. Frontend, pilot, fuzz and production
+dependency graphs are unchanged; their prior gates were not rerun.
+The listening pilot is ready; owner judgments remain outstanding.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -104,12 +110,12 @@ options survey; this plan determines the narrower implementation scope.
 |---|---|---|---|---|
 | Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
-| FFmpeg / ffprobe | Decode and technical inspection | Bounded codec/filter pools; reliable final loudness capture | Keep | Core: original-audio facts; verbose metadata must not silently reduce evidence quality. |
+| FFmpeg / ffprobe | Decode and technical inspection | Bounded pools, reliable loudness capture and normalized voice downmix | Keep | Core: correct input levels and complete original-audio evidence; stereo defaults previously boosted voice input by about 3 dB. |
 | FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
 | music-context-probe | No factual extractor acceptance CLI | Current v2 reports with numeric loudness, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
-| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Optional score/coverage; shared frontend passes pinned numerical fixtures | Keep optional | Useful: audible vocals matter for session beds; verified preprocessing is reusable, but scores remain uncalibrated. |
+| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Complete ending windows, constant-storage summaries, corrected stereo and real-model tests | Keep optional | High session value: avoid missed ending vocals and partial-success reports; window scores remain uncalibrated. |
 | Essentia.js / ONNX Runtime Web references | No retained numerical reference fixtures | Pinned local verification only; absent from production dependencies | Keep offline fixtures; run references when changing models/frontend | High validation value: independently check feature/graph calculations without another application runtime. |
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
@@ -384,6 +390,12 @@ may trigger fresh analysis initially; measure that cost before adding another ca
   and log compression. EffNet uses this feature family but **128-frame patches**,
   unlike the voice model's 187. Check centering, downmixing, resampling, silence and
   tails against the pinned reference. [EffNet preprocessing](https://essentia.upf.edu/reference/std_TensorflowPredictEffnetDiscogs.html).
+- Voice decoding now matches the pinned MonoMixer's levels for mono/stereo and passes
+  native-rate, 44.1/48 kHz count/level, ending, invalid-value and cancellation regressions.
+  One final full patch covers the ending without repeating tail frames; summaries use
+  constant storage. Decoder/window identities invalidate previous generated contexts.
+  Full resampling spectral parity, multichannel behavior and the production resource
+  gate remain separate from these basic checks.
 - Stop treating the current loudness-heavy intensity proxy as independent evidence
   of emotional arousal, or duration/activity heuristics as calibrated accuracy.
   Keep absolute loudness for technical uses; trial relative dynamics where it helps
