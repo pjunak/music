@@ -11,7 +11,8 @@ not a second description of the implementation.
 - Product, deployment, configuration, and development: [root README](../README.md)
 - Optional model setup and operator acceptance: [AI setup guide](../ASSISTANT.md)
 - Mood workflow rework and remaining evaluation: [findings and plan](MOOD_CONTEXT_REVIEW.md),
-  [offline listening pilot](MOOD_PILOT.md)
+  [offline listening pilot](MOOD_PILOT.md),
+  [factual audio acceptance probe](AUDIO_ANALYSIS_ACCEPTANCE.md)
 - Song evidence, audio models, datasets, and Jev assessment:
   [research and proposed experiments](SONG_EVIDENCE_RESEARCH.md),
   [ordered implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)

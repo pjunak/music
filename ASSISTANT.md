@@ -408,6 +408,9 @@ field is a score, not a probability. Generated suggestions carry per-tag reasons
 No new music classifier has been adopted. Prepare independent judgments with the
 [grouped offline pilot](docs/MOOD_PILOT.md); development and confirmation recordings stay
 separate. Synthetic tests and native model compatibility do not establish musical accuracy.
+Use the [read-only factual audio probe](docs/AUDIO_ANALYSIS_ACCEPTANCE.md) for a small
+coverage, timing and cancellation pass before a large rebuild. It runs the same extractor
+without changing the database; whole-container playback/resource acceptance remains separate.
 
 ### EQ assistance
 

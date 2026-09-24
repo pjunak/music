@@ -23,6 +23,10 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** forward schema-15/16 reset of generated analysis and proposal reviews,
   old-job supersession and audit preservation, current-only context parsing, updated
   existing review/inspector UI. Accepted/manual tags and authored playlists survive.
+- **Implemented:** a read-only factual-audio acceptance probe using the real extractor
+  and fixed executor, with repeated passes, explicit cancellation outcomes, coverage,
+  stage timings and process-local memory observations. It adds no model or dependency;
+  production container totals and concurrent playback still need separate measurement.
 - **Native probe:** exact published ONNX encoder and both heads run with Tract 0.23.7
   at batch size one. Full preprocessing/output parity, cancellation, production resource
   bounds and listening usefulness remain unproven; no new model runtime/weights are bundled.
@@ -40,7 +44,7 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Windows GNU validation passed: 491 Rust tests, 342 frontend tests and 48 pilot/policy
+Windows GNU validation passed: 497 Rust tests, 342 frontend tests and 48 pilot/policy
 checks; workspace and fuzz Clippy, formatting, architecture, generated contracts,
 doctor/migration coverage, frontend production build and the headless release build.
 The migration test starts with the old schema, verifies the backup/reset, parses a
@@ -55,13 +59,21 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** added an offline paired comparison to the existing pilot CLI,
-including precision/recall/coverage deltas, per-recording gains and regressions,
-explicit missing-versus-abstained results, and protected confirmation scoring.
-Fixed pre-listening freezing and the operator guide's stale automatic-playlist claim.
-No runtime, provider, model or dependency was added. Twenty pilot regression tests
-and 48 total pilot/policy checks pass; independent listening and production acceptance
-remain open. Prior runtime gates cover unchanged Rust/frontend code in this batch.
+**Latest batch:** added `music-context-probe`, a read-only operator/developer CLI
+that exercises the real FFmpeg/RustFFT extractor on one fixed worker. It reports
+coverage, stage timings, repeated passes, typed cancellation and process-local memory
+without writing a library or adding models/dependencies. Six focused regression tests
+pass, including final-frame coverage and reusing the worker after cancellation.
+The [acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md) documents commands, scope and
+remaining whole-container and listening gates. The paired listening comparison from
+the previous batch remains available. A release-mode local smoke run retained all
+15 synthetic duration/tail checks; six cancellations completed cleanup within 49 ms.
+The ten-minute fixture took 8.04–8.08 s, with roughly 97% in the existing loudness pass.
+These are unconstrained Windows observations, not production or listening acceptance.
+This batch passed 497 Rust tests, 48 pilot/policy checks, strict Clippy, formatting,
+architecture, doc tests, contract verification and the release probe build. Frontend,
+fuzz, dependency graphs and application packaging are unchanged; their earlier gates
+were not rerun.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -74,6 +86,7 @@ options survey; this plan determines the narrower implementation scope.
 | Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
 | FFmpeg / ffprobe | Decode and technical inspection | Reused | Keep | Core: existing bounded decoding avoids a second audio pipeline. |
+| music-context-probe | No factual extractor acceptance CLI | Read-only repeated extraction, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
 | MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Optional voice score and coverage | Keep optional | Useful: audible vocals matter for quiet session beds; scores remain uncalibrated and do not produce mood tags. |

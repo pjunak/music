@@ -77,6 +77,11 @@ The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, `
 0.22.2, and `cargo-machete` 0.9.2; install those exact versions with
 `cargo install <tool> --version <version> --locked` only when they are unavailable or the required version changed.
 
+For an operator acceptance pass on original audio, the optional
+[factual audio probe](AUDIO_ANALYSIS_ACCEPTANCE.md) exercises coverage, repeat runs and
+cancellation without touching a library. Its tests are included in the normal Rust
+workspace gates; private-corpus and container measurements remain separately reported.
+
 ## Frontend
 
 From `frontend/` (Node 26+). Run `npm ci` only for a missing or stale dependency
