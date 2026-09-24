@@ -31,9 +31,13 @@ The status below identifies delivered contracts; conditional stages remain propo
   factual decode/loudness codec and filter pools are limited. The acceptance probe exposes
   numeric measurements. The direct ebur128 substitution failed end-of-file/short-signal
   checks and was rejected; no faster loudness algorithm has been adopted.
-- **Native probe:** exact published ONNX encoder and both heads run with Tract 0.23.7
-  at batch size one. Full preprocessing/output parity, cancellation, production resource
-  bounds and listening usefulness remain unproven; no new model runtime/weights are bundled.
+- **Implemented:** shared MusiCNN frame preprocessing with independently generated,
+  checksum-pinned numerical fixtures and reusable FFT scratch. All 1,152 synthetic
+  frame features pass the fixed tolerance; voice preprocessing semantics are unchanged.
+- **Native probe:** five synthetic patches pass frontend and ONNX graph parity against
+  pinned Essentia.js and ONNX Runtime Web references. Real-audio decoding/tails,
+  original TensorFlow-export equivalence, cancellation, production resource bounds
+  and listening usefulness remain open; no new model runtime/weights are bundled.
 - **Implemented:** tagger output v5 / analyzer v8 with per-tag support, reasons,
   validated supporting/conflicting observation IDs and explicit abstention. Current-only
   save/review contracts, strict fixtures, disclosure and existing review UI are updated.
@@ -48,7 +52,7 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Across completed batches, Windows GNU validation passed: 502 Rust tests, 342 frontend
+Across completed batches, Windows GNU validation passed: 503 Rust tests, 342 frontend
 tests and 48 pilot/policy checks; workspace and fuzz Clippy, formatting, architecture,
 generated contracts, doctor/migration coverage, frontend production build and the
 headless release build.
@@ -64,30 +68,31 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** fixed lost loudness measurements when long embedded notes filled
-the subprocess log buffer. The extractor now retains the bounded final report and
-explicitly limits factual decode/loudness codec and filter pools. The same loudnorm
-algorithm and parameters remain in use. Context implementation identity advances;
-old generated contexts become stale through the existing guards, without a legacy
-reader or changes to accepted/manual tags. The read-only probe emits current-only
-`context-probe/v2` records with numeric, allowlisted loudness fields.
+**Latest batch:** extracted the already-correct MusiCNN frame calculation into one
+shared module used by voice inference and the isolated EffNet probe. A pinned upstream
+reference generates twelve synthetic frame fixtures; the normal Rust suite verifies
+all 1,152 mel values without downloading tools or models. Maximum absolute error is
+0.0000290871 against a fixed 0.0001 limit. FFT scratch now persists across frames;
+preprocessing meaning and identity remain unchanged.
 
-A direct measurement-only ebur128 substitution was investigated and rejected after
-a missed final-sample peak and material short-signal/range differences. Faster processing
-does not pass a correctness gate by itself. The
-[acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md#loudness-reliability-and-optimization-decision--24-september-2026)
-records commands, primary sources, observed differences and the remaining reference
-validation. No new model/runtime/dependency was added. The paired listening pilot
-remains available; no owner judgments or production data were invented.
+Five controlled patches also pass Tract-versus-ONNX-Runtime graph comparison, including
+the Rust frontend: embedding cosine exceeds 0.99999999999 and every head-score difference
+is below 0.00000090. The
+[numerical reference notes](../crates/music-analysis/tests/fixtures/README.md)
+record provenance, reproducible fixture generation, the synthetic probe's exact scope
+and remaining gates. This does not establish music-label accuracy or production cost.
+Essentia.js and ONNX Runtime Web are isolated development references, not application
+dependencies. No legacy support, new feature store, production runtime, provider calls or live
+rebuild was added.
 
-Validation for this batch: 502 Rust tests, strict workspace Clippy, formatting,
-architecture, workspace check, doc tests, generated contracts and the release probe
-build passed. Forty-eight before/after release passes retained coverage across
-PCM, FLAC and MP3; all 18 measured new runs matched the original command's four
-loudness values exactly. The metadata case recovered valid EBU results, and six
-cancellations completed cleanup within 49 ms. The ten-minute fixture remains about
-7.9 s: no speedup is claimed. Frontend, Node pilot/policy, fuzz, dependencies and
-application packaging are unchanged; their earlier gates were not rerun.
+Validation for this batch: 503 Rust tests, strict workspace Clippy, formatting,
+architecture, workspace check, doc tests and generated-contract checks passed.
+Reference regeneration reproduces all 1,152 features exactly; six negative generator
+checks and 41 documentation links/anchors pass. Five synthetic patches meet the
+independent frontend and graph gates. Optional licensed voice weights are unavailable,
+so the two graph/worker tests requiring them returned early and remain unexercised.
+Frontend, pilot, fuzz and production dependency graphs are unchanged; their prior
+gates were not rerun. The listening pilot is ready; owner judgments remain outstanding.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -104,15 +109,16 @@ options survey; this plan determines the narrower implementation scope.
 | music-context-probe | No factual extractor acceptance CLI | Current v2 reports with numeric loudness, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
-| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Optional voice score and coverage | Keep optional | Useful: audible vocals matter for quiet session beds; scores remain uncalibrated and do not produce mood tags. |
+| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Optional score/coverage; shared frontend passes pinned numerical fixtures | Keep optional | Useful: audible vocals matter for session beds; verified preprocessing is reusable, but scores remain uncalibrated. |
+| Essentia.js / ONNX Runtime Web references | No retained numerical reference fixtures | Pinned local verification only; absent from production dependencies | Keep offline fixtures; run references when changing models/frontend | High validation value: independently check feature/graph calculations without another application runtime. |
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
 | JSONL listening pilot + grouped bootstrap | Fixed small pilot format | Frozen groups, four-state judgments, paired comparison and recall | Use for development, then confirmation | Essential validation: distinguishes useful improvements from more tags or missing results without building a dataset application. |
-| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Isolated zero-input graph probe only | Adopt only useful heads after parity, resource and listening gates | Conditional high value: richer learned audio evidence; native graph loading alone proves no benefit. |
-| tract-onnx / ort | Neither in production | Tract 0.23.7 isolated probe | Prefer Tract if qualified; ORT only if compatibility requires it | Conditional infrastructure: one selected native inference runtime; avoid parallel production stacks. |
+| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Five synthetic patches pass frontend/ONNX numerical comparison | Adopt useful heads after real-audio, resource and listening gates | Conditional high value: richer learned audio evidence; numerical parity does not prove mood usefulness. |
+| tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated synthetic graph comparison | Prefer Tract if qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; the WASM oracle is development-only. |
 | TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
@@ -141,11 +147,17 @@ No graph operations or weights were rewritten. Encoder input is `[1,128,96]`, em
 | `mtg_jamendo_moodtheme-discogs-effnet-1.onnx` | `7d6270acaa5f4bba4b115a0d6849aca05ed6bd153dcb6d9da4f6ab9f99ef10ff` |
 | `mtg_jamendo_instrument-discogs-effnet-1.onnx` | `9ae2d9e763d66bd8eed654d1ac3aa171e6539cb8a0e11f3dcd53df1428980802` |
 
-A zero-mel tensor produced finite outputs with those dimensions; one observed encoder
-load took 115 ms and inference 9 ms on this host. These are smoke-test observations,
-not audio/reference parity, a production performance budget or mood-quality evidence.
-The artifacts and temporary probe are private ignored research output, not app dependencies.
-The upstream artifact links and licensing gate remain in stage 2 below.
+The initial zero-input smoke test is now supplemented by five synthetic 128-frame
+patches. Essentia.js 0.1.3 supplies reference mel features and ONNX Runtime Web 1.30.0
+(single-thread CPU WASM) runs the same published graphs. Both graph-only comparison
+and the shared Rust frontend plus Tract meet the fixed feature/embedding/head gates.
+All values are finite with the expected dimensions; worst mel error is 0.0000290871
+and worst head error is below 0.00000090. See the
+[reference ledger](../crates/music-analysis/tests/fixtures/README.md#isolated-effnet-comparison-24-september-2026)
+for the cases and limits. This is controlled numerical evidence, not original
+TensorFlow-export equivalence, real-music coverage, production resource acceptance
+or mood-quality evidence. The artifacts and temporary probe remain ignored research
+output, not application dependencies. Upstream links and licensing remain in stage 2.
 
 ## Product purpose and admission rule
 
@@ -364,10 +376,11 @@ may trigger fresh analysis initially; measure that cost before adding another ca
 ## 5. Correct misleading factual inputs and share required preprocessing
 
 **Owners:** [context DSP](../crates/music-analysis/src/context.rs),
-[voice frontend](../crates/music-analysis/src/voice.rs), a shared mel module if adopted.
+[voice streaming](../crates/music-analysis/src/voice.rs),
+[shared mel frontend](../crates/music-analysis/src/musicnn.rs).
 
-- Extract the existing MusiCNN frontend only as needed by the successful EffNet probe,
-  behind parity tests: 16 kHz, 512-sample frames, 256-sample hop, 96 Slaney mel bands
+- The shared MusiCNN frame frontend is implemented behind pinned numerical fixtures.
+  Keep it limited to the voice classifier and successful EffNet probe: 16 kHz, 512-sample frames, 256-sample hop, 96 Slaney mel bands
   and log compression. EffNet uses this feature family but **128-frame patches**,
   unlike the voice model's 187. Check centering, downmixing, resampling, silence and
   tails against the pinned reference. [EffNet preprocessing](https://essentia.upf.edu/reference/std_TensorflowPredictEffnetDiscogs.html).

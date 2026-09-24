@@ -14,8 +14,6 @@ use std::time::{Duration, Instant};
 use music_application::assistant::{
     VOICE_ANALYZER_ID, VOICE_MODEL_FILENAME, VOICE_MODEL_SHA256, VoiceAnalyzerStatus,
 };
-use rustfft::num_complex::Complex;
-use rustfft::{Fft, FftPlanner};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
@@ -25,13 +23,11 @@ use tract_tensorflow::tract_hir::internal::{
     check_output_arity, ensure, inference_wrap,
 };
 
-const SAMPLE_RATE: u32 = 16_000;
-const FRAME_SIZE: usize = 512;
+use crate::musicnn::{FRAME_SIZE, MEL_BANDS, MusicNnPreprocessor, SAMPLE_RATE};
+
 const FRAME_HOP: usize = 256;
-const MEL_BANDS: usize = 96;
 const PATCH_FRAMES: usize = 187;
 const PATCH_HOP: usize = 93;
-const SPECTRUM_BINS: usize = FRAME_SIZE / 2 + 1;
 const MAX_AUDIO_SECONDS: u64 = 24 * 60 * 60;
 const FRAMES_PER_CHUNK: usize = 8_192;
 const VOICE_REQUEST_CAPACITY: usize = 1;
@@ -415,7 +411,7 @@ fn decode_and_predict_until(
     let error_thread = thread::spawn(move || drain(stderr));
     let (sender, receiver) = sync_channel(2);
     let audio_thread = thread::spawn(move || read_audio(stdout, sender));
-    let mut pipeline = VoicePipeline::new()?;
+    let mut pipeline = VoicePipeline::new();
     let mut pending = Vec::with_capacity(3);
     let stream_result = 'stream: loop {
         if cancelled.load(Ordering::Relaxed) {
@@ -522,20 +518,20 @@ struct VoicePipeline {
 }
 
 impl VoicePipeline {
-    fn new() -> Result<Self, VoiceAnalysisError> {
-        Ok(Self {
+    fn new() -> Self {
+        Self {
             frame: [0.0; FRAME_SIZE],
             // MusiCNN's centered first frame begins 256 samples before the
             // stream. Deterministic zero padding replaces Essentia's optional
-            // random silence dither without changing non-silent recordings.
+            // random silence dither; frame-level silence is tested explicitly.
             filled: FRAME_SIZE / 2,
             frame_start: -(FRAME_SIZE as i64 / 2),
             total_samples: 0,
             emitted_frames: 0,
             mel_frames: VecDeque::with_capacity(PATCH_FRAMES),
             predictions: Vec::new(),
-            preprocessor: MusicNnPreprocessor::new()?,
-        })
+            preprocessor: MusicNnPreprocessor::new(),
+        }
     }
 
     fn add_sample(
@@ -616,118 +612,6 @@ impl VoicePipeline {
         self.frame.copy_within(FRAME_HOP..FRAME_SIZE, 0);
         self.filled = FRAME_SIZE - FRAME_HOP;
         self.frame_start = self.frame_start.saturating_add(FRAME_HOP as i64);
-    }
-}
-
-struct MusicNnPreprocessor {
-    fft: Arc<dyn Fft<f32>>,
-    window: [f32; FRAME_SIZE],
-    filters: Vec<[f32; SPECTRUM_BINS]>,
-    spectrum: Vec<Complex<f32>>,
-}
-
-impl MusicNnPreprocessor {
-    fn new() -> Result<Self, VoiceAnalysisError> {
-        let mut planner = FftPlanner::<f32>::new();
-        let fft = planner.plan_fft_forward(FRAME_SIZE);
-        let window = std::array::from_fn(|index| {
-            0.5 - 0.5 * (std::f32::consts::TAU * index as f32 / (FRAME_SIZE - 1) as f32).cos()
-        });
-        Ok(Self {
-            fft,
-            window,
-            filters: mel_filter_bank()?,
-            spectrum: vec![Complex::new(0.0, 0.0); FRAME_SIZE],
-        })
-    }
-
-    fn transform(&mut self, frame: &[f32; FRAME_SIZE]) -> [f32; MEL_BANDS] {
-        for (index, sample) in frame.iter().enumerate() {
-            self.spectrum[index] = Complex::new(*sample * self.window[index], 0.0);
-        }
-        self.fft.process(&mut self.spectrum);
-        let magnitudes =
-            std::array::from_fn::<_, SPECTRUM_BINS, _>(|index| self.spectrum[index].norm());
-        std::array::from_fn(|band| {
-            let energy = magnitudes
-                .iter()
-                .zip(&self.filters[band])
-                .map(|(magnitude, weight)| magnitude * magnitude * weight)
-                .sum::<f32>();
-            energy.mul_add(10_000.0, 1.0).log10()
-        })
-    }
-}
-
-fn mel_filter_bank() -> Result<Vec<[f32; SPECTRUM_BINS]>, VoiceAnalysisError> {
-    let edges = mel_edges();
-    let bin_hz = SAMPLE_RATE as f32 / FRAME_SIZE as f32;
-    let mut filters = Vec::with_capacity(MEL_BANDS);
-    for band in 0..MEL_BANDS {
-        let left = edges[band];
-        let center = edges[band + 1];
-        let right = edges[band + 2];
-        let rising = center - left;
-        let falling = right - center;
-        let area = (rising + falling) / 2.0;
-        if rising <= 0.0 || falling <= 0.0 || area <= 0.0 {
-            return Err(VoiceAnalysisError::Inference);
-        }
-        let mut coefficients = [0.0; SPECTRUM_BINS];
-        let first = (left / bin_hz).ceil().max(0.0) as usize;
-        let last = (right / bin_hz).floor().max(0.0) as usize;
-        for (index, coefficient) in coefficients
-            .iter_mut()
-            .enumerate()
-            .take(last.min(SPECTRUM_BINS - 1).saturating_add(1))
-            .skip(first)
-        {
-            let frequency = index as f32 * bin_hz;
-            let triangle = if frequency < center {
-                (frequency - left) / rising
-            } else {
-                (right - frequency) / falling
-            };
-            *coefficient = triangle / area;
-        }
-        filters.push(coefficients);
-    }
-    Ok(filters)
-}
-
-fn mel_edges() -> [f32; MEL_BANDS + 2] {
-    let low = hz_to_slaney_mel(0.0);
-    let high = hz_to_slaney_mel(SAMPLE_RATE as f32 / 2.0);
-    let increment = (high - low) / (MEL_BANDS + 1) as f32;
-    let mut mel = low;
-    std::array::from_fn(|_| {
-        let frequency = slaney_mel_to_hz(mel);
-        mel += increment;
-        frequency
-    })
-}
-
-fn hz_to_slaney_mel(frequency: f32) -> f32 {
-    const MIN_LOG_HZ: f32 = 1_000.0;
-    const LINEAR_SLOPE: f32 = 3.0 / 200.0;
-    if frequency < MIN_LOG_HZ {
-        frequency * LINEAR_SLOPE
-    } else {
-        const MIN_LOG_MEL: f32 = MIN_LOG_HZ * LINEAR_SLOPE;
-        let log_step = 6.4_f32.ln() / 27.0;
-        MIN_LOG_MEL + (frequency / MIN_LOG_HZ).ln() / log_step
-    }
-}
-
-fn slaney_mel_to_hz(mel: f32) -> f32 {
-    const MIN_LOG_HZ: f32 = 1_000.0;
-    const LINEAR_SLOPE: f32 = 3.0 / 200.0;
-    const MIN_LOG_MEL: f32 = MIN_LOG_HZ * LINEAR_SLOPE;
-    if mel < MIN_LOG_MEL {
-        mel / LINEAR_SLOPE
-    } else {
-        let log_step = 6.4_f32.ln() / 27.0;
-        MIN_LOG_HZ * ((mel - MIN_LOG_MEL) * log_step).exp()
     }
 }
 
@@ -1009,8 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn predictions_use_the_legacy_bounded_normalization_contract() -> Result<(), VoiceAnalysisError>
-    {
+    fn predictions_use_the_bounded_normalization_contract() -> Result<(), VoiceAnalysisError> {
         let (score, coverage) = summarize_predictions(&[
             [0.1, 0.9],
             [0.3, 0.7],
@@ -1041,40 +924,6 @@ mod tests {
     }
 
     #[test]
-    fn slaney_scale_round_trips_and_edges_are_strictly_increasing() {
-        for frequency in [0.0, 100.0, 999.0, 1_000.0, 4_000.0, 8_000.0] {
-            let round_trip = slaney_mel_to_hz(hz_to_slaney_mel(frequency));
-            assert!((round_trip - frequency).abs() < 0.01);
-        }
-        let edges = mel_edges();
-        assert!((edges[0] - 0.0).abs() < f32::EPSILON);
-        assert!((edges[MEL_BANDS + 1] - 8_000.0).abs() < 0.02);
-        assert!(edges.windows(2).all(|edge| edge[0] < edge[1]));
-    }
-
-    #[test]
-    fn preprocessing_maps_silence_to_zero_and_tone_to_its_filter() -> Result<(), VoiceAnalysisError>
-    {
-        let mut preprocessor = MusicNnPreprocessor::new()?;
-        let silence = preprocessor.transform(&[0.0; FRAME_SIZE]);
-        assert_eq!(silence, [0.0; MEL_BANDS]);
-
-        let tone =
-            std::array::from_fn(|index| (TAU * 1_000.0 * index as f32 / SAMPLE_RATE as f32).sin());
-        let bands = preprocessor.transform(&tone);
-        let strongest = bands
-            .iter()
-            .enumerate()
-            .max_by(|left, right| left.1.total_cmp(right.1))
-            .map(|(index, _)| index)
-            .ok_or(VoiceAnalysisError::Inference)?;
-        let edges = mel_edges();
-        assert!(edges[strongest] <= 1_000.0);
-        assert!(edges[strongest + 2] >= 1_000.0);
-        Ok(())
-    }
-
-    #[test]
     fn centered_frames_and_overlapping_patches_match_musicnn_counts()
     -> Result<(), VoiceAnalysisError> {
         let sample_count = 100_000_usize;
@@ -1086,7 +935,7 @@ mod tests {
             .saturating_add(1);
         let cancelled = AtomicBool::new(false);
         let mut model = FixedPredictor::default();
-        let mut pipeline = VoicePipeline::new()?;
+        let mut pipeline = VoicePipeline::new();
         for index in 0..sample_count {
             let sample = (TAU * 440.0 * index as f32 / SAMPLE_RATE as f32).sin() * 0.2;
             pipeline.add_sample(sample, &mut model, &cancelled)?;

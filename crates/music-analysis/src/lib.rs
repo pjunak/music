@@ -11,6 +11,7 @@
 
 mod context;
 mod executor;
+mod musicnn;
 mod voice;
 
 pub use context::{

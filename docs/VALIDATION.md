@@ -82,6 +82,12 @@ For an operator acceptance pass on original audio, the optional
 cancellation without touching a library. Its tests are included in the normal Rust
 workspace gates; private-corpus and container measurements remain separately reported.
 
+The [MusiCNN reference fixtures](../crates/music-analysis/tests/fixtures/README.md) run
+in the normal Rust suite without external packages or model weights. Regenerate them
+with the pinned developer-only reference when changing the frontend; verify the fixed
+numerical tolerance before accepting new fixtures. Optional voice graph/worker tests
+still require the separately supplied licensed model.
+
 ## Frontend
 
 From `frontend/` (Node 26+). Run `npm ci` only for a missing or stale dependency

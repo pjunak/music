@@ -678,7 +678,14 @@ centered 512-sample symmetric Hann frames with a 256-sample hop, a 257-bin magni
 96 Slaney-warped linear triangles with unit-triangle normalization and power accumulation,
 `log10(energy * 10000 + 1)`, and 187-frame patches with a 93-frame hop. Silent padding is
 deterministic zero rather than Essentia's default random low-level dither; this is an explicit
-reproducibility hardening recorded in the compatibility ledger.
+reproducibility hardening recorded in the compatibility ledger. The fixed frame
+transform now lives in [the shared MusiCNN module](../crates/music-analysis/src/musicnn.rs),
+with reusable FFT scratch and no decoder or model-specific patch configuration.
+[Twelve upstream-generated synthetic fixtures](../crates/music-analysis/tests/fixtures/README.md)
+check every mel band within 0.0001 absolute error, including silence after nonzero
+frames. The reference tools are separately installed for development; ordinary tests
+and production require neither Essentia.js nor ONNX Runtime Web. This extraction
+preserves the preprocessing definition and identity.
 
 This thread boundary is conditional on evidence. If the selected backend contains unsafe native
 code, leaks, wedges, cannot bound an inference call, or cannot meet shutdown deadlines, the same
@@ -688,8 +695,9 @@ isolation is therefore a tested fallback, not a Python-era default.
 The implementation gate verifies the official model checksum, exact graph output shape and
 fixed zero-input output, end-to-end FFmpeg-to-worker inference, bounded score aggregation, frame and
 patch counts, and cancellation-aware streaming. A normal full-library context build after rollout
-exercises the actual media, model mount, and durable job path. Private Essentia comparison and a
-long repeated-run RSS/cancellation soak remain useful post-cutover diagnostics. If that evidence
+exercises the actual media, model mount, and durable job path. The pinned frame fixtures
+cover controlled numerical preprocessing; full decoded-audio comparison and a long
+repeated-run RSS/cancellation soak remain separate acceptance work. If that evidence
 fails, the same interface moves to the documented Rust subprocess. There is no Python fallback.
 
 ## Assistant and provider boundary
