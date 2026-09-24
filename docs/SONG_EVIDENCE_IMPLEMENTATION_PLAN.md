@@ -72,7 +72,18 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** repaired the optional voice path's ending coverage and stereo input.
+**Latest batch — CI repair:** [secret-scan run 36072259587](https://github.com/pjunak/music/actions/runs/36072259587)
+flagged the public Essentia JavaScript artifact checksum as a generic API key.
+The generator now uses `core_artifact_sha256`; regenerated inputs and all 1,152
+reference values are unchanged. One exact historical fingerprint is ignored so
+push scans can traverse the introducing commit without excluding the file or rule.
+Gitleaks 8.30.1 reproduced the finding before the fix and passed the same five-commit
+range afterward. The current fixture/generator scan, synthetic new-key detection
+control, reference regeneration and Rust numerical regression passed. Audio behavior
+and the tool inventory below retain the previous batch's status; this is a local
+CI correction, with no push or deployment.
+
+**Previous analysis batch:** repaired the optional voice path's ending coverage and stereo input.
 A four-second fixture with sound only in its final second previously produced one
 silent prediction window. The analyzer now adds one full, ending-aligned window when
 needed, using actual retained frames; it never repeats a short tail or duplicates an
@@ -92,7 +103,7 @@ FFmpeg/worker test now ran successfully. The [dated acceptance notes](../crates/
 record the decoder checks, model identity and remaining limits. No application model
 download, new dependency, legacy reader or production rebuild was introduced.
 
-Validation for this batch: all 511 Rust tests passed with FFmpeg and the pinned voice
+Validation for that analysis batch: all 511 Rust tests passed with FFmpeg and the pinned voice
 model explicitly configured, including both previously unexercised graph/worker checks.
 Strict workspace Clippy, formatting, architecture, workspace check, doc-test and
 generated-contract gates passed. The pinned reference reproduced all 1,152 features;

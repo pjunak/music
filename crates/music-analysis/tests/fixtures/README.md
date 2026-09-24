@@ -19,7 +19,9 @@ in `essentia.js@0.1.3`, package Git revision
 `f46c91c08bdf263d5f3d575ab8fb0f9b81695acf`. The generator checks both the embedded
 WASM and JavaScript API SHA-256 values before loading them. The upstream runtime
 reports `2.1-beta6-dev`; that string is not an exact C++ source revision. The package
-revision and binary hashes identify this reference.
+revision and binary hashes identify this reference. The JavaScript checksum field
+uses the explicit name `core_artifact_sha256` to distinguish this public artifact digest
+from an API credential. The generator still verifies both exact file hashes.
 
 The fixed absolute tolerance is 0.0001 per feature. On Windows GNU, the maximum
 observed error was 0.0000290871 before and after extraction into the shared module.

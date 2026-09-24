@@ -75,7 +75,7 @@ function main() {
         essentia_version: essentia.version,
         algorithm: 'TensorflowInputMusiCNN',
         artifact_sha256: artifacts[0][1],
-        core_api_sha256: artifacts[1][1],
+        core_artifact_sha256: artifacts[1][1],
         source: 'https://github.com/MTG/essentia.js/tree/f46c91c08bdf263d5f3d575ab8fb0f9b81695acf',
         scope: 'One 512-sample mono frame at 16 kHz; no decoding, framing, patching or model inference',
       },

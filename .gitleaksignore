@@ -7,3 +7,8 @@ f501bbe147c85ad61b6cdcd0727df71750f0d8a2:backend/tests/test_assistant_providers.
 # UI test, never an application API key. The current fixture no longer resembles
 # a key; retain this fingerprint only because push scans include the prior commit.
 83bc1bc5e9a54dc90465619fe8fd62049bf36ff3:frontend/src/views/assistant/LibraryCleanupViews.test.tsx:generic-api-key:188
+
+# Exact historical false positive: the public Essentia JavaScript artifact SHA-256
+# was mistaken for an API key because of its metadata field name. The generator
+# now names it core_artifact_sha256; retain only this finding for history scans.
+a0a1c615b37074e622274af9884a5adf36ea96c3:crates/music-analysis/tests/fixtures/musicnn-reference-v1.json:generic-api-key:10

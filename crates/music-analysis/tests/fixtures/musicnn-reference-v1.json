@@ -7,7 +7,7 @@
     "essentia_version": "2.1-beta6-dev",
     "algorithm": "TensorflowInputMusiCNN",
     "artifact_sha256": "7e0a2b5507199e8162c4ed090d38518de0c7faa070ce35d1593e7631b201014d",
-    "core_api_sha256": "e3958a89ca0d3e1f95f67de627a383cdbbd8058f24fd53c6749758ff78b5e337",
+    "core_artifact_sha256": "e3958a89ca0d3e1f95f67de627a383cdbbd8058f24fd53c6749758ff78b5e337",
     "source": "https://github.com/MTG/essentia.js/tree/f46c91c08bdf263d5f3d575ab8fb0f9b81695acf",
     "scope": "One 512-sample mono frame at 16 kHz; no decoding, framing, patching or model inference"
   },
