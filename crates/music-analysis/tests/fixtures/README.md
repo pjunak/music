@@ -480,8 +480,11 @@ frame/window counts still passed, but the spectral gate failed at only 3.06 dB
 attenuation. The exact production filter was then restored. These tests add a guard
 against spectral damage that level/count tests alone could miss.
 
-The pinned Essentia.js package exposed `Resample` but threw during valid synthetic
-conversion on this host. No full reference-resampler comparison was obtained.
+The pinned Essentia.js package exposed a `Resample` wrapper but threw during valid
+synthetic conversion on this host. Follow-up diagnosis found no registered
+`Resample` algorithm in this exact build: its caught exception says
+`Identifier 'Resample' not found in registry...`, and its exposed algorithm-name
+list also omits it. No full reference-resampler comparison was obtained.
 Upstream [Essentia Resample](https://essentia.upf.edu/reference/std_Resample.html)
 uses SRC, while [FFmpeg's default resampler](https://ffmpeg.org/ffmpeg-resampler.html)
 is SWR. Analytic passband/stopband checks do not establish equivalence between those

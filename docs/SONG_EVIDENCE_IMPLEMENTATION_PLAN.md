@@ -17,7 +17,9 @@ The status below identifies delivered contracts; conditional stages remain propo
   pilot freezes recording duration and requires blind, complete-recording judgments
   for independent scores. Assisted/excerpt comparisons require explicit diagnostic
   mode and retain the entire cohort. Freezing works before listening. The owner has
-  no labeled dataset yet; listening remains open.
+  no labeled dataset yet; listening remains open. A read-only status command now
+  reports the selected split's blockers, listening time and four-state label counts
+  before any run export exists, using the same gates as scoring and comparison.
 - **Implemented:** context v3 with gain-invariant relative dynamics, explicit coverage,
   no whole-track context confidence, `voice_score`, and coarse local tempo withheld from
   the model projection. Existing bounded execution and source-audio decoding are reused.
@@ -101,21 +103,25 @@ them into scope; their experimental state remains visible in the inventory below
 
 ### Local validation and release boundary
 
-The spectral-validation batch passed all 544 Rust tests on Windows GNU with the real
-pinned voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz
-Clippy, formatting, architecture, doc tests and generated contracts. All 151 local
-documentation links/anchors passed. Six synthetic decoder cases verify stereo spectra
-and out-of-band rejection. The degraded-filter negative control failed its spectral
-gate while retaining frame/window counts; the restored production filter passes.
-Existing resource, decoder, panic and eight SQLite-backed recovery cases still pass.
-No live Linux/cgroup or production-playback validation ran in this batch.
+The listening-readiness batch passes all 35 offline pilot tests, including real CLI
+checks with no model-run file, unchanged-input checks, confirmation isolation and
+shared readiness/scoring/comparison gates. The Rust application, frontend, providers,
+model runtimes and wire contracts are unchanged; their suites were not rerun.
+
+The preceding spectral-validation batch passed all 544 Rust tests on Windows GNU
+with the real pinned voice model and FFmpeg configured, plus workspace check,
+strict workspace/fuzz Clippy, formatting, architecture, doc tests and generated
+contracts. Six synthetic decoder cases verify stereo spectra and out-of-band
+rejection; a degraded-filter negative control failed despite correct counts.
+Existing resource, decoder, panic and eight SQLite-backed recovery cases passed.
+No live Linux/cgroup or production-playback validation ran in either batch.
 
 Earlier batches passed the headless release build, all 361 frontend tests, frontend
 lint/typecheck/production build, 29 grouped mood-pilot tests and 26 reference-tool tests.
 Original TensorFlow/ONNX comparisons passed on 71 patches; the metadata-bearing formats
 reproduced all 66 selected patches and a complete 226-patch track with its summary.
-Frontend, pilot, model-reference tools and packaging are unchanged by this batch;
-their separate gates were not rerun.
+Frontend, model-reference tools and packaging are unchanged by this batch;
+their separate gates were not rerun. The pilot suite increased from 29 to 35 tests.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -128,21 +134,26 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** added real-decoder spectral regressions using analytic input signals.
-At 44.1/48 kHz, distinct stereo tones retain their expected mono mel features and
-9/12 kHz energy is suppressed by at least 60 dB before reaching voice-model features.
-All six cases preserve frame/window coverage. A deliberately degraded resampler still
-passed counts but failed the spectral check at 3.06 dB, demonstrating the new guard.
+**Latest batch:** added a read-only listening-readiness command to the existing
+pilot CLI. Before running a candidate, the owner can inspect blocked track IDs,
+ready/reviewed counts, declared listening time and unknown/uncertain core labels.
+It verifies the frozen membership/vocabulary and uses the same listening gates as
+score/compare. Confirmation stays explicit; no predictions or new annotation UI
+are needed. All 35 pilot tests pass, including actual CLI/read-only checks.
 
-No production algorithm, model, dependency, identity or compatibility path changed.
-The pinned WASM reference threw during sample-rate conversion, so full upstream
-resampler parity remains unverified. See the [spectral acceptance evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#decoder-spectral-acceptance-25-september-2026).
+Diagnosed the earlier reference-resampler exception: the pinned Essentia.js build
+has a JavaScript wrapper but no registered `Resample` algorithm. Its caught exception
+says `Identifier 'Resample' not found in registry...`; full upstream resampler
+parity is therefore still unverified. This is a development-reference limitation,
+not evidence of a production decoder defect. No runtime dependency or filter changed.
+See the [spectral acceptance evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#decoder-spectral-acceptance-25-september-2026).
 
 **Fully implemented in the application:** factual whole-track context and optional
 voice analysis; attributed catalog evidence; structured per-tag model proposals and
 abstention; stale-result/review guards; current-only reset/resume; removal of the
 old keyword/audio mood heuristics; accepted-tag playlist behavior. Read-only probes,
-pilot inventory/run exports and offline comparison tools are also implemented.
+pilot inventory/run exports, pre-call listening readiness and offline comparison tools
+are also implemented.
 
 **Experimental only:** EffNet and its matching heads pass numerical qualification,
 including whole-track native comparison and original TensorFlow/ONNX pairing. They
@@ -178,7 +189,7 @@ options survey; this plan determines the narrower implementation scope.
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Forced retries repeated facts; normal runs retained failed voice indefinitely | Current-only reset/freshness, compatible retry-chain reuse and voice-only failure recovery | Keep | Core: retry failed work without repeating current facts or looping on same-job failures; preserve authored tags and reject stale reviews. |
 | Bounded Rust analysis executor | A task panic permanently removed a worker | Typed panic failure; same fixed worker remains usable | Keep | High reliability: an unexpected extraction failure cannot disable later analysis; no automatic retries or larger pool. |
-| JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, independent whole-recording scoring, marked diagnostics and paired comparison | Collect independent judgments; evaluate development, then confirmation | Essential: prevents selection and listening-scope bias; keeps missing outcomes and useful diagnostic data without a dataset application. |
+| JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
 | TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |

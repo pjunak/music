@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPilot, freezePilot, scorePilot, comparePilot, parsePilot, serializePilot, main } from "./mood-pilot.mjs";
+import { createPilot, freezePilot, pilotReadiness, scorePilot, comparePilot, parsePilot, serializePilot, main } from "./mood-pilot.mjs";
 
 const vocabulary = { groups: [{ key: "mood", tags: [{ id: "m.calm", name: "calm" }, { id: "m.urgent", name: "urgent" }, { id: "m.sad", name: "sad" }] }, { key: "scene", tags: [{ id: "s.rest", name: "rest" }] }] };
 const ids = Array.from({ length: 20 }, (_, index) => index + 1);
@@ -463,6 +463,131 @@ test("CLI requires an explicit diagnostic flag for assisted excerpts and keeps c
         await assert.rejects(command(process.execPath, [...args, ...flags]), /Usage/);
       }
     }
+    assert.deepEqual(await Promise.all(paths.map((path) => readFile(path, "utf8"))), values);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("readiness reports unfinished frozen listening without needing predictions or changing private data", () => {
+  const rows = draft();
+  rows.slice(1).forEach((track) => Object.assign(track, { reviewed: false, blind: null, labels: {}, listened_intervals: [] }));
+  const frozen = freezePilot(rows, vocabulary), original = structuredClone(frozen);
+  const result = pilotReadiness(frozen, vocabulary);
+  const selected = frozen.slice(1).filter((track) => track.split === "development");
+  assert.equal(result.schema_version, "song-mood-readiness/v1");
+  assert.equal(result.split, "development");
+  assert.equal(result.assessment_mode, "independent");
+  assert.equal(result.ready_for_scoring, false);
+  assert.equal(result.tracks, selected.length);
+  assert.equal(result.independent_groups, selected.length);
+  assert.equal(result.ready_tracks, 0);
+  assert.equal(result.reviewed_tracks, 0);
+  assert.equal(result.duration_seconds, selected.length * 120);
+  assert.equal(result.declared_listened_seconds, 0);
+  assert.equal(result.unheard_seconds, result.duration_seconds);
+  assert.deepEqual(result.core_judgments, { positive: 0, negative: 0, uncertain: 0, unjudged: selected.length * 4 });
+  assert.ok(result.blockers.every((issue) => issue.track_ids.length === selected.length));
+  assert.deepEqual(result.blockers.find((issue) => issue.code === "unfinished_listening").track_ids, selected.map((track) => track.track_id));
+  assert.deepEqual(frozen, original);
+  assert.ok(!JSON.stringify(result).includes("file_reference"));
+  assert.ok(!JSON.stringify(result).includes("sha256-"));
+});
+
+test("readiness preserves unknown labels and distinguishes declared listening from useful judgment coverage", () => {
+  const rows = pilot(), selected = rows.slice(1).filter((track) => track.split === "development");
+  selected.forEach((track) => { track.labels = { "m.sad": "uncertain", "m.urgent": "unjudged" }; });
+  const result = pilotReadiness(rows, vocabulary);
+  assert.equal(result.ready_for_scoring, true);
+  assert.equal(result.ready_tracks, selected.length);
+  assert.equal(result.reviewed_tracks, selected.length);
+  assert.equal(result.declared_listened_seconds, result.duration_seconds);
+  assert.equal(result.unheard_seconds, 0);
+  assert.deepEqual(result.core_judgments, { positive: 0, negative: 0, uncertain: selected.length, unjudged: selected.length * 3 });
+  assert.deepEqual(result.blockers, []);
+  assert.match(result.scope_note, /no judged labels and produce unknown metrics/);
+  assert.equal(scorePilot(rows, run(), vocabulary).categories.all.precision, null);
+});
+
+test("readiness exposes only the requested split and counts recording groups rather than recordings", () => {
+  const draftRows = draft(); draftRows[2].recording_group = draftRows[1].recording_group;
+  const rows = freezePilot(draftRows, vocabulary), expected = pilotReadiness(rows, vocabulary);
+  const confirmation = rows.slice(1).filter((track) => track.split === "confirmation");
+  confirmation.forEach((track) => Object.assign(track, { reviewed: false, blind: null, labels: {}, listened_intervals: [] }));
+  assert.deepEqual(pilotReadiness(rows, vocabulary), expected);
+  const result = pilotReadiness(rows, vocabulary, "confirmation");
+  assert.equal(result.ready_for_scoring, false);
+  assert.equal(result.tracks, confirmation.length);
+  assert.ok(result.blockers.every((issue) => issue.track_ids.every((id) => confirmation.some((track) => track.track_id === id))));
+  const groupedSplit = rows[1].split;
+  const grouped = pilotReadiness(rows, vocabulary, groupedSplit);
+  assert.equal(grouped.independent_groups, grouped.tracks - 1);
+});
+
+test("readiness and score/compare share listening gates in independent and diagnostic modes", () => {
+  for (const change of [
+    {}, { reviewed: false }, { reviewed: false, blind: null, listened_intervals: [] },
+    { blind: false }, { scope: "excerpt", listened_intervals: [[10, 30]] },
+    { listened_intervals: [[0, 20], [21, 120]] }, { listened_intervals: [[0, 119.5]] },
+    { listened_intervals: [[0, 20.5], [20.5, 120]] },
+  ]) {
+    const rows = pilot(), selected = rows.slice(1).filter((track) => track.split === "development");
+    Object.assign(selected[0], change);
+    for (const mode of ["independent", "diagnostic"]) {
+      const result = pilotReadiness(rows, vocabulary, "development", mode);
+      const score = () => scorePilot(rows, run(), vocabulary, "development", mode);
+      const compare = () => comparePilot(rows, run(), run(), vocabulary, "development", mode);
+      if (result.ready_for_scoring) { assert.doesNotThrow(score); assert.doesNotThrow(compare); }
+      else {
+        assert.throws(score, { message: result.blockers[0].message });
+        assert.throws(compare, { message: result.blockers[0].message });
+        assert.equal(result.ready_tracks, selected.length - 1);
+        assert.ok(result.blockers.every((issue) => issue.track_ids.length === 1 && issue.track_ids[0] === selected[0].track_id));
+      }
+    }
+  }
+  const fractional = draft();
+  fractional.slice(1).forEach((track) => Object.assign(track, { duration_seconds: 120.5, listened_intervals: [[0, 30.25]], scope: "excerpt" }));
+  const report = pilotReadiness(freezePilot(fractional, vocabulary), vocabulary, "development", "diagnostic");
+  assert.equal(report.declared_listened_seconds, report.tracks * 30.25);
+  assert.equal(report.unheard_seconds, report.tracks * 90.25);
+});
+
+test("readiness rejects unfrozen, retired, changed and invalid cohorts instead of declaring them ready", () => {
+  assert.throws(() => pilotReadiness(draft(), vocabulary), /partition/);
+  assert.throws(() => pilotReadiness(pilot(), { ...vocabulary, revision: 2 }), /Vocabulary changed/);
+  const rows = pilot(); rows[1].duration_seconds = 121;
+  assert.throws(() => pilotReadiness(rows, vocabulary), /partition/);
+  const retired = pilot(); retired[0].schema_version = "song-mood-judgments/v1";
+  assert.throws(() => pilotReadiness(retired, vocabulary), /Unsupported pilot contract/);
+  assert.throws(() => pilotReadiness(pilot(), vocabulary, "all"), /development or confirmation/);
+  assert.throws(() => pilotReadiness(pilot(), vocabulary, "development", "anything"), /independent or diagnostic/);
+  const invalid = pilot(); invalid[1].listened_intervals = [[0, 121]];
+  assert.throws(() => pilotReadiness(invalid, vocabulary), /within the recording duration/);
+});
+
+test("CLI readiness requires no run export, preserves inputs and keeps diagnostic/confirmation explicit", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "music-pilot-readiness-"));
+  try {
+    const rows = pilot();
+    rows.slice(1).forEach((track) => Object.assign(track, { blind: false, scope: "excerpt", listened_intervals: [[10, 30]] }));
+    const values = [serializePilot(rows), JSON.stringify(vocabulary)];
+    const paths = ["pilot.jsonl", "vocabulary.json"].map((name) => join(directory, name));
+    await Promise.all(paths.map((path, index) => writeFile(path, values[index])));
+    const command = promisify(execFile), args = ["tools/mood-pilot.mjs", "status", ...paths];
+    const result = JSON.parse((await command(process.execPath, args)).stdout);
+    assert.equal(result.ready_for_scoring, false);
+    assert.equal(result.split, "development");
+    assert.equal(result.assessment_mode, "independent");
+    for (const flags of [["--diagnostic"], ["--diagnostic", "--confirmation"], ["--confirmation", "--diagnostic"]]) {
+      const report = JSON.parse((await command(process.execPath, [...args, ...flags])).stdout);
+      assert.equal(report.ready_for_scoring, true);
+      assert.equal(report.assessment_mode, "diagnostic");
+      assert.equal(report.split, flags.includes("--confirmation") ? "confirmation" : "development");
+    }
+    for (const flags of [["--all"], ["--diagnostic", "--diagnostic"], ["--confirmation", "--confirmation"], ["extra.json"]]) {
+      await assert.rejects(command(process.execPath, [...args, ...flags]), /Usage/);
+    }
+    await assert.rejects(command(process.execPath, args.slice(0, -1)), /Usage/);
     assert.deepEqual(await Promise.all(paths.map((path) => readFile(path, "utf8"))), values);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

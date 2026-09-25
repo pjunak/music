@@ -205,7 +205,7 @@ function intervals(groups, runs, included, seed) {
     defined_replicates: Object.fromEntries(RATE_KEYS.map((key) => [key, samples[key].length])) };
 }
 
-function prepareScoring(rows, vocabulary, split, mode) {
+function prepareFrozenPilot(rows, vocabulary, split, mode) {
   const context = validatePilot(rows, vocabulary), { manifest, tracks } = context;
   check(["development", "confirmation"].includes(split), "Choose development or confirmation explicitly.");
   check(["independent", "diagnostic"].includes(mode), "Choose independent or diagnostic scoring explicitly.");
@@ -213,18 +213,58 @@ function prepareScoring(rows, vocabulary, split, mode) {
   const splits = partition(manifest, tracks);
   check(tracks.every((track) => track.split === splits.get(track.track_id)), "Pilot groups crossed their frozen split.");
   const selected = tracks.filter((track) => track.split === split).sort((a, b) => a.track_id - b.track_id);
-  check(selected.every((track) => track.reviewed && track.listened_intervals.length > 0), "Finish listening judgments and intervals for the selected split.");
-  const coversWholeTrack = (track) => {
-    let coveredThrough = 0;
-    for (const [start, end] of track.listened_intervals) {
-      if (start !== coveredThrough) return false;
-      coveredThrough = end;
-    }
-    return coveredThrough === track.duration_seconds;
-  };
-  check(selected.every((track) => track.scope !== "whole_track" || coversWholeTrack(track)), "Whole-track judgments must cover the complete frozen duration without gaps; record partial listening as excerpt scope.");
-  check(mode === "diagnostic" || selected.every((track) => track.blind && track.scope === "whole_track"), "Independent scoring requires blind, whole-track judgments for every track in the selected split. Use --diagnostic for assisted or excerpt judgments; no tracks are dropped.");
   return { ...context, split, mode, selected, groups: groupedTracks(selected, manifest.separate_by) };
+}
+
+function coversWholeTrack(track) {
+  let coveredThrough = 0;
+  for (const [start, end] of track.listened_intervals) {
+    if (start !== coveredThrough) return false;
+    coveredThrough = end;
+  }
+  return coveredThrough === track.duration_seconds;
+}
+
+// Readiness and scoring must reject the same listening conditions, including in diagnostics.
+function listeningBlockers({ selected, mode }) {
+  const checks = [
+    ["unfinished_listening", "Finish listening judgments and intervals for the selected split.",
+      (track) => !track.reviewed || track.listened_intervals.length === 0],
+    ["incomplete_whole_track", "Whole-track judgments must cover the complete frozen duration without gaps; record partial listening as excerpt scope.",
+      (track) => track.scope === "whole_track" && !coversWholeTrack(track)],
+    ["independent_listening_required", "Independent scoring requires blind, whole-track judgments for every track in the selected split. Use --diagnostic for assisted or excerpt judgments; no tracks are dropped.",
+      (track) => mode === "independent" && (track.blind !== true || track.scope !== "whole_track")],
+  ];
+  return checks.map(([code, message, blocked]) => ({ code, message,
+    track_ids: selected.filter(blocked).map((track) => track.track_id) })).filter((issue) => issue.track_ids.length > 0);
+}
+
+function prepareScoring(rows, vocabulary, split, mode) {
+  const context = prepareFrozenPilot(rows, vocabulary, split, mode);
+  const blockers = listeningBlockers(context);
+  check(blockers.length === 0, blockers[0]?.message);
+  return context;
+}
+
+export function pilotReadiness(rows, vocabulary, split = "development", mode = "independent") {
+  const context = prepareFrozenPilot(rows, vocabulary, split, mode);
+  const { manifest, selected, groups } = context, blockers = listeningBlockers(context);
+  const blocked = new Set(blockers.flatMap((issue) => issue.track_ids));
+  const coreJudgments = Object.fromEntries([...STATES].map((state) => [state, 0]));
+  let durationSeconds = 0, listenedSeconds = 0;
+  for (const track of selected) {
+    durationSeconds += track.duration_seconds;
+    listenedSeconds += track.listened_intervals.reduce((sum, [start, end]) => sum + end - start, 0);
+    for (const tag of manifest.core_tag_ids) coreJudgments[track.labels[tag] ?? "unjudged"]++;
+  }
+  return { schema_version: "song-mood-readiness/v1", split, assessment_mode: mode,
+    partition_fingerprint: manifest.partition_fingerprint, ready_for_scoring: blockers.length === 0,
+    tracks: selected.length, independent_groups: groups.length, ready_tracks: selected.length - blocked.size,
+    reviewed_tracks: selected.filter((track) => track.reviewed).length,
+    duration_seconds: durationSeconds, declared_listened_seconds: listenedSeconds,
+    unheard_seconds: Math.max(0, durationSeconds - listenedSeconds),
+    core_judgments: coreJudgments, blockers,
+    scope_note: "Selected split only; confirmation requires --confirmation. Readiness checks listening declarations and the frozen contract, not model results, judgment quality or production acceptance. Core-label counts include unfinished rows; omitted labels are unjudged, never negative. Even a ready cohort may have no judged labels and produce unknown metrics. Declared time cannot prove listening or blinding; assisted listening cannot be made blind by relabeling it. No provider calls or file changes occur." };
 }
 
 function scorePrepared(context, run, predictions) {
@@ -309,7 +349,7 @@ async function readBounded(path) {
   return readFile(path, "utf8");
 }
 const readJson = async (path) => JSON.parse(await readBounded(path));
-const USAGE = "Usage: node tools/mood-pilot.mjs init inventory.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | score pilot.jsonl run.json vocabulary.json [--confirmation] [--diagnostic] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation] [--diagnostic]";
+const USAGE = "Usage: node tools/mood-pilot.mjs init inventory.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | status pilot.jsonl vocabulary.json [--confirmation] [--diagnostic] | score pilot.jsonl run.json vocabulary.json [--confirmation] [--diagnostic] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation] [--diagnostic]";
 export async function main(args) {
   if (args[0] === "init" && args.length === 4) {
     const [inventory, vocabulary] = await Promise.all(args.slice(1, 3).map(readJson));
@@ -317,14 +357,15 @@ export async function main(args) {
   } else if (args[0] === "freeze" && args.length === 4) {
     const [content, vocabulary] = await Promise.all([readBounded(args[1]), readJson(args[2])]);
     await writeFile(args[3], serializePilot(freezePilot(parsePilot(content), vocabulary)), { flag: "wx" });
-  } else if (["score", "compare"].includes(args[0])) {
-    const fileCount = args[0] === "score" ? 3 : 4;
+  } else if (["status", "score", "compare"].includes(args[0])) {
+    const fileCount = { status: 2, score: 3, compare: 4 }[args[0]];
     const paths = args.slice(1, fileCount + 1), flags = args.slice(fileCount + 1);
     check(paths.length === fileCount && paths.every((path) => !path.startsWith("--")) && unique(flags) && flags.every((flag) => ["--confirmation", "--diagnostic"].includes(flag)), USAGE);
     const [content, ...inputs] = await Promise.all([readBounded(paths[0]), ...paths.slice(1).map(readJson)]);
     const rows = parsePilot(content), split = flags.includes("--confirmation") ? "confirmation" : "development";
     const mode = flags.includes("--diagnostic") ? "diagnostic" : "independent";
-    const result = args[0] === "score" ? scorePilot(rows, inputs[0], inputs[1], split, mode)
+    const result = args[0] === "status" ? pilotReadiness(rows, inputs[0], split, mode)
+      : args[0] === "score" ? scorePilot(rows, inputs[0], inputs[1], split, mode)
       : comparePilot(rows, inputs[0], inputs[1], inputs[2], split, mode);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else throw new Error(USAGE);

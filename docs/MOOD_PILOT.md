@@ -94,6 +94,34 @@ Evaluate perceived mood separately from scene/setting suitability, and use
 `session_notes` to record useful candidates, auditioning time and review effort.
 Record ambiguity in `notes`; do not overwrite disagreement to match the model.
 
+## Check readiness before model calls
+
+After freezing, check the selected split without supplying predictions:
+
+```powershell
+node tools/mood-pilot.mjs status pilot.jsonl vocabulary.json
+```
+
+The read-only `song-mood-readiness/v1` report lists blocking library track IDs,
+ready/reviewed track counts, independent groups, frozen duration, declared listening
+time and unheard time. It uses the same listening gates as scoring and comparison.
+Whole-track declarations with gaps remain blocked even in diagnostic mode. The
+report includes all four core-label states; omitted labels stay unjudged. Counts
+include labels entered on unfinished rows, so read them alongside the blockers.
+
+Only development readiness is reported by default. Add `--confirmation` when ready
+to open that cohort, or `--diagnostic` to check assisted/excerpt declarations. The
+flags may be combined. This command changes no judgments, opens no audio, calls no
+provider and needs no run export. An incomplete valid cohort returns a report with
+`ready_for_scoring: false` and exit code zero; invalid/frozen-contract changes fail
+with a nonzero exit code. Scripts must inspect the readiness field.
+
+Readiness means the listening declarations satisfy the selected mode. It is not a
+quality pass: a ready cohort with few or no judged core tags can still produce
+unknown or uninformative scores. Do not change assisted listening to blind merely
+to clear a blocker; record it honestly and use diagnostics. Completing the pilot,
+comparing real candidate results and checking production remain separate steps.
+
 ## Score development; open confirmation once
 
 After freezing the sample and preparing independent judgments, run each candidate

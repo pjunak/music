@@ -9,7 +9,7 @@ Read the relevant rows before choosing checks. CI/release coverage is unchanged.
 | Rust behavior | Focused regression tests while iterating; formatting, architecture checks, workspace check/Clippy/nextest/doc tests and contracts check below on the final change. |
 | Frontend behavior | Frontend lint, typecheck, tests and build; inspect affected visible flows. Rust gates apply when a server/wire contract also changes. |
 | Development audio references | `node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
-| Offline mood pilot | `node --test tools/mood-pilot.test.mjs`; affected frontend gates for exported files and controls. Exercise exports through the CLI when their contract changes. Private listening judgments remain separate acceptance evidence. |
+| Offline mood pilot | `node --test tools/mood-pilot.test.mjs`; affected frontend gates for exported files and controls. Exercise changed CLI operations, including prediction-free readiness and export handling. Private listening judgments remain separate acceptance evidence. |
 | HTTP/WS, schema, persistence, auth or shared playback | Affected Rust/frontend gates plus relevant client serialization, reconnect, failure and compatibility tests; coordinate Baton when its wire behavior changes. |
 | Dependencies, licenses or toolchains | Affected runtime gates plus deny/audit/machete for each changed dependency graph; preserve separate fuzz lockfile coverage. |
 | Fuzz sources/configuration | Fuzz formatting, Clippy and applicable dependency checks below. |
