@@ -1,3 +1,5 @@
+pub(super) mod cgroup;
+
 use std::error::Error;
 use std::ffi::OsString;
 use std::io::Read;

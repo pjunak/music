@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 mod probe_support;
 
+use probe_support::cgroup::snapshot as cgroup_snapshot;
 use probe_support::{ProbeError, ProcessMemory, bounded_number, read_tracks, set_once};
 
 const RECORD_PREFIX: &str = "CONTEXT_PROBE_JSON ";
@@ -27,6 +28,7 @@ struct Arguments {
     ffprobe: PathBuf,
     repeat: u32,
     cancel_after: Option<Duration>,
+    cgroup_dir: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -63,6 +65,7 @@ async fn run(arguments: Arguments) -> Result<(), ProbeError> {
     for iteration in 0..arguments.repeat {
         for (index, path) in tracks.iter().enumerate() {
             let before = ProcessMemory::capture();
+            let cgroup_before = cgroup_snapshot(arguments.cgroup_dir.as_deref());
             let observation = analyze_once(
                 &executor,
                 Arc::clone(&analyzer),
@@ -70,6 +73,7 @@ async fn run(arguments: Arguments) -> Result<(), ProbeError> {
                 arguments.cancel_after,
             )
             .await?;
+            let cgroup_after = cgroup_snapshot(arguments.cgroup_dir.as_deref());
             let after = ProcessMemory::capture();
             let expected_cancel = arguments.cancel_after.is_some();
             let success = if expected_cancel {
@@ -90,6 +94,8 @@ async fn run(arguments: Arguments) -> Result<(), ProbeError> {
             let mut record = record.as_object().cloned().ok_or("invalid probe record")?;
             record.insert("process_memory_before".to_owned(), before.json());
             record.insert("process_memory_after".to_owned(), after.json());
+            record.insert("cgroup_before".to_owned(), cgroup_before);
+            record.insert("cgroup_after".to_owned(), cgroup_after);
             record.insert(
                 "memory_scope".to_owned(),
                 json!("Probe process only; excludes FFmpeg/ffprobe children and the server. Peak is process-lifetime, not per-track. Null means unavailable."),
@@ -165,7 +171,7 @@ fn probe_record(
     expected_cancel: bool,
 ) -> Value {
     let mut record = json!({
-        "schema_version": "context-probe/v2",
+        "schema_version": "context-probe/v3",
         "index": index,
         "iteration": iteration,
         "analyzer_id": analyzer.analyzer_id(),
@@ -262,13 +268,22 @@ fn parse_arguments(
     let mut ffprobe = None;
     let mut repeat = None;
     let mut cancel_after = None;
+    let mut cgroup_dir = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let flag = argument.to_str().ok_or("flags must be valid Unicode")?;
         if matches!(flag, "--help" | "-h") {
             return Ok(None);
         }
-        if !["--ffmpeg", "--ffprobe", "--repeat", "--cancel-after-ms"].contains(&flag) {
+        if ![
+            "--ffmpeg",
+            "--ffprobe",
+            "--repeat",
+            "--cancel-after-ms",
+            "--cgroup-dir",
+        ]
+        .contains(&flag)
+        {
             return Err("unknown argument".to_owned());
         }
         let value = arguments
@@ -276,6 +291,12 @@ fn parse_arguments(
             .ok_or_else(|| format!("{flag} requires a value"))?;
         match flag {
             "--ffmpeg" => set_once(&mut ffmpeg, value, flag)?,
+            "--cgroup-dir" => {
+                if value.is_empty() {
+                    return Err("--cgroup-dir must be nonempty".to_owned());
+                }
+                set_once(&mut cgroup_dir, PathBuf::from(value), flag)?;
+            }
             "--ffprobe" => set_once(&mut ffprobe, value, flag)?,
             "--repeat" => set_once(&mut repeat, bounded_number(&value, 1, 20, flag)?, flag)?,
             "--cancel-after-ms" => set_once(
@@ -291,13 +312,15 @@ fn parse_arguments(
         ffprobe: PathBuf::from(ffprobe.ok_or("--ffprobe is required")?),
         repeat: repeat.unwrap_or(1),
         cancel_after,
+        cgroup_dir,
     }))
 }
 
 fn usage() -> &'static str {
-    "usage: music-context-probe --ffmpeg <path> --ffprobe <path> [--repeat 1..20] [--cancel-after-ms 1..1800000]\n\
+    "usage: music-context-probe --ffmpeg <path> --ffprobe <path> [--repeat 1..20] [--cancel-after-ms 1..1800000] [--cgroup-dir <v2-directory>]\n\
      Reads 1-512 private audio paths as a JSON array from stdin. Runs the real factual extractor on one fixed worker.\n\
      Emits path-free prefixed JSON for coverage, numeric loudness, stage timing and process-local memory. Never writes a library.\n\
+     Optional cgroup v2 snapshots read the selected scope; limits and peaks are not a production acceptance verdict.\n\
      Cancellation mode succeeds only when every input returns the typed cancelled result. Voice has its separate probe."
 }
 
@@ -320,17 +343,26 @@ mod tests {
             "3",
             "--cancel-after-ms",
             "25",
+            "--cgroup-dir",
+            "private/cgroup",
         ])?
         .ok_or("expected arguments")?;
         assert_eq!(parsed.repeat, 3);
         assert_eq!(parsed.cancel_after, Some(Duration::from_millis(25)));
         assert_eq!(parsed.ffmpeg, PathBuf::from("decoder"));
+        assert_eq!(parsed.cgroup_dir, Some(PathBuf::from("private/cgroup")));
+        let default = arguments(&["--ffmpeg", "decoder", "--ffprobe", "inspector"])?
+            .ok_or("expected arguments")?;
+        assert!(default.cgroup_dir.is_none());
         assert!(arguments(&[]).is_err());
         assert!(arguments(&["--ffmpeg", "decoder", "--repeat", "0"]).is_err());
         assert!(arguments(&["--ffmpeg", "decoder", "--repeat", "21"]).is_err());
         assert!(arguments(&["--ffmpeg", "decoder", "--cancel-after-ms", "1800001"]).is_err());
         assert!(arguments(&["--ffmpeg", "decoder", "--ffmpeg", "other"]).is_err());
         assert!(arguments(&["--repeat", "2", "--repeat", "3"]).is_err());
+        assert!(arguments(&["--cgroup-dir", ""]).is_err());
+        assert!(arguments(&["--cgroup-dir"]).is_err());
+        assert!(arguments(&["--cgroup-dir", "private/a", "--cgroup-dir", "private/b"]).is_err());
         assert!(arguments(&["--unknown"]).is_err());
         assert!(arguments(&["--help"])?.is_none());
         Ok(())
@@ -426,7 +458,7 @@ mod tests {
             VoiceContextPreparation::NotConfigured,
         )?;
         let record = probe_record(0, 0, &analyzer, &Ok(document.clone()), 0.1, None, false);
-        assert_eq!(record["schema_version"], "context-probe/v2");
+        assert_eq!(record["schema_version"], "context-probe/v3");
         assert!(record.get("loudness_status").is_none());
         assert_eq!(record["loudness"]["status"], "ebu_r128");
         assert!(record["loudness"]["integrated_lufs"].as_f64().is_some());

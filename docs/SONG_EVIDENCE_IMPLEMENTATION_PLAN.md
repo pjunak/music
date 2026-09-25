@@ -36,8 +36,10 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** read-only factual and voice acceptance probes using the real extractors,
   with bounded repeats, explicit cancellation outcomes and shared input/memory helpers.
   Voice reports readiness, per-track work and each worker start/join separately; scores
-  appear only for completed classification. No model, dependency or storage layer was
-  added. Production container totals and concurrent playback need separate measurement.
+  appear only for completed classification. Both current v3 reports optionally capture
+  an explicit Linux cgroup v2 scope, with local limits, memory/CPU and OOM/throttling
+  counters. No model, dependency or storage layer was added. Live container totals and
+  concurrent playback need separate measurement.
 - **Implemented:** bounded final loudness-report capture survives verbose embedded notes;
   factual decode/loudness codec and filter pools are limited. The acceptance probe exposes
   numeric measurements. Factual decoding has a 30-minute budget; factual and voice
@@ -77,13 +79,15 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-The decoder-deadline batch passed all 532 Rust tests on Windows GNU with the real
+The resource-observation batch passed all 542 Rust tests on Windows GNU with the real
 pinned voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz
 Clippy, formatting, architecture, doc tests and generated contracts. All 150 local
-documentation links/anchors passed. Three subprocess regressions verify deadline,
-cancellation and reaping; the probe rejects completed measurements after timeout.
-Eight existing recovery regressions exercise the actual job/coordinator/SQLite path;
-a separate worker test preserves its thread through three task panics.
+documentation links/anchors passed. Five shared cgroup fixture cases run in both probes;
+real-model tests cover initialization, failed/successful tracks and worker release.
+Three actual CLI smoke runs emitted five path-free v3 records on synthetic audio,
+correctly marking cgroup measurement not requested or unsupported on Windows. Live
+Linux/cgroup measurement remains unverified; neither Docker/Podman nor WSL is available.
+Existing decoder, panic and eight SQLite-backed recovery regressions still pass.
 
 Earlier batches passed the headless release build, all 361 frontend tests, frontend
 lint/typecheck/production build, 29 grouped mood-pilot tests and 26 reference-tool tests.
@@ -103,19 +107,21 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** bounded factual decoding and preserved cancellation/deadlines through
-FFmpeg process exit for both factual and voice analysis. A subprocess regression reproduced
-the missing factual deadline: a 50-millisecond budget was ignored until the child exited
-two seconds later. Factual decode/frame accumulation now has a 30-minute stage budget.
+**Latest batch:** added optional cgroup v2 snapshots to the existing factual and voice
+probes. Process RSS excluded FFmpeg and other application processes, so it could not
+supply the container observations needed for production qualification. Operators now
+select the cgroup explicitly with `--cgroup-dir`; the current-only v3 reports include
+before/after readings and voice worker start/release observations.
 
-Audio EOF no longer starts an uncontrolled wait for FFmpeg to exit. Both paths keep their
-control checks active, stop/reap the child on failure and retain the original stream error.
-The factual probe reports a typed timeout without completed measurements. No new tool,
-dependency, model, schema, legacy path or numerical identity was added.
+Reads are bounded and contain no paths or raw errors. Missing/malformed counters stay
+unknown; unlimited limits are distinct from unavailable limits. Peak and CPU/event
+counters are explicitly cumulative, local limits do not imply effective ancestor limits,
+and the reports make no automatic production-acceptance decision. There is no new
+service, dependency, application runtime or cgroup v1 compatibility path.
 
-Three subprocess regressions verify the stalled stream and controlled process-exit wait,
-including cancellation precedence and child cleanup. The probe regression rejects completed
-coverage on timeout. See the [decoder acceptance evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#decoder-deadlines-and-process-exit-25-september-2026).
+Five shared fixture cases run in both probes. The real-model voice test covers all
+initialization/track/pass report points, including failed tracks. Live Linux cgroup
+and playback acceptance remain open. See the [cgroup tooling evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#cgroup-observation-tooling-25-september-2026).
 
 **Fully implemented in the application:** factual whole-track context and optional
 voice analysis; attributed catalog evidence; structured per-tag model proposals and
@@ -146,7 +152,7 @@ options survey; this plan determines the narrower implementation scope.
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
 | FFmpeg / ffprobe | Decode and technical inspection | Bounded pools, normalized downmix, reliable loudness capture and controlled decoder deadlines/exit | Keep | Core: correct original-audio evidence and recoverable decoder stalls; preserve input levels and failure causes. |
 | FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
-| music-context-probe / music-voice-probe | No factual acceptance CLI; basic single-pass voice probe | Current v2 reports; bounded repeats/cancellation, explicit timeout failures, factual coverage and voice worker lifecycle | Keep for rebuild acceptance | High: measure actual original-audio extraction and cleanup before a large rebuild; process RSS is not whole-container evidence. |
+| music-context-probe / music-voice-probe | No factual acceptance CLI; basic single-pass voice probe | Current v3 reports; repeats/cancellation/timeouts, coverage, worker lifecycle and optional scoped cgroup snapshots | Keep for rebuild acceptance | High: observe decoder-inclusive resource scope without inventing totals from process RSS; live production/playback checks remain required. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
 | MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries, verified model bytes, selective failed-stage retry and controlled decoder exit | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |

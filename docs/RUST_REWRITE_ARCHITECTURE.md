@@ -742,8 +742,10 @@ comparison and a long repeated-run RSS/cancellation soak remain separate accepta
 The existing [voice acceptance probe](AUDIO_ANALYSIS_ACCEPTANCE.md#voice-repetition-and-lifecycle-probe)
 now measures initialization, repeated job-scoped workers, explicit cancellation and
 post-join process memory separately, without opening a library or changing analysis
-semantics. Its Linux process counters exclude the decoder and server; whole-container
-resource and concurrent-playback acceptance remain required.
+semantics. Its Linux process counters exclude the decoder and server. Optional v3 cgroup
+snapshots record an explicitly selected scope, including cumulative memory/CPU observations
+and local limits; missing values stay unknown and no settings are changed. These snapshots
+do not replace continuous whole-application resource and concurrent-playback acceptance.
 If that evidence fails, the same interface moves to the documented Rust subprocess.
 There is no Python fallback.
 

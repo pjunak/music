@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 mod probe_support;
 
+use probe_support::cgroup::snapshot as cgroup_snapshot;
 use probe_support::{ProbeError, ProcessMemory, bounded_number, read_tracks, set_once};
 
 const RECORD_PREFIX: &str = "VOICE_PROBE_JSON ";
@@ -26,6 +27,7 @@ struct Arguments {
     warmup: bool,
     repeat: u32,
     cancel_after: Option<Duration>,
+    cgroup_dir: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -60,11 +62,13 @@ async fn run_with_output(
     output: &mut impl Write,
 ) -> Result<(), ProbeError> {
     let before = ProcessMemory::capture();
+    let cgroup_before = cgroup_snapshot(arguments.cgroup_dir.as_deref());
     let started = Instant::now();
     // Readiness itself loads and releases a graph. Account for it separately
     // from the job-scoped workers measured by each subsequent pass.
     let backend = VoiceBackend::initialize(Some(&arguments.model), &arguments.ffmpeg);
     let initialization_seconds = started.elapsed().as_secs_f64();
+    let cgroup_after = cgroup_snapshot(arguments.cgroup_dir.as_deref());
     let after = ProcessMemory::capture();
     if backend.status.status != "ready" {
         return Err(format!(
@@ -87,15 +91,19 @@ async fn run_with_output(
     initialization["elapsed_seconds"] = json!(initialization_seconds);
     initialization["process_memory_before"] = before.json();
     initialization["process_memory_after"] = after.json();
+    initialization["cgroup_before"] = cgroup_before;
+    initialization["cgroup_after"] = cgroup_after;
     write_record(output, &initialization)?;
 
     let mut unsuccessful = false;
     for iteration in 0..arguments.repeat {
         let before_start = ProcessMemory::capture();
+        let cgroup_before_start = cgroup_snapshot(arguments.cgroup_dir.as_deref());
         let pass_started = Instant::now();
         let worker = factory.start()?;
         let worker_start_seconds = pass_started.elapsed().as_secs_f64();
         let after_start = ProcessMemory::capture();
+        let cgroup_after_start = cgroup_snapshot(arguments.cgroup_dir.as_deref());
         let warmup_seconds = if arguments.warmup {
             let started = Instant::now();
             worker
@@ -108,6 +116,7 @@ async fn run_with_output(
         };
         let mut failed_tracks = 0;
         for (index, path) in tracks.iter().enumerate() {
+            let cgroup_before = cgroup_snapshot(arguments.cgroup_dir.as_deref());
             let observation = observe(
                 |cancelled| worker.analyze(path.clone(), cancelled),
                 arguments.cancel_after,
@@ -117,6 +126,8 @@ async fn run_with_output(
                 failed_tracks += 1;
             }
             let mut record = observation.record(signature, arguments.cancel_after.is_some());
+            record["cgroup_before"] = cgroup_before;
+            record["cgroup_after"] = cgroup_snapshot(arguments.cgroup_dir.as_deref());
             record["index"] = json!(index);
             record["iteration"] = json!(iteration);
             record["warmup"] = json!(arguments.warmup);
@@ -125,12 +136,14 @@ async fn run_with_output(
             write_record(output, &record)?;
         }
         let before_release = ProcessMemory::capture();
+        let cgroup_before_release = cgroup_snapshot(arguments.cgroup_dir.as_deref());
         let release_started = Instant::now();
         // This is the only handle. Drop joins the model thread; it is not merely
         // removing a reference while inference or subprocess cleanup continues.
         drop(worker);
         let release_seconds = release_started.elapsed().as_secs_f64();
         let after_release = ProcessMemory::capture();
+        let cgroup_after_release = cgroup_snapshot(arguments.cgroup_dir.as_deref());
         let mut pass = base_record("pass", signature);
         pass["iteration"] = json!(iteration);
         pass["status"] = json!(if failed_tracks == 0 {
@@ -146,9 +159,13 @@ async fn run_with_output(
         pass["worker_release_seconds"] = json!(release_seconds);
         pass["elapsed_seconds"] = json!(pass_started.elapsed().as_secs_f64());
         pass["process_memory_before_start"] = before_start.json();
+        pass["cgroup_before_start"] = cgroup_before_start;
         pass["process_memory_after_start"] = after_start.json();
+        pass["cgroup_after_start"] = cgroup_after_start;
         pass["process_memory_before_release"] = before_release.json();
+        pass["cgroup_before_release"] = cgroup_before_release;
         pass["process_memory_after_release"] = after_release.json();
+        pass["cgroup_after_release"] = cgroup_after_release;
         write_record(output, &pass)?;
         unsuccessful |= failed_tracks != 0;
     }
@@ -264,7 +281,7 @@ fn error_code(error: &VoiceAnalysisError) -> &'static str {
 
 fn base_record(record_type: &str, signature: &str) -> Value {
     json!({
-        "schema_version": "voice-probe/v2",
+        "schema_version": "voice-probe/v3",
         "record_type": record_type,
         "source_signature": signature,
         "platform": std::env::consts::OS,
@@ -288,6 +305,7 @@ fn parse_arguments(
     let mut warmup = false;
     let mut repeat = None;
     let mut cancel_after = None;
+    let mut cgroup_dir = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let flag = argument.to_str().ok_or("flags must be valid Unicode")?;
@@ -301,7 +319,15 @@ fn parse_arguments(
             warmup = true;
             continue;
         }
-        if !["--model", "--ffmpeg", "--repeat", "--cancel-after-ms"].contains(&flag) {
+        if ![
+            "--model",
+            "--ffmpeg",
+            "--repeat",
+            "--cancel-after-ms",
+            "--cgroup-dir",
+        ]
+        .contains(&flag)
+        {
             return Err("unknown argument".to_owned());
         }
         let value = arguments
@@ -310,6 +336,12 @@ fn parse_arguments(
         match flag {
             "--model" => set_once(&mut model, value, flag)?,
             "--ffmpeg" => set_once(&mut ffmpeg, value, flag)?,
+            "--cgroup-dir" => {
+                if value.is_empty() {
+                    return Err("--cgroup-dir must be nonempty".to_owned());
+                }
+                set_once(&mut cgroup_dir, PathBuf::from(value), flag)?;
+            }
             "--repeat" => set_once(&mut repeat, bounded_number(&value, 1, 20, flag)?, flag)?,
             "--cancel-after-ms" => set_once(
                 &mut cancel_after,
@@ -328,13 +360,15 @@ fn parse_arguments(
         warmup,
         repeat: repeat.unwrap_or(1),
         cancel_after,
+        cgroup_dir,
     }))
 }
 
 fn usage() -> &'static str {
-    "usage: music-voice-probe --model <model.pb> --ffmpeg <path> [--warmup] [--repeat 1..20] [--cancel-after-ms 1..1800000]\n\
+    "usage: music-voice-probe --model <model.pb> --ffmpeg <path> [--warmup] [--repeat 1..20] [--cancel-after-ms 1..1800000] [--cgroup-dir <v2-directory>]\n\
      Reads 1-512 private audio paths as a JSON array from stdin. Starts and releases one voice worker per pass.\n\
      Emits path-free prefixed JSON for initialization, tracks and pass lifecycle measurements. Never writes a library.\n\
+     Optional cgroup v2 snapshots read the selected scope; limits and peaks are not a production acceptance verdict.\n\
      Cancellation mode succeeds only when every input returns the requested typed cancelled result; it excludes warmup."
 }
 
@@ -376,6 +410,7 @@ mod tests {
                 warmup: true,
                 repeat: 3,
                 cancel_after: None,
+                cgroup_dir: None,
             }
         );
         let parsed = arguments(&[
@@ -385,10 +420,13 @@ mod tests {
             "decoder",
             "--cancel-after-ms",
             "25",
+            "--cgroup-dir",
+            "private/cgroup",
         ])?
         .ok_or("expected arguments")?;
         assert_eq!(parsed.repeat, 1);
         assert_eq!(parsed.cancel_after, Some(Duration::from_millis(25)));
+        assert_eq!(parsed.cgroup_dir, Some(PathBuf::from("private/cgroup")));
         for invalid in [
             vec![],
             vec!["--model", "model.pb"],
@@ -413,6 +451,9 @@ mod tests {
                 "5",
             ],
             vec!["private/source.wav"],
+            vec!["--cgroup-dir", ""],
+            vec!["--cgroup-dir"],
+            vec!["--cgroup-dir", "private/a", "--cgroup-dir", "private/b"],
         ] {
             let error = arguments(&invalid)
                 .err()
@@ -499,7 +540,7 @@ mod tests {
         let observation = observe(|_| std::future::ready(Ok(document())), None).await;
         assert!(observation.succeeded(false));
         let record = observation.record("test-signature", false);
-        assert_eq!(record["schema_version"], "voice-probe/v2");
+        assert_eq!(record["schema_version"], "voice-probe/v3");
         assert_eq!(record["status"], "classified");
         assert_eq!(record["voice_score"], 0.2);
         assert_eq!(record["prediction_windows"], 2);
@@ -536,6 +577,7 @@ mod tests {
             warmup: true,
             repeat: 2,
             cancel_after: None,
+            cgroup_dir: Some(directory.path().join("private-cgroup")),
         };
         let mut output = Vec::new();
         // The missing file must not prevent the next input or next worker pass.
@@ -563,6 +605,27 @@ mod tests {
         assert_eq!(records.len(), 9);
         assert_eq!(records[0]["record_type"], "initialization");
         assert_eq!(records[0]["status"], "ready");
+        let cgroup_status = if cfg!(target_os = "linux") {
+            "unavailable"
+        } else {
+            "unsupported_platform"
+        };
+        for record in &records {
+            assert_eq!(record["schema_version"], "voice-probe/v3");
+            let fields: &[&str] = if record["record_type"] == "pass" {
+                &[
+                    "cgroup_before_start",
+                    "cgroup_after_start",
+                    "cgroup_before_release",
+                    "cgroup_after_release",
+                ]
+            } else {
+                &["cgroup_before", "cgroup_after"]
+            };
+            for field in fields {
+                assert_eq!(record[*field]["status"], cgroup_status);
+            }
+        }
         for (iteration, pass) in records[1..].chunks_exact(4).enumerate() {
             assert_eq!(pass[0]["index"], 0);
             assert_eq!(pass[0]["status"], "classified");

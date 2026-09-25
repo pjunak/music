@@ -38,7 +38,7 @@ Get-Content -Raw ./private-context-paths.json |
 ```
 
 For a POSIX shell, redirect the same JSON file to standard input. Each stdout line
-starts with `CONTEXT_PROBE_JSON `, followed by one `context-probe/v2` JSON record. The zero-based
+starts with `CONTEXT_PROBE_JSON `, followed by one `context-probe/v3` JSON record. The zero-based
 `index` maps to the manifest and `iteration` distinguishes repeated passes.
 No paths, filenames, embedded metadata or raw error messages are emitted.
 
@@ -54,6 +54,8 @@ Reports include:
   Unknown measurements are null. The report copies only these approved fields;
   it never copies arbitrary technical metadata. Error/cancelled records have no loudness.
 - Process RSS before/after a recording and lifetime peak RSS where available.
+- Optional cgroup v2 snapshots before/after each recording, using `--cgroup-dir`.
+  See the [resource scope and interpretation](#resource-boundary-and-production-acceptance).
 - Typed errors; failed/cancelled records never carry completed coverage.
 
 Check decoded duration and the final section against the known reference duration.
@@ -214,7 +216,7 @@ processes the tracks sequentially, and joins/releases the worker before the next
 pass. The optional `--warmup` analyzes the first track once before each measured
 pass; its time is reported separately. It does not provide a controlled cold start.
 
-The current-only report is `voice-probe/v2`, prefixed with `VOICE_PROBE_JSON `.
+The current-only report is `voice-probe/v3`, prefixed with `VOICE_PROBE_JSON `.
 Three record types share the verified source signature, platform and memory scope:
 
 - `initialization`: readiness duration and memory before/after its temporary worker.
@@ -229,7 +231,7 @@ Only approved numeric measurements and typed failure codes are projected. Paths,
 embedded tags, arbitrary model summaries and raw decoder/IO errors are excluded.
 A failed track does not prevent later inputs or passes. Initialization, worker-start,
 warmup or output failures terminate the command with a nonzero exit; an incomplete
-report cannot pass acceptance. No v1 compatibility output is retained.
+report cannot pass acceptance. Only the current v3 output is emitted.
 
 Exercise cancellation with recordings long enough to remain in inference:
 
@@ -432,23 +434,76 @@ Workspace check, strict workspace/fuzz Clippy, formatting, architecture, doc tes
 generated contracts and all 150 local documentation links/anchors passed. Production
 resource/playback, independent listening and the operator-started rebuild remain open.
 
+## Cgroup observation tooling (25 September 2026)
+
+Both probes now accept an explicit cgroup v2 directory and emit bounded, read-only
+resource snapshots in their current v3 reports. Factual records include before/after
+snapshots. Voice initialization and tracks have the same pair; pass records also
+capture before/after worker start and release. No library, model, application service,
+dependency or cgroup setting changes. There is no cgroup v1 fallback.
+
+Five shared fixture tests cover counter/limit parsing, selected scope, read-only
+behavior, missing/malformed/oversized data, and unsupported-platform handling; they
+run in both probe binaries. The real-model voice regression verifies all nine records
+across initialization, successful/failed tracks and two worker lifecycles. Windows
+reports unsupported cgroup measurement explicitly. Three actual CLI smoke runs on a
+four-second synthetic recording emitted five path-free v3 records: factual default,
+factual with requested counters, and voice initialization/track/release. The default
+reported `not_requested`; requested counters reported `unsupported_platform`.
+
+All 542 Rust tests passed with the real pinned voice model and FFmpeg configured.
+Workspace check, strict workspace/fuzz Clippy, formatting, architecture, doc tests,
+generated contracts and all 150 local documentation links/anchors passed. No live
+Linux/cgroup counter or concurrent-playback test ran: Docker/Podman and WSL are
+unavailable on this host. Independent listening and production acceptance remain open.
+
 ## Resource boundary and production acceptance
 
-Linux counters come from `/proc/self/status`. Their scope is **this probe process
-only**: they exclude FFmpeg/ffprobe children, the application server, playback and
-other container processes. Peak RSS is cumulative for the entire probe lifetime,
-not a per-recording peak. Windows and inaccessible/malformed counters return
-`null`, never zero or a fabricated estimate.
+Process counters come from `/proc/self/status`. Their scope remains **this probe
+process only**: they exclude FFmpeg/ffprobe children, the server and other processes.
+Peak RSS is process-lifetime, not per-recording. Unsupported or unreadable values
+remain unknown.
 
-Consequently these counters alone cannot pass the three-CPU/4 GB production gate.
-On the target container, also measure total cgroup CPU/memory while the normal
-durable context job runs concurrently with ordinary browsing and playback. Include
-optional voice inference if enabled; use the [voice probe](#voice-repetition-and-lifecycle-probe)
-for isolated repeated-pass and cancellation diagnostics. Record cancellation, restart/resume, failures,
-post-pass resource release and playback behavior. Existing job checkpoints remain
-the authority for the actual rebuild; these tools write none.
+For Linux cgroup v2 observations, add `--cgroup-dir <directory>` to either probe.
+Select the scope explicitly and verify it contains the intended application and
+its decoder children. The probes do not discover membership or substitute a host
+cgroup automatically. For a container whose cgroup namespace root is the intended
+application scope, a factual diagnostic can use:
 
-Keep an independent listening comparison and the operator-controlled production
-rebuild as separate acceptance steps. See the current
-[implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md) for delivered work,
-conditional models and the tool inventory.
+```sh
+./music-context-probe --ffmpeg ffmpeg --ffprobe ffprobe --repeat 3 \
+  --cgroup-dir /sys/fs/cgroup < private-context-paths.json > private-context-report.jsonl
+```
+
+The operator supplies the probe binary separately; it is not added to the application
+image. Preserve the chosen scope and environment details with the private report.
+Paths never appear in the emitted JSON. Each counter file is limited to 4 KiB and a
+v2 controller marker is required. Unsupported platforms, missing files, invalid
+values and oversized data never become invented zeros.
+
+| Observation | Meaning |
+|---|---|
+| `memory.current_bytes`, `memory.peak_bytes` | Current and lifetime peak memory for the selected cgroup and descendants. The probe never resets the peak. |
+| `memory.max`, `cpu.max` | Local configured limits; explicit limited/unlimited/unavailable state. CPU quota and period are microseconds. These do not resolve ancestor restrictions or CPU affinity. |
+| `cpu.usage_usec` | Cumulative CPU time for the selected cgroup and descendants. |
+| `cpu.nr_periods`, `nr_throttled`, `throttled_usec` | Cumulative bandwidth counters for this cgroup's own CPU limit, not all ancestor throttling. |
+| `memory_events` | Raw high/max/OOM/OOM-kill counters. Subtree event accounting depends on the mount's `memory_localevents` setting. |
+
+These meanings follow the [Linux cgroup v2 interface](https://docs.kernel.org/admin-guide/cgroup-v2.html).
+Compare before/after cumulative counters only while the selected cgroup persists;
+a reset or recreation invalidates the difference. A lifetime peak is not a per-track
+peak. Concurrent activity in the scope contributes to observations. Individual file
+reads are not an atomic snapshot. `observed` means some counters were read, not that
+all values are available or the production gate passed. Without the flag, snapshots
+say `not_requested`; Windows says `unsupported_platform`.
+
+Neither process nor isolated-probe observations alone pass the three-CPU/4 GB gate.
+On the target container, measure the normal durable context job with ordinary
+browsing and playback, including optional voice if enabled. Keep external container
+monitoring for continuous sampling of that job; these probes only bracket their
+own work. Record cancellation, restart/resume, failures, post-pass resource release
+and playback behavior. Job checkpoints remain authoritative for the rebuild.
+
+Independent listening and the operator-controlled production rebuild remain separate
+acceptance steps. See the [implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
+for delivered work, conditional models and the tool inventory.

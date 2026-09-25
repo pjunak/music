@@ -83,8 +83,10 @@ The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, `
 For an operator acceptance pass on original audio, the optional
 [audio probes](AUDIO_ANALYSIS_ACCEPTANCE.md) exercise factual coverage and voice inference,
 repeat runs, cancellation and worker lifecycle measurements without touching a library.
-Voice requires the separately supplied pinned model. Tests for both probes are included
-in the normal Rust workspace gates; private-corpus and container measurements remain
+Voice requires the separately supplied pinned model. Both v3 reports optionally read an
+explicit cgroup v2 directory; fixture tests cover parsing, unknown values and read-only
+scope without requiring Linux. Tests for both probes are included in the normal Rust
+workspace gates; live cgroup, private-corpus and concurrent-playback measurements remain
 separately reported.
 
 The [MusiCNN reference fixtures](../crates/music-analysis/tests/fixtures/README.md) run
