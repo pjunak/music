@@ -85,6 +85,7 @@ jobs:
         run: |
           node --test tools/mood-pilot.test.mjs
           node --test tools/cleanup-pilot.test.mjs
+          node --test tools/effnet-reference.test.mjs
           node --test .github/scripts/workflow-policy.test.mjs
           node --test .github/scripts/publish-output.test.mjs
           node --test .github/scripts/rust-architecture.test.mjs

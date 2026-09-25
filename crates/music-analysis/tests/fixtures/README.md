@@ -88,9 +88,91 @@ then the Rust frontend and Tract graphs against the complete reference path.
 These checks passed on this Windows GNU host. One observed combined graph load was
 106 ms and individual encoder-plus-head calls were approximately 5-7.4 ms. Those
 isolated timings are not a production throughput, cancellation or memory benchmark.
-Local scripts, raw tensors and model artifacts remain ignored research output under
-`target/`; this is a dated feasibility result, not a supported EffNet application
-command or an additional production runtime.
+The original scripts, raw tensors and model artifacts remain ignored research output
+under `target/`; the reference exporter below now makes selected-patch generation
+repeatable. This is not an EffNet application feature or additional production runtime.
+
+## Real-audio patch reference, 25 September 2026
+
+The first real-audio attempt exposed a reference problem: Essentia.js 0.1.3's
+[pinned FrameGenerator implementation](https://github.com/MTG/essentia.js/blob/f46c91c08bdf263d5f3d575ab8fb0f9b81695acf/src/cpp/includes/essentiajs.cpp#L70-L95)
+deliberately skips silent frames. It dropped 1-59 frames in 20 of the 22 approved
+recordings. Its frame index therefore cannot be used as an absolute timeline index.
+The earlier constant/synthetic checks did not expose this real-file behavior.
+
+The development-only [exporter](../../../../tools/effnet-reference.mjs) preserves
+explicit centered 512-sample frames with 256-sample hops, including silence and
+zero padding at either boundary. It selects the beginning, a middle patch on the
+62-frame grid, and one full 128-frame patch anchored at the final centered frame.
+Duplicate positions are omitted. It does not repeat a short tail or silently drop
+one; input shorter than a complete patch fails. These are explicit probe semantics,
+not a claim to reproduce the full upstream TensorFlow wrapper's final-patch policy.
+See the upstream [frame semantics](https://essentia.upf.edu/reference/std_FrameCutter.html)
+and [EffNet patch parameters](https://essentia.upf.edu/reference/std_TensorflowPredictEffnetDiscogs.html).
+
+Prepare private float32-le, 16 kHz mono files from approved original audio. Record
+the decoder version/command and source hashes alongside them; the exporter cannot
+verify decoding or the original files from raw PCM. For the dated run, FFmpeg 9.0.2
+decoded the same 22 stereo AAC recordings used by the acceptance probes, with:
+
+```powershell
+ffmpeg -v error -nostdin -n -filter_threads 1 -filter_complex_threads 1 -threads 1 -i original.m4a -map 0:a:0 -vn -af aresample=16000:out_chlayout=mono:rematrix_maxval=1 -ac 1 -ar 16000 -f f32le normalized.f32le
+```
+
+Keep a private JSON array of absolute PCM paths. Supply the explicitly installed
+`essentia.js@0.1.3`, `onnxruntime-web@1.30.0` and the three separately licensed
+ONNX artifacts pinned in the [plan](../../../../docs/SONG_EVIDENCE_IMPLEMENTATION_PLAN.md#native-probe-evidence).
+These packages and model files are not application or CI dependencies:
+
+```powershell
+node tools/effnet-reference.mjs --inputs private-pcm-paths.json --essentia ./reference/node_modules/essentia.js --ort ./reference/node_modules/onnxruntime-web --models ./private-models --output private-effnet-reference.jsonl
+node --test tools/effnet-reference.test.mjs
+```
+
+The tool also pins the WASM loader `ort-wasm-simd-threaded.mjs` to SHA-256
+`e13f7f94fc51b4ca72b12faeb1ee95f4ace6dfbc8939bc718aabdc0a27c4299b` and loads
+the verified Node entry directly. It validates exact model byte snapshots,
+finite PCM and output dimensions. Limits are a 1 MiB input manifest, 1-32 recordings,
+15 minutes per recording and three selected patches per recording. It processes
+one recording at a time and one graph patch at a time. This bounds a development
+experiment; it does not implement or certify a streaming production worker.
+
+The current-only `effnet-patch-reference/v1` JSONL contains a provenance header,
+patches with raw sample support, zero-based track/frame indices, valid sample
+intervals, PCM hashes, feature tensors and graph outputs, then a completion record.
+These private numerical exports contain audio samples: keep them outside Git.
+Require a successful process exit, the completion record and its matching counts
+before using a reference. Failed runs may leave incomplete output for inspection;
+existing outputs are never overwritten. Errors omit input paths and tensor contents.
+Raw scores are uncalibrated, and this exporter neither assigns library IDs nor
+produces mood judgments or changes accepted tags.
+
+The real run compared all 66 patches twice: reference features into Tract, then
+shared Rust features into Tract, against the same pinned ONNX Runtime Web graphs.
+
+| Check | Unchanged gate | Worst observed across both paths |
+|---|---|---|
+| 811,008 mel feature values | Absolute error <= 0.0001 | 0.0000290871 |
+| 1,280-value embeddings | Cosine >= 0.999 | Minimum 0.999999999980 |
+| 56 mood/theme scores | Absolute error <= 0.001 | 0.0000010133 |
+| 40 instrument scores | Absolute error <= 0.001 | 0.0000011027 |
+
+All 66 comparisons passed on Windows GNU. Ten dependency-free regression tests
+cover framing, silent gaps, endings, duplicate patch removal, bounded input and
+private failures; these run in CI. The existing 12-frame/1,152-value MusiCNN fixture
+still reproduces exactly. Real-tool controls reject overwrite and altered weights;
+a deliberately perturbed feature reference fails the numerical gate.
+Source hashes, sizes and modification times, and all three model hashes, were
+unchanged after the run. Private PCM, reference outputs and native probe remain
+ignored research artifacts.
+
+This establishes selected-patch feature and same-export graph parity on common
+decoded music. It does not compare FFmpeg with an independent decoder/resampler,
+prove original TensorFlow/ONNX export equivalence, run every patch of each track,
+validate full streaming/aggregation/cancellation, measure production resource use,
+or certify musical usefulness. The fixed explicit framing policy is tested
+mechanically; the rejected convenience helper is not its temporal oracle.
+Independent owner listening and the complete-path gates still determine adoption.
 
 ## Voice decoding and ending acceptance, 25 September 2026
 
@@ -175,16 +257,19 @@ memory/cancellation benchmark.
 
 ## Remaining acceptance
 
-The 24 September EffNet comparison establishes controlled frontend and same-export
-ONNX graph parity. The 25 September voice checks establish basic mono/stereo decoding,
+The EffNet comparisons establish synthetic and selected real-patch feature/same-export
+ONNX graph parity on common PCM. The 25 September voice checks establish basic
+mono/stereo decoding,
 resampling counts, ending coverage and actual pinned-graph execution on this host.
 Neither establishes original TensorFlow/ONNX encoder equivalence, full resampling
 spectral parity, multichannel downmix parity, or usefulness on independently judged music.
 Separate short/partial-hop constant-signal checks matched upstream frame counts and
 centering; they did not exercise a complete EffNet wrapper.
 
-Long-file repeated-run RSS/cancellation, production Linux container cost and concurrent
-playback remain open. Cancellation/expiry is checked before and after each Tract call;
+The voice acceptance probes now cover repeated real-file runs and cooperative
+cancellation on Windows. Live Linux RSS/cgroup memory and concurrent playback remain
+open; the EffNet experiment has not qualified a full streaming/cancellable worker.
+Voice cancellation/expiry is checked before and after each Tract call;
 a wedged in-process inference call cannot be interrupted midway. No new model was
 enabled, no production rebuild ran, and no owner listening labels were invented.
 An EffNet candidate still needs development recordings, its own bounded extraction/tail

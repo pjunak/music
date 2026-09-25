@@ -5,19 +5,10 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
+import { pathToFileURL } from 'node:url';
 
-function main() {
-  const { values } = parseArgs({
-    options: {
-      essentia: { type: 'string' },
-      output: { type: 'string' },
-      check: { type: 'string' },
-    },
-  });
-  if (!values.essentia || Boolean(values.output) === Boolean(values.check)) {
-    throw new Error('Usage: node tools/musicnn-reference.mjs --essentia PACKAGE_DIRECTORY (--check FIXTURE | --output NEW_FIXTURE)');
-  }
-  const root = path.resolve(values.essentia);
+export function loadEssentiaReference(packageDirectory) {
+  const root = path.resolve(packageDirectory);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(manifest.name, 'essentia.js', 'Wrong reference package');
   assert.equal(manifest.version, '0.1.3', 'Reference version changed; review before regenerating');
@@ -32,7 +23,21 @@ function main() {
   const require = createRequire(import.meta.url);
   const EssentiaWASM = require(path.join(root, 'dist', artifacts[0][0]));
   const Essentia = require(path.join(root, 'dist', artifacts[1][0]));
-  const essentia = new Essentia(EssentiaWASM);
+  return { essentia: new Essentia(EssentiaWASM), artifacts };
+}
+
+function main() {
+  const { values } = parseArgs({
+    options: {
+      essentia: { type: 'string' },
+      output: { type: 'string' },
+      check: { type: 'string' },
+    },
+  });
+  if (!values.essentia || Boolean(values.output) === Boolean(values.check)) {
+    throw new Error('Usage: node tools/musicnn-reference.mjs --essentia PACKAGE_DIRECTORY (--check FIXTURE | --output NEW_FIXTURE)');
+  }
+  const { essentia, artifacts } = loadEssentiaReference(values.essentia);
   const tau = 2 * Math.PI;
   const signals = [
     ['silence', () => 0],
@@ -101,10 +106,12 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  // Avoid dumping complete numerical fixtures or an upstream embedded WASM line.
-  console.error(error instanceof Error ? error.message : "Reference generation failed");
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (error) {
+    // Avoid dumping complete numerical fixtures or an upstream embedded WASM line.
+    console.error(error instanceof Error ? error.message : "Reference generation failed");
+    process.exitCode = 1;
+  }
 }

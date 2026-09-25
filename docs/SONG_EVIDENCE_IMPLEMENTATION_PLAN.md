@@ -43,10 +43,12 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** each voice worker verifies the exact owned model bytes it parses,
   with bounded input and replacement/deletion/recovery regressions. The artifact/v2
   identity retires contexts produced under the previous startup-only verification.
-- **Native probe:** five synthetic patches pass frontend and ONNX graph parity against
-  pinned Essentia.js and ONNX Runtime Web references. Real-audio decoding/tails,
-  original TensorFlow-export equivalence, cancellation, production resource bounds
-  and listening usefulness remain open; no new model runtime/weights are bundled.
+- **Native probe:** five synthetic patches and 66 beginning/interior/ending patches
+  from 22 owner-approved recordings pass fixed feature/ONNX numerical gates. A
+  bounded development exporter preserves silent-frame positions and verifies the
+  pinned references/models. Complete streaming/tail aggregation, original TensorFlow
+  equivalence, cancellation, production resources and listening usefulness remain
+  open; no new application model runtime or weights are bundled.
 - **Implemented:** tagger output v5 / analyzer v8 with per-tag support, reasons,
   validated supporting/conflicting observation IDs and explicit abstention. Current-only
   save/review contracts, strict fixtures, disclosure and existing review UI are updated.
@@ -63,8 +65,10 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 Across completed batches, Windows GNU validation passed 519 Rust tests, workspace
 and fuzz Clippy, formatting, architecture, generated contracts, doctor/migration
-coverage and the headless release build. This batch passed all 361 frontend tests,
-frontend lint/typecheck/production build and 23 grouped mood-pilot tests.
+coverage and the headless release build. Earlier batches also passed all 361 frontend
+tests, frontend lint/typecheck/production build and 23 grouped mood-pilot tests.
+This development-reference batch passed 10 new reference-tool tests and 8 workflow
+policy checks; the existing 1,152-value pinned frame fixture remains identical.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -77,31 +81,35 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** removed selection bias from listening-pilot initialization.
-The old initializer used retained model answers as its inventory, so failed, missing
-or never-run tracks disappeared before membership was frozen. Initialization now
-requires an explicit selected-track inventory; the run-based entrypoint is removed.
+**Latest batch:** made the optional EffNet numerical experiment usable on real audio.
+The pinned Essentia.js convenience FrameGenerator drops silent frames; it removed
+1-59 frames in 20 of the 22 approved recordings. Indexing its output as a complete
+timeline would shift later patches. A small development-only reference exporter
+now cuts centered frames explicitly, retaining silence, real sample offsets and
+boundary padding. It shares the pinned Essentia loader with the existing fixture
+generator, verifies the ONNX reference/model artifacts and refuses output overwrite.
 
-The existing Mood Library selection panel exports only selected IDs. Vocabulary
-exports its saved revision, excluding unsaved edits. Terminal jobs and asynchronous
-batches can export zero retained answers; scoring keeps those outcomes missing,
-separate from a returned per-track abstention. The exports are read-only and add no
-provider calls, retry action, annotation screen, API, runtime model or storage layer.
+The tool selects beginning, interior and ending patches from bounded private 16 kHz
+mono PCM. All 66 patches passed the unchanged feature, embedding and head gates
+against the shared Rust preprocessing and isolated Tract probe. This establishes
+selected-patch parity on common decoded input, not decoder or complete wrapper
+equivalence. Original audio hashes, sizes and modification times stayed unchanged.
 
-Validation: all 361 frontend tests and 23 pilot tests passed, including a real
-export-to-CLI init/freeze/score regression, selection with missing model answers,
-saved-versus-unsaved vocabulary and failed/expired/cancelled batch exports. Frontend
-lint, typecheck and production build passed. Visual inspection could not initialize
-because of the local browser-helper ACL failure. Rust, audio probes, fuzz, dependency
-graphs and server contracts are unchanged; their earlier gates were not rerun.
+Validation: 10 reference-tool tests and 8 workflow-policy tests passed; existing
+synthetic fixtures reproduced exactly. Real-tool controls rejected overwritten
+outputs and modified weights, and a deliberately perturbed reference failed the
+numerical gate. CI runs only the dependency-free unit tests. Application runtime,
+frontend, Rust dependency graphs, schemas and provider behavior are unchanged;
+their earlier gates were not rerun. See the
+[reference ledger](../crates/music-analysis/tests/fixtures/README.md#real-audio-patch-reference-25-september-2026)
+for commands, observed errors and the framing limitation.
 
-Independent owner judgments and the real-library candidate comparison remain open.
-The two supplied albums provide operational audio checks, not listening labels.
-Production resource/concurrent-playback measurements and the operator-started
-rebuild still remain. The optional EffNet path must also pass its separate
-real-audio/usefulness gates before adoption. The [pilot guide](MOOD_PILOT.md) owns
-the selection and evaluation workflow; the [acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md)
-retains the earlier 22-recording measurements and their limits.
+Independent listening and real-library candidate usefulness remain open. EffNet
+also needs full streaming/aggregation, original TensorFlow-export equivalence and
+resource/cancellation qualification before adoption. Docker and WSL are unavailable
+on this host, so production resource/concurrent-playback measurements and the
+operator-started rebuild remain separate gates. No application model, audio upload,
+paid call, authored-tag change or deployment was added.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -119,15 +127,15 @@ options survey; this plan determines the narrower implementation scope.
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
 | MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries and exact model snapshot verification per worker | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |
-| Essentia.js / ONNX Runtime Web references | No retained numerical reference fixtures | Pinned local verification only; absent from production dependencies | Keep offline fixtures; run references when changing models/frontend | High validation value: independently check feature/graph calculations without another application runtime. |
+| Essentia.js / ONNX Runtime Web references | Synthetic frame/patch checks | Pinned offline references; explicit framing preserves silence and ending offsets | Keep development-only; reject FrameGenerator as a timeline oracle | High: avoid validating shifted patches; the convenience helper drops silent frames. No production dependency. |
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
 | JSONL listening pilot + grouped bootstrap | Small pilot, then inventory derived from successful results | Explicit selected inventory, saved vocabulary, frozen groups, paired comparison and empty-run exports | Collect independent judgments; evaluate development, then confirmation | Essential: prevents success-only selection and distinguishes useful tags, abstentions and missing outcomes without a dataset application. |
-| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Five synthetic patches pass frontend/ONNX numerical comparison | Adopt useful heads after real-audio, resource and listening gates | Conditional high value: richer learned audio evidence; numerical parity does not prove mood usefulness. |
-| tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated synthetic graph comparison | Prefer Tract if qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; the WASM oracle is development-only. |
+| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Five synthetic and 66 real-audio patches pass fixed feature/ONNX gates | Qualify full extraction, TensorFlow equivalence, resources and usefulness before adoption | Conditional high value: richer evidence; common-PCM patch parity does not certify complete inference or mood quality. |
+| tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated synthetic and real-patch comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; the WASM oracle is development-only. |
 | TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
@@ -156,7 +164,7 @@ No graph operations or weights were rewritten. Encoder input is `[1,128,96]`, em
 | `mtg_jamendo_moodtheme-discogs-effnet-1.onnx` | `7d6270acaa5f4bba4b115a0d6849aca05ed6bd153dcb6d9da4f6ab9f99ef10ff` |
 | `mtg_jamendo_instrument-discogs-effnet-1.onnx` | `9ae2d9e763d66bd8eed654d1ac3aa171e6539cb8a0e11f3dcd53df1428980802` |
 
-The initial zero-input smoke test is now supplemented by five synthetic 128-frame
+The initial zero-input smoke test was supplemented by five synthetic 128-frame
 patches. Essentia.js 0.1.3 supplies reference mel features and ONNX Runtime Web 1.30.0
 (single-thread CPU WASM) runs the same published graphs. Both graph-only comparison
 and the shared Rust frontend plus Tract meet the fixed feature/embedding/head gates.
@@ -165,8 +173,14 @@ and worst head error is below 0.00000090. See the
 [reference ledger](../crates/music-analysis/tests/fixtures/README.md#isolated-effnet-comparison-24-september-2026)
 for the cases and limits. This is controlled numerical evidence, not original
 TensorFlow-export equivalence, real-music coverage, production resource acceptance
-or mood-quality evidence. The artifacts and temporary probe remain ignored research
-output, not application dependencies. Upstream links and licensing remain in stage 2.
+or mood-quality evidence. The artifacts and temporary native probe remain ignored
+research output, not application dependencies. Upstream links and licensing remain in stage 2.
+
+The 25 September real-audio extension passed 66 selected patches from the two approved
+albums using the same gates. It replaces the silence-dropping convenience frame helper
+with explicit positions in the shared decoded PCM. The
+[reference ledger](../crates/music-analysis/tests/fixtures/README.md#real-audio-patch-reference-25-september-2026)
+records the new exporter, 811,008 feature comparisons and remaining complete-path limits.
 
 ## Product purpose and admission rule
 
