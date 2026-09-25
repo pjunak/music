@@ -9,11 +9,12 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ## Implementation status — 25 September 2026
 
-- **Implemented:** grouped JSONL pilot tooling with frozen recording groups, four-state
-  labels, separate development/confirmation scoring, per-tag counts, known-positive
-  recall and paired group-bootstrap comparisons. Freezing works before listening;
-  missing results cannot count as safer abstentions. The owner confirmed there is
-  no labeled dataset yet; listening remains open.
+- **Implemented:** selected-library inventory and saved-vocabulary exports initialize
+  the grouped JSONL pilot before model calls. Frozen recording groups, four-state
+  labels, development/confirmation scoring, per-tag counts, known-positive recall
+  and paired group-bootstrap comparisons remain. Empty/failed run exports preserve
+  missing outcomes; model-success-based initialization is removed. Freezing works
+  before listening. The owner has no labeled dataset yet; listening remains open.
 - **Implemented:** context v3 with gain-invariant relative dynamics, explicit coverage,
   no whole-track context confidence, `voice_score`, and coarse local tempo withheld from
   the model projection. Existing bounded execution and source-audio decoding are reused.
@@ -60,10 +61,10 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Across completed batches, Windows GNU validation passed: 519 Rust tests, 342 frontend
-tests and 48 pilot/policy checks; workspace and fuzz Clippy, formatting, architecture,
-generated contracts, doctor/migration coverage, frontend production build and the
-headless release build.
+Across completed batches, Windows GNU validation passed 519 Rust tests, workspace
+and fuzz Clippy, formatting, architecture, generated contracts, doctor/migration
+coverage and the headless release build. This batch passed all 361 frontend tests,
+frontend lint/typecheck/production build and 23 grouped mood-pilot tests.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -76,39 +77,31 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** extended the existing voice probe for bounded real-audio acceptance.
-It now repeats whole passes with one fresh worker each, measures initialization and
-worker start/join separately, and checks cancellation at explicit delays. A cancelled
-record is accepted only after the worker returns its typed result and cleanup finishes.
-Early completion cannot pass cancellation or emit a successful score record.
+**Latest batch:** removed selection bias from listening-pilot initialization.
+The old initializer used retained model answers as its inventory, so failed, missing
+or never-run tracks disappeared before membership was frozen. Initialization now
+requires an explicit selected-track inventory; the run-based entrypoint is removed.
 
-The factual and voice tools share bounded private-input parsing, numeric argument
-validation and Linux process-memory sampling. Voice reports only the current v2
-shape, approved numeric fields and typed errors; malformed input and decoder errors
-do not echo private paths. Failure of one track still permits later inputs/passes.
-No analysis semantics, provider, model, dependency, public API or persistence changed.
+The existing Mood Library selection panel exports only selected IDs. Vocabulary
+exports its saved revision, excluding unsaved edits. Terminal jobs and asynchronous
+batches can export zero retained answers; scoring keeps those outcomes missing,
+separate from a returned per-track abstention. The exports are read-only and add no
+provider calls, retry action, annotation screen, API, runtime model or storage layer.
 
-The owner supplied two albums for read-only checks, totaling about 91 minutes. Both
-extractors processed all 22 stereo AAC recordings twice: 44 factual and 44 voice
-operations passed. Reported factual duration/coverage/endings/loudness and voice
-scores/window counts matched across repeats. The ending discrepancy was below
-0.44 ms and decoded/container duration differences below 22 ms. All 24 planned
-cancellations passed, with maximum cleanup of 35.26 ms factual / 24.32 ms voice.
-Failure/recovery, early-completion and warmup controls passed; original file hashes,
-sizes and modification times were unchanged. Windows RSS is unavailable, so graph
-joins do not certify production memory release.
+Validation: all 361 frontend tests and 23 pilot tests passed, including a real
+export-to-CLI init/freeze/score regression, selection with missing model answers,
+saved-versus-unsaved vocabulary and failed/expired/cancelled batch exports. Frontend
+lint, typecheck and production build passed. Visual inspection could not initialize
+because of the local browser-helper ACL failure. Rust, audio probes, fuzz, dependency
+graphs and server contracts are unchanged; their earlier gates were not rerun.
 
-Validation: all 519 Rust tests passed with the real pinned voice model and FFmpeg
-configured. Formatting, strict workspace Clippy, workspace check, architecture,
-doc tests, generated contracts and both release probe builds passed. Documentation
-links passed. Frontend, pilot, fuzz and dependency graphs are unchanged; their prior
-gates were not rerun.
-
-The listening pilot is ready. These operational observations are not independent
-mood/vocal labels or model reference outputs. Owner judgments, the complete EffNet
-audio path, production resource/concurrent-playback measurements and the
-operator-started rebuild remain open. The [acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md)
-owns commands, report semantics, dated measurements and their limits.
+Independent owner judgments and the real-library candidate comparison remain open.
+The two supplied albums provide operational audio checks, not listening labels.
+Production resource/concurrent-playback measurements and the operator-started
+rebuild still remain. The optional EffNet path must also pass its separate
+real-audio/usefulness gates before adoption. The [pilot guide](MOOD_PILOT.md) owns
+the selection and evaluation workflow; the [acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md)
+retains the earlier 22-recording measurements and their limits.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -132,7 +125,7 @@ options survey; this plan determines the narrower implementation scope.
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
-| JSONL listening pilot + grouped bootstrap | Fixed small pilot format | Frozen groups, four-state judgments, paired comparison and recall | Use for development, then confirmation | Essential validation: distinguishes useful improvements from more tags or missing results without building a dataset application. |
+| JSONL listening pilot + grouped bootstrap | Small pilot, then inventory derived from successful results | Explicit selected inventory, saved vocabulary, frozen groups, paired comparison and empty-run exports | Collect independent judgments; evaluate development, then confirmation | Essential: prevents success-only selection and distinguishes useful tags, abstentions and missing outcomes without a dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Five synthetic patches pass frontend/ONNX numerical comparison | Adopt useful heads after real-audio, resource and listening gates | Conditional high value: richer learned audio evidence; numerical parity does not prove mood usefulness. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated synthetic graph comparison | Prefer Tract if qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; the WASM oracle is development-only. |
 | TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |

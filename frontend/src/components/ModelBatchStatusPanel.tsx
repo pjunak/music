@@ -105,10 +105,10 @@ export function ModelBatchStatusPanel({ id }: { id: string | null }) {
           <TaggingYieldSummary value={status.result} />
           <p>Saved {String(status.result.updated_profiles ?? 0)} profiles. Rejected or unavailable tracks: {String(Number(status.result.rejected_tracks ?? 0) + Number(status.result.unavailable_or_changed_tracks ?? 0))}. Suggestions still require review in the Mood Library.</p>
           <a href={modelRunReviewUrl(id)}>View saved results from this batch</a>
-          <TaggingRunExport id={id} result={status.result} />
           <ModelUsageSummary job={{ result: status.result }} />
         </>
       ) : null}
+      {status && TERMINAL.has(status.state) ? <TaggingRunExport id={id} result={status.result} /> : null}
       {error ? <p role="alert">{error}</p> : null}
     </section>
   );

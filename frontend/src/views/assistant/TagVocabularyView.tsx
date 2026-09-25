@@ -12,6 +12,7 @@ import { toast } from "@/core/toast";
 
 import { AssistantInfoPopover } from "./AssistantInfoPopover";
 import { TagCatalogManager } from "./TagCatalogManager";
+import { downloadJson } from "./downloadJson";
 
 type TermListField = "aliases" | "context_cues";
 type TermDrafts = Record<string, Record<TermListField, string>>;
@@ -485,6 +486,20 @@ export function TagVocabularyView() {
                 Discard changes
               </button>
             ) : null}
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={saving}
+              onClick={() => {
+                try {
+                  downloadJson(vocabulary, "mood-vocabulary.json");
+                } catch {
+                  toast.error("Could not export the saved vocabulary");
+                }
+              }}
+            >
+              Export saved vocabulary
+            </button>
             <button className="btn-primary" type="submit" disabled={!dirty || saving}>
               {saving ? "Saving…" : "Save vocabulary"}
             </button>

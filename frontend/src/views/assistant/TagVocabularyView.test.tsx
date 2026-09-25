@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
+import { downloadJson } from "./downloadJson";
+
+vi.mock("./downloadJson", () => ({ downloadJson: vi.fn() }));
 import type { ManualTagCatalog, TagVocabulary } from "@/core/api";
 
 vi.mock("@/components/inputDialog", () => ({
@@ -124,6 +127,17 @@ beforeEach(() => {
 });
 
 describe("TagVocabularyView", () => {
+  it("exports the saved revision even when the editor has unsaved changes", async () => {
+    const user = userEvent.setup();
+    render(<TagVocabularyView />);
+    await screen.findByRole("heading", { name: "Setting" });
+    await user.type(screen.getByLabelText("Selection meaning for tavern"), " unsaved definition");
+    expect(screen.getByText("Unsaved vocabulary changes")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Export saved vocabulary" }));
+    expect(downloadJson).toHaveBeenCalledWith(vocabulary, "mood-vocabulary.json");
+    expect(JSON.stringify(vi.mocked(downloadJson).mock.calls[0][0])).not.toContain("unsaved definition");
+    expect(assistantApi.updateTagVocabulary).not.toHaveBeenCalled();
+  });
   it("keeps vocabulary and manual tag tools without legacy AI maintenance", async () => {
     render(<TagVocabularyView />);
     expect(await screen.findByRole("heading", { name: "Setting" })).toBeVisible();

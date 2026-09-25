@@ -11,13 +11,27 @@ library sample. Include sparse/rich metadata, quiet/loud masters, vocals, and
 tracks with changing endings. Two independent groups are the minimum the tool
 can score, not a useful accuracy sample. Keep audio and judgments outside Git.
 
-Export a selected run using **Export retained run results**, and export the exact
-Mood vocabulary. The run is only an inventory for initialization: the template
-contains no predictions or explanations. Its IDs must refer to the same library.
+Before running the tagger, select the recordings in **Mood Library** using its
+existing track checkboxes. Open **Listening comparison** in the selection panel
+and choose **Export listening sample**. In **Vocabulary**, choose **Export saved
+vocabulary**; this downloads the saved revision, excluding unsaved editor changes.
+Keep that vocabulary fixed for all candidates.
+
+The inventory contains only explicit library IDs, with no predictions or inferred
+file identities. It accepts 2-1,000 unique positive IDs from the same library that
+will produce the later run exports:
+
+```json
+{"schema_version":"song-mood-inventory/v1","track_ids":[7,14,21]}
+```
 
 ```powershell
-node tools/mood-pilot.mjs init run.json vocabulary.json draft.jsonl
+node tools/mood-pilot.mjs init inventory.json vocabulary.json draft.jsonl
 ```
+
+Initialization rejects retained run exports. Deriving the sample from returned
+answers would exclude failed or missing tracks before freezing and bias the
+comparison. Export selected IDs first, including tracks that have never been tagged.
 
 The first JSONL line is the `song-mood-judgments/v1` manifest; subsequent lines are
 judgments. There is one current format, with no old 30-track cohort parser. Edit:
@@ -68,6 +82,13 @@ Evaluate perceived mood separately from scene/setting suitability, and use
 Record ambiguity in `notes`; do not overwrite disagreement to match the model.
 
 ## Score development; open confirmation once
+
+After freezing the sample and preparing independent judgments, run each candidate
+through the normal consent/budget flow. Use **Export retained run results** from
+its finished job or asynchronous batch. Failed, expired or cancelled runs can also
+export their retained answers, including an empty result set. Do not drop those
+runs or their selected tracks from the comparison. A missing row is unavailable;
+a retained row with `tags: []` is an explicit abstention.
 
 ```powershell
 node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json > development-score.json

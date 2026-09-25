@@ -24,6 +24,7 @@ import { toast } from "@/core/toast";
 import { AnalysisTagReview } from "./AnalysisTagReview";
 import { analysisTagSuggestionKey } from "./analysisTagSelection";
 import { TagReviewSummary } from "./TagReviewSummary";
+import { ListeningSampleExport } from "./ListeningSampleExport";
 import { modelStatusLabel, suggestionSource } from "./tagProvenance";
 
 const PAGE_SIZE = 50;
@@ -789,6 +790,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
                     Close batch
                   </button>
                 </div>
+                <ListeningSampleExport trackIds={[...selectedTrackIds]} />
                 <div className="assistant-tag-source is-manual">
                   <div>
                     <strong>Batch mood tags</strong>

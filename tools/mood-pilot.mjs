@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 export const SCHEMA = "song-mood-judgments/v1";
+export const INVENTORY_SCHEMA = "song-mood-inventory/v1";
 const MAX_TRACKS = 1000;
 const STATES = new Set(["positive", "negative", "uncertain", "unjudged"]);
 const CATEGORIES = ["all", "mood", "session_use", "period", "custom"];
@@ -45,14 +46,15 @@ function runIndex(run, names) {
   return results;
 }
 
-export function createPilot(run, vocabulary) {
-  const { names, fingerprint } = vocabularyIndex(vocabulary);
-  const results = runIndex(run, names);
-  check(results.size >= 2 && results.size <= MAX_TRACKS, "Select 2-1000 tracks; aim for 60-100 varied recordings.");
+export function createPilot(inventory, vocabulary) {
+  const { fingerprint } = vocabularyIndex(vocabulary);
+  check(inventory?.schema_version === INVENTORY_SCHEMA && Object.keys(inventory).every((key) => ["schema_version", "track_ids"].includes(key)), "Expected an explicit listening inventory, not model results. Export selected tracks before running the tagger.");
+  const trackIds = inventory.track_ids;
+  check(unique(trackIds) && trackIds.length >= 2 && trackIds.length <= MAX_TRACKS && trackIds.every(id), "Select 2-1000 unique positive library track IDs; aim for 60-100 varied recordings.");
   return [{ kind: "manifest", schema_version: SCHEMA, seed: "music-listening-1", vocabulary_fingerprint: fingerprint,
     annotator: "", core_tag_ids: [], separate_by: [], confirmation_fraction: 0.3,
     session_requests: [], selection_notes: "", partition_fingerprint: null },
-  ...[...results].sort(([a], [b]) => a - b).map(([track_id]) => ({ kind: "judgment", track_id,
+  ...[...trackIds].sort((a, b) => a - b).map((track_id) => ({ kind: "judgment", track_id,
     file_reference: "", recording_group: "", duplicate_group: null, album: null, composers: [],
     split: null, scope: "whole_track", listened_intervals: [], blind: null, reviewed: false,
     labels: {}, session_notes: "", notes: "" }))];
@@ -297,8 +299,8 @@ async function readBounded(path) {
 const readJson = async (path) => JSON.parse(await readBounded(path));
 export async function main(args) {
   if (args[0] === "init" && args.length === 4) {
-    const [run, vocabulary] = await Promise.all(args.slice(1, 3).map(readJson));
-    await writeFile(args[3], serializePilot(createPilot(run, vocabulary)), { flag: "wx" });
+    const [inventory, vocabulary] = await Promise.all(args.slice(1, 3).map(readJson));
+    await writeFile(args[3], serializePilot(createPilot(inventory, vocabulary)), { flag: "wx" });
   } else if (args[0] === "freeze" && args.length === 4) {
     const [content, vocabulary] = await Promise.all([readBounded(args[1]), readJson(args[2])]);
     await writeFile(args[3], serializePilot(freezePilot(parsePilot(content), vocabulary)), { flag: "wx" });
@@ -308,7 +310,7 @@ export async function main(args) {
   } else if (args[0] === "compare" && (args.length === 5 || (args.length === 6 && args[5] === "--confirmation"))) {
     const [content, baseline, candidate, vocabulary] = await Promise.all([readBounded(args[1]), ...args.slice(2, 5).map(readJson)]);
     process.stdout.write(JSON.stringify(comparePilot(parsePilot(content), baseline, candidate, vocabulary, args[5] ? "confirmation" : "development"), null, 2) + "\n");
-  } else throw new Error("Usage: node tools/mood-pilot.mjs init run.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | score pilot.jsonl run.json vocabulary.json [--confirmation] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation]");
+  } else throw new Error("Usage: node tools/mood-pilot.mjs init inventory.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | score pilot.jsonl run.json vocabulary.json [--confirmation] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation]");
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main(process.argv.slice(2)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });

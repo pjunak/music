@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as ApiModule from "@/core/api";
+import { downloadJson } from "./downloadJson";
+
+vi.mock("./downloadJson", () => ({ downloadJson: vi.fn() }));
 import type {
   LibraryTagPage,
   LibraryTagTrack,
@@ -106,6 +109,22 @@ beforeEach(() => {
 });
 
 describe("LibraryTagEditor", () => {
+  it("exports selected tracks with and without model results without writing tags", async () => {
+    vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({ ...page, total: 2, items: [track, {
+      ...track, track_id: 8, title: "Unprocessed song", manual_tags: [], analysis_tags: [], analysis_suggestions: [],
+      model_analysis: { status: "missing", job_id: null, updated_at_unix_seconds: null },
+    }] });
+    const user = userEvent.setup();
+    render(<LibraryTagEditor />);
+    await screen.findByRole("heading", { name: "Tavern Dance" });
+    await user.click(screen.getByRole("checkbox", { name: "Select this page for bulk tagging" }));
+    await user.click(screen.getByText("Listening comparison"));
+    await user.click(screen.getByRole("button", { name: "Export listening sample" }));
+    expect(downloadJson).toHaveBeenCalledWith({ schema_version: "song-mood-inventory/v1", track_ids: [7, 8] }, "mood-listening-inventory.json");
+    expect(assistantApi.patchManualTags).not.toHaveBeenCalled();
+    expect(assistantApi.patchManualTagsBulk).not.toHaveBeenCalled();
+    expect(assistantApi.reviewAnalysisTag).not.toHaveBeenCalled();
+  });
   it("filters saved AI results across the whole library and combines source and review", async () => {
     const user = userEvent.setup();
     render(<LibraryTagEditor />);

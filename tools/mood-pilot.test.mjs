@@ -9,17 +9,18 @@ import { createPilot, freezePilot, scorePilot, comparePilot, parsePilot, seriali
 
 const vocabulary = { groups: [{ key: "mood", tags: [{ id: "m.calm", name: "calm" }, { id: "m.urgent", name: "urgent" }, { id: "m.sad", name: "sad" }] }, { key: "scene", tags: [{ id: "s.rest", name: "rest" }] }] };
 const ids = Array.from({ length: 20 }, (_, index) => index + 1);
+const inventory = () => ({ schema_version: "song-mood-inventory/v1", track_ids: [...ids] });
 const run = (tags = ["calm", "rest"]) => ({ schema_version: "assistant-mood-run-export/v1", run_id: "pilot", track_results: ids.map((track_id) => ({ track_id, tags, source_signature: `source-${track_id}` })) });
 function draft() {
-  const rows = createPilot(run(), vocabulary);
+  const rows = createPilot(inventory(), vocabulary);
   Object.assign(rows[0], { annotator: "owner", core_tag_ids: ["m.calm", "m.urgent", "m.sad", "s.rest"] });
   rows.slice(1).forEach((track) => Object.assign(track, { recording_group: `recording-${track.track_id}`, file_reference: `sha256-${track.track_id}`, reviewed: true, blind: true, listened_intervals: [[0, 120]], labels: { "m.calm": "positive", "m.urgent": "negative", "m.sad": "uncertain", "s.rest": "positive" } }));
   return rows;
 }
 const pilot = () => freezePilot(draft(), vocabulary);
 
-test("one JSONL contract; initialization strips predictions and does not invent recording identity", () => {
-  const rows = createPilot(run(), vocabulary);
+test("inventory initialization is independent of model results and does not invent recording identity", () => {
+  const rows = createPilot(inventory(), vocabulary);
   assert.deepEqual(parsePilot(serializePilot(rows)), rows);
   assert.deepEqual(rows[1].labels, {});
   assert.equal(rows[1].recording_group, "");
@@ -27,6 +28,53 @@ test("one JSONL contract; initialization strips predictions and does not invent 
   assert.throws(() => parsePilot(JSON.stringify({ schema_version: "assistant-mood-pilot/v1", tracks: [] })), /JSONL/);
 });
 
+
+test("initialization retains the whole selected cohort, including failed and never-run tracks", () => {
+  const input = inventory(), original = structuredClone(input);
+  const rows = createPilot(input, vocabulary);
+  assert.deepEqual(rows.slice(1).map((track) => track.track_id), ids);
+  assert.deepEqual(input, original);
+  assert.deepEqual(createPilot({ ...input, track_ids: [...ids].reverse() }, vocabulary), rows);
+  const frozen = pilot(), partial = run();
+  partial.track_results = [];
+  const allMissing = scorePilot(frozen, partial, vocabulary);
+  assert.equal(allMissing.categories.all.missing_results, allMissing.categories.all.tracks);
+  assert.equal(allMissing.categories.all.empty_results, 0);
+  const selected = frozen.slice(1).filter((track) => track.split === "development");
+  partial.track_results = [run().track_results.find((row) => row.track_id === selected[0].track_id)];
+  const oneResult = scorePilot(frozen, partial, vocabulary);
+  assert.equal(oneResult.categories.all.tracks, selected.length);
+  assert.equal(oneResult.categories.all.missing_results, selected.length - 1);
+  assert.equal(oneResult.categories.all.recall, 1 / selected.length);
+});
+
+test("inventory rejects result-derived cohorts and invalid or oversized selections", () => {
+  assert.throws(() => createPilot(run(), vocabulary), /explicit listening inventory/);
+  assert.throws(() => createPilot({ ...inventory(), track_results: [] }, vocabulary), /explicit listening inventory/);
+  for (const track_ids of [[], [1], [1, 1], [0, 1], [-1, 2], ["1", 2], [1.5, 2], [NaN, 2], [Number.MAX_SAFE_INTEGER + 1, 2], Array.from({ length: 1001 }, (_, i) => i + 1)]) {
+    assert.throws(() => createPilot({ ...inventory(), track_ids }, vocabulary), /unique positive library track IDs/);
+  }
+  assert.equal(createPilot({ ...inventory(), track_ids: [1, 2] }, vocabulary).length, 3);
+  assert.equal(createPilot({ ...inventory(), track_ids: Array.from({ length: 1000 }, (_, i) => i + 1) }, vocabulary).length, 1001);
+});
+
+test("CLI initializes before any run exists and never overwrites listening work", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "music-pilot-inventory-"));
+  try {
+    const source = join(directory, "inventory.json"), vocab = join(directory, "vocabulary.json"), target = join(directory, "draft.jsonl");
+    const content = JSON.stringify(inventory());
+    await writeFile(source, content); await writeFile(vocab, JSON.stringify(vocabulary));
+    await main(["init", source, vocab, target]);
+    const saved = await readFile(target, "utf8"), rows = parsePilot(saved);
+    assert.deepEqual(rows.slice(1).map((track) => track.track_id), ids);
+    assert.ok(rows.slice(1).every((track) => !track.reviewed && track.blind === null && Object.keys(track.labels).length === 0));
+    await assert.rejects(main(["init", source, vocab, target]), { code: "EEXIST" });
+    assert.equal(await readFile(target, "utf8"), saved);
+    assert.equal(await readFile(source, "utf8"), content);
+    await writeFile(source, JSON.stringify(run()));
+    await assert.rejects(main(["init", source, vocab, join(directory, "rejected.jsonl")]), /explicit listening inventory/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 test("transitive duplicate, file and recording groups stay together regardless of input order", () => {
   const rows = draft();
   rows[1].recording_group = rows[2].recording_group;
