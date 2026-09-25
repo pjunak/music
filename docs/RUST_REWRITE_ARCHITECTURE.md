@@ -724,6 +724,11 @@ exercises the actual media, model mount, and durable job path. The pinned frame 
 cover controlled numerical preprocessing; basic mono/stereo level/count, ending and real-graph
 checks also passed on Windows GNU on 25 September 2026. Full resampling/multichannel reference
 comparison and a long repeated-run RSS/cancellation soak remain separate acceptance work.
+The existing [voice acceptance probe](AUDIO_ANALYSIS_ACCEPTANCE.md#voice-repetition-and-lifecycle-probe)
+now measures initialization, repeated job-scoped workers, explicit cancellation and
+post-join process memory separately, without opening a library or changing analysis
+semantics. Its Linux process counters exclude the decoder and server; whole-container
+resource and concurrent-playback acceptance remain required.
 If that evidence fails, the same interface moves to the documented Rust subprocess.
 There is no Python fallback.
 

@@ -78,9 +78,11 @@ The Rust gates are verified with `cargo-nextest` 0.9.143, `cargo-deny` 0.20.2, `
 `cargo install <tool> --version <version> --locked` only when they are unavailable or the required version changed.
 
 For an operator acceptance pass on original audio, the optional
-[factual audio probe](AUDIO_ANALYSIS_ACCEPTANCE.md) exercises coverage, repeat runs and
-cancellation without touching a library. Its tests are included in the normal Rust
-workspace gates; private-corpus and container measurements remain separately reported.
+[audio probes](AUDIO_ANALYSIS_ACCEPTANCE.md) exercise factual coverage and voice inference,
+repeat runs, cancellation and worker lifecycle measurements without touching a library.
+Voice requires the separately supplied pinned model. Tests for both probes are included
+in the normal Rust workspace gates; private-corpus and container measurements remain
+separately reported.
 
 The [MusiCNN reference fixtures](../crates/music-analysis/tests/fixtures/README.md) run
 in the normal Rust suite without external packages or model weights. Regenerate them

@@ -1,13 +1,15 @@
-# Factual audio acceptance probe
+# Audio analysis acceptance probes
 
-Use this read-only tool before a large context rebuild to check the real extractor
-on representative recordings. It runs the same FFmpeg/RustFFT implementation on
-one fixed analysis worker. It does not start a server, access the database, change
-tags, contact providers or load a voice/mood model.
+Use these read-only tools before a large context rebuild to check the real extractors
+on representative recordings. The factual probe runs the same FFmpeg/RustFFT
+implementation on one fixed analysis worker, without a model. The optional
+[voice probe](#voice-repetition-and-lifecycle-probe) exercises the configured MusiCNN
+worker separately. Neither starts a server, accesses the database, changes tags or
+contacts providers.
 
 This is extraction and operational evidence. Listening judgments remain in the
-[grouped mood pilot](MOOD_PILOT.md). Model preprocessing/output parity, voice
-inference and whole-application resource acceptance are separate checks.
+[grouped mood pilot](MOOD_PILOT.md). Model preprocessing/output parity and
+whole-application resource acceptance are separate checks.
 
 ## Build and prepare
 
@@ -194,6 +196,115 @@ added. Absolute loudness remains local technical evidence, outside mood-tagger i
 A separate loudness pass remains the measured bottleneck; its optimization is open,
 with correctness acceptance required before adoption.
 
+## Voice repetition and lifecycle probe
+
+Build the existing optional voice probe and supply the separately licensed,
+checksum-pinned model described in the [voice architecture](RUST_REWRITE_ARCHITECTURE.md#voice-inference):
+
+```powershell
+cargo build --locked --release -p music-analysis --bin music-voice-probe
+Get-Content -Raw ./private-voice-paths.json |
+  ./target/release/music-voice-probe --model ./voice_instrumental-musicnn-msd-2.pb --ffmpeg ffmpeg --repeat 3 |
+  Set-Content ./private-voice-report.jsonl
+```
+
+Input limits match the factual probe: 4 MiB, 1-512 paths and 1-20 repetitions.
+Readiness loads and releases a model once. Every pass then starts one fresh worker,
+processes the tracks sequentially, and joins/releases the worker before the next
+pass. The optional `--warmup` analyzes the first track once before each measured
+pass; its time is reported separately. It does not provide a controlled cold start.
+
+The current-only report is `voice-probe/v2`, prefixed with `VOICE_PROBE_JSON `.
+Three record types share the verified source signature, platform and memory scope:
+
+- `initialization`: readiness duration and memory before/after its temporary worker.
+- `track`: zero-based manifest index and pass iteration, elapsed time, numeric
+  `voice_score` / `vocal_coverage`, prediction-window count and memory before/after.
+  Failed or cancellation-mode records carry no scores or window count.
+- `pass`: track/failure counts, start/warmup/release timings, total pass time and
+  memory before/after starting and joining the worker. `complete` means all requested
+  track operations succeeded; in cancellation mode those operations must be cancelled.
+
+Only approved numeric measurements and typed failure codes are projected. Paths,
+embedded tags, arbitrary model summaries and raw decoder/IO errors are excluded.
+A failed track does not prevent later inputs or passes. Initialization, worker-start,
+warmup or output failures terminate the command with a nonzero exit; an incomplete
+report cannot pass acceptance. No v1 compatibility output is retained.
+
+Exercise cancellation with recordings long enough to remain in inference:
+
+```powershell
+Get-Content -Raw ./private-long-voice-paths.json |
+  ./target/release/music-voice-probe --model ./voice_instrumental-musicnn-msd-2.pb --ffmpeg ffmpeg --repeat 3 --cancel-after-ms 100 |
+  Set-Content ./private-voice-cancellation.jsonl
+```
+
+The timer starts at each analysis request, after worker initialization. Delays are
+1-1,800,000 ms. Cancellation mode rejects `--warmup` so it cannot silently run an
+entire uncancelled warmup before measuring. It requires both a cancellation request
+and the typed cancelled result, awaiting inference and decoder cleanup before
+proceeding. Finishing before or despite the request is `cancellation_not_observed`
+and a nonzero exit. Repeat with different delays. A single Tract prediction cannot
+be interrupted midway; this remains cooperative cancellation, not a hard watchdog.
+
+`voice_score` is an uncalibrated model score; `vocal_coverage` is the fraction of
+voice-leading overlapping windows, not measured vocal seconds. Window count alone
+cannot establish decoded duration or musical correctness. Compare original duration
+and factual coverage separately. Joining a worker proves its graph lifetime ended;
+process RSS can remain above the initial level because of allocator/cache retention.
+Use repeated pass observations to investigate growth before drawing conclusions.
+
+## Original-audio acceptance — 25 September 2026
+
+With owner permission, both release probes processed all 22 recordings from two
+local albums: stereo AAC at 44.1 kHz, 207.40–310.03 seconds each, totaling
+5,469.19 seconds (91.15 minutes). Each extractor ran two complete passes, one probe
+at a time on Windows x64 GNU with Rust 1.97.1 and FFmpeg/ffprobe 9.0.2 (Gyan full
+build). These were unconstrained local runs; disk caches were not controlled.
+The manifest, per-file hashes and reports remain private ignored artifacts.
+
+| Observation | Factual extractor | Optional voice worker |
+|---|---|---|
+| Completed track operations | 44/44 | 44/44 |
+| Elapsed time per track | 2.930–4.337 s | 3.298–4.942 s |
+| Processing seconds per audio minute | 0.835–0.870 | 0.943–1.085 |
+| Repeat agreement | Duration, coverage, section ending and all four loudness fields matched exactly | Score, voice-leading window fraction and window count matched exactly |
+| Additional planned cancellation checks | 12/12 cancelled | 12/12 cancelled |
+| Longest observed cancellation cleanup | 35.26 ms | 24.32 ms |
+
+All factual records retained `whole_track` decoded coverage and finite EBU input
+measurements. The last section reached decoded duration within 0.44 ms; decoded
+duration differed from ffprobe container duration by at most 21.66 ms. No proxy was
+needed for this sample. Voice produced 139–208 prediction windows per recording;
+the two model-owning worker starts took 17.06–18.50 ms and joins took 0.61–0.68 ms.
+Readiness took 25.26 ms separately. These times exclude an application server and
+do not predict production throughput or certify peak memory.
+
+Cancellation used one original recording from each album, three repetitions each,
+at both 100 ms and 500 ms. Every planned cancellation returned the typed result
+after cleanup; none emitted completed scores, coverage or loudness. Separate CLI
+controls verified missing-file failure with later-track recovery, malformed-input
+rejection, repeated warmup, and nonzero exit when a four-second synthetic recording
+completed before the cancellation timer. The last case emitted no voice score.
+
+The voice source signature retained the pinned MusiCNN graph with
+`tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2+artifact/v2`.
+Factual extraction retained `local-context/v3+rustfft/v2+loudness/v2`.
+The probe changes require neither a new analyzer identity nor a data migration.
+Source SHA-256 hashes, sizes and modification times were unchanged after the runs.
+No database, authored tags, provider calls or deployment participated.
+
+This is the first operational acceptance sample on owner-supplied music. Two albums
+do not establish broad format/domain performance. There are no independent listening
+judgments or reference model outputs for these recordings, so repeatability cannot
+certify vocal detection, mood accuracy or tabletop suitability. Windows RSS remained
+null as designed; live Linux/cgroup memory, concurrent playback and the actual durable
+production rebuild still need their own acceptance.
+
+The batch passed all 519 Rust tests with the real pinned model and FFmpeg configured,
+formatting, workspace check, strict Clippy, architecture, doc tests, generated
+contracts and both release builds. Changed documentation links also passed.
+
 ## Resource boundary and production acceptance
 
 Linux counters come from `/proc/self/status`. Their scope is **this probe process
@@ -205,10 +316,10 @@ not a per-recording peak. Windows and inaccessible/malformed counters return
 Consequently these counters alone cannot pass the three-CPU/4 GB production gate.
 On the target container, also measure total cgroup CPU/memory while the normal
 durable context job runs concurrently with ordinary browsing and playback. Include
-optional voice inference if enabled; use the existing `music-voice-probe` only
-for isolated voice diagnostics. Record cancellation, restart/resume, failures,
+optional voice inference if enabled; use the [voice probe](#voice-repetition-and-lifecycle-probe)
+for isolated repeated-pass and cancellation diagnostics. Record cancellation, restart/resume, failures,
 post-pass resource release and playback behavior. Existing job checkpoints remain
-the authority for the actual rebuild; this tool writes none.
+the authority for the actual rebuild; these tools write none.
 
 Keep an independent listening comparison and the operator-controlled production
 rebuild as separate acceptance steps. See the current

@@ -23,10 +23,11 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** forward schema-15/16 reset of generated analysis and proposal reviews,
   old-job supersession and audit preservation, current-only context parsing, updated
   existing review/inspector UI. Accepted/manual tags and authored playlists survive.
-- **Implemented:** a read-only factual-audio acceptance probe using the real extractor
-  and fixed executor, with repeated passes, explicit cancellation outcomes, coverage,
-  stage timings and process-local memory observations. It adds no model or dependency;
-  production container totals and concurrent playback still need separate measurement.
+- **Implemented:** read-only factual and voice acceptance probes using the real extractors,
+  with bounded repeats, explicit cancellation outcomes and shared input/memory helpers.
+  Voice reports readiness, per-track work and each worker start/join separately; scores
+  appear only for completed classification. No model, dependency or storage layer was
+  added. Production container totals and concurrent playback need separate measurement.
 - **Implemented:** bounded final loudness-report capture survives verbose embedded notes;
   factual decode/loudness codec and filter pools are limited. The acceptance probe exposes
   numeric measurements. The direct ebur128 substitution failed end-of-file/short-signal
@@ -51,15 +52,15 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** retired metadata/audio heuristic jobs, routes, schemas and UI; removed
   their saved axes and readers. Automatic playlists use accepted/manual tags. Playlist
   ranking retains metadata search but no longer presents keyword guesses as analysis tags.
-- **Still required before production acceptance:** independent owner judgments, bounded
-  real-library/listening comparison, resource/concurrent-playback checks, and an
+- **Still required before production acceptance:** independent owner judgments,
+  real-library listening comparison, resource/concurrent-playback checks, and an
   operator-started production rebuild. No paid calls or production changes were made.
 - **Conditional:** learned audio integration follows its parity/usefulness gates. Jev,
   training, extra encoders/datasets and a new annotation UI are not release dependencies.
 
 ### Local validation and release boundary
 
-Across completed batches, Windows GNU validation passed: 514 Rust tests, 342 frontend
+Across completed batches, Windows GNU validation passed: 519 Rust tests, 342 frontend
 tests and 48 pilot/policy checks; workspace and fuzz Clippy, formatting, architecture,
 generated contracts, doctor/migration coverage, frontend production build and the
 headless release build.
@@ -75,30 +76,39 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** made voice-model provenance hold at every worker start. Previously,
-startup checked the file checksum but later workers reopened the path without
-verification. A regression reproduced acceptance of a graph with altered output
-weights under the original model identity.
+**Latest batch:** extended the existing voice probe for bounded real-audio acceptance.
+It now repeats whole passes with one fresh worker each, measures initialization and
+worker start/join separately, and checks cancellation at explicit delays. A cancelled
+record is accepted only after the worker returns its typed result and cleanup finishes.
+Early completion cannot pass cancellation or emit a successful score record.
 
-Startup and worker model reads are now bounded to 4 MiB (plus one byte to detect
-overflow). Each worker hashes an owned byte snapshot and parses that same snapshot
-before applying the pinned-graph compatibility adjustments. A changed, missing or
-unreadable model fails the optional stage; restoring the exact model allows a new
-worker. No live file mapping or post-check reopen is used for graph parsing.
+The factual and voice tools share bounded private-input parsing, numeric argument
+validation and Linux process-memory sampling. Voice reports only the current v2
+shape, approved numeric fields and typed errors; malformed input and decoder errors
+do not echo private paths. Failure of one track still permits later inputs/passes.
+No analysis semantics, provider, model, dependency, public API or persistence changed.
 
-The `+artifact/v2` identity invalidates older generated voice contexts. Accepted/manual
-tags are preserved. Golden model outputs and decoded-audio regressions still pass;
-no model, provider, dependency or general storage layer was added.
+The owner supplied two albums for read-only checks, totaling about 91 minutes. Both
+extractors processed all 22 stereo AAC recordings twice: 44 factual and 44 voice
+operations passed. Reported factual duration/coverage/endings/loudness and voice
+scores/window counts matched across repeats. The ending discrepancy was below
+0.44 ms and decoded/container duration differences below 22 ms. All 24 planned
+cancellations passed, with maximum cleanup of 35.26 ms factual / 24.32 ms voice.
+Failure/recovery, early-completion and warmup controls passed; original file hashes,
+sizes and modification times were unchanged. Windows RSS is unavailable, so graph
+joins do not certify production memory release.
 
-Validation: all 514 Rust tests passed with the real pinned model and FFmpeg configured,
-including replacement/recovery, bounded reads, golden outputs and worker inference.
-Formatting, workspace check, strict Clippy, architecture, doc tests and generated
-contracts passed. Local documentation links and the changed-source secret scans passed.
-Frontend, pilot, fuzz and dependency graphs are unchanged; their prior gates were not
-rerun. The [dated acceptance notes](../crates/music-analysis/tests/fixtures/README.md)
-record the exact model and validation boundary.
-The listening pilot is ready. Owner judgments, EffNet's complete audio path, production
-resource/concurrent-playback measurements and the operator-started rebuild remain open.
+Validation: all 519 Rust tests passed with the real pinned voice model and FFmpeg
+configured. Formatting, strict workspace Clippy, workspace check, architecture,
+doc tests, generated contracts and both release probe builds passed. Documentation
+links passed. Frontend, pilot, fuzz and dependency graphs are unchanged; their prior
+gates were not rerun.
+
+The listening pilot is ready. These operational observations are not independent
+mood/vocal labels or model reference outputs. Owner judgments, the complete EffNet
+audio path, production resource/concurrent-playback measurements and the
+operator-started rebuild remain open. The [acceptance guide](AUDIO_ANALYSIS_ACCEPTANCE.md)
+owns commands, report semantics, dated measurements and their limits.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -112,7 +122,7 @@ options survey; this plan determines the narrower implementation scope.
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
 | FFmpeg / ffprobe | Decode and technical inspection | Bounded pools, reliable loudness capture and normalized voice downmix | Keep | Core: correct input levels and complete original-audio evidence; stereo defaults previously boosted voice input by about 3 dB. |
 | FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
-| music-context-probe | No factual extractor acceptance CLI | Current v2 reports with numeric loudness, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
+| music-context-probe / music-voice-probe | No factual acceptance CLI; basic single-pass voice probe | Current v2 reports; bounded repeats/cancellation, factual coverage and voice worker lifecycle | Keep for rebuild acceptance | High: measure actual original-audio extraction and cleanup before a large rebuild; process RSS is not whole-container evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
 | MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries and exact model snapshot verification per worker | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |
