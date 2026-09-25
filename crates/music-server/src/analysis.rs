@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 const FAILURE_SAMPLE_LIMIT: usize = 20;
+const MAX_RETRY_HISTORY: usize = 64;
 const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
@@ -135,6 +136,46 @@ impl ContextAnalysisJobHandler {
         }
     }
 
+    async fn retry_job_ids(
+        &self,
+        context: &JobExecutionContext,
+    ) -> Result<BTreeSet<String>, JobHandlerError> {
+        let current = context
+            .related_job(context.job_id())
+            .await
+            .map_err(JobHandlerError::from_execution)?
+            .ok_or_else(|| JobHandlerError::new("context analysis job history is unavailable"))?;
+        let mut completed = BTreeSet::new();
+        let mut next = current.retry_of_id.clone();
+        while let Some(id) = next {
+            // Missing, incompatible, cyclic or excessive history cannot justify reuse.
+            // Older results outside this bounded chain must be analyzed again.
+            if completed.len() >= MAX_RETRY_HISTORY || id == current.id || completed.contains(&id) {
+                break;
+            }
+            let Some(previous) = context
+                .related_job(&id)
+                .await
+                .map_err(JobHandlerError::from_execution)?
+            else {
+                break;
+            };
+            if previous.kind != current.kind
+                || previous.schema_version != current.schema_version
+                || previous.lane != current.lane
+                || previous.restartable != current.restartable
+                || previous.checkpoint_policy != current.checkpoint_policy
+                || previous.parameters != current.parameters
+                || !previous.status.can_retry()
+            {
+                break;
+            }
+            next = previous.retry_of_id;
+            completed.insert(previous.id);
+        }
+        Ok(completed)
+    }
+
     async fn start_voice_worker(&self) -> Option<VoiceWorker> {
         let factory = self.voice_worker_factory.as_ref()?.clone();
         self.executor
@@ -200,6 +241,11 @@ impl JobHandler for ContextAnalysisJobHandler {
             let voice_signature = self.voice_analyzer.source_signature.as_deref();
             let voice_enabled =
                 self.voice_analyzer.is_ready() && self.voice_worker_factory.is_some();
+            let retry_jobs = if parameters.force {
+                self.retry_job_ids(context).await?
+            } else {
+                BTreeSet::new()
+            };
             let mut signal_work = Vec::new();
             let mut audio_completed = 0_usize;
             let mut audio_failed = 0_usize;
@@ -229,11 +275,18 @@ impl JobHandler for ContextAnalysisJobHandler {
                 if completed_by_job {
                     checkpointed = checkpointed.saturating_add(1);
                 }
+                let completed_by_retry =
+                    state.is_some_and(|state| retry_jobs.contains(&state.job_id));
                 // A partial row is the durable boundary between the signal and
                 // voice passes. Preserve it even for a forced retry so a
                 // cancelled voice pass never causes another signal decode.
                 let signal_is_current = parsed.as_ref().is_some_and(|parsed| {
-                    parsed.completeness == "partial" || !parameters.force || completed_by_job
+                    parsed.completeness == "partial"
+                        || !parameters.force
+                        || completed_by_job
+                        || (completed_by_retry
+                            && (!voice_enabled
+                                || context_voice_stage_status(parsed) == Some("complete")))
                 });
                 if signal_is_current && !current_failure {
                     audio_completed = audio_completed.saturating_add(1);
@@ -1037,6 +1090,10 @@ fn object(value: Value) -> Map<String, Value> {
 fn round_seconds(value: f64) -> f64 {
     (value * 1_000.0).round() / 1_000.0
 }
+
+#[cfg(test)]
+#[path = "analysis_recovery_tests.rs"]
+mod recovery_tests;
 
 #[cfg(test)]
 mod tests {

@@ -175,7 +175,14 @@ active old analysis jobs before recovery. Per-tag decisions replace those column
 rules retain their filters and materialized tracks while switching to accepted/manual tags. Provider attempts and remote batch identifiers remain audit history;
 old submissions are not replayed. Context, tagging and batch-collection jobs use schema 2 and new analyzer signatures.
 Restart preserves completed new analysis; all tracks require the initial source-audio
-rebuild. No old-context reader or model-ID prefix fallback is retained.
+rebuild. Explicit retries of a cancelled/failed forced context job also reuse current
+successes from that job's compatible retry chain; a new forced job recomputes all
+completed tracks. Unfinished or stale results remain work; when voice is enabled,
+a full context with failed voice is also retried. History lookup is limited
+to 64 predecessors with the same job contract and parameters; missing, incompatible
+or cyclic history ends reuse lookup, so results outside the validated chain are
+recomputed. Existing partial audio checkpoints still resume their voice stage.
+No old-context reader or model-ID prefix fallback is retained.
 
 `ModelBatchTransport` is the separate asynchronous port; `model_jobs/batch.rs` owns the
 upload/submission/collection lifecycle. SQLite schema 12 stores durable pending batches.

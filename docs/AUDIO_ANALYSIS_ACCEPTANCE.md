@@ -305,6 +305,48 @@ The batch passed all 519 Rust tests with the real pinned model and FFmpeg config
 formatting, workspace check, strict Clippy, architecture, doc tests, generated
 contracts and both release builds. Changed documentation links also passed.
 
+## Durable rebuild recovery (25 September 2026)
+
+The application job now avoids repeating completed work when the operator retries a
+cancelled or failed forced rebuild. The previous code preserved successes on restart
+of the same job, but an explicit retry has a new job ID and decoded completed tracks
+again. The regression reproduced a completed context being overwritten by that retry.
+
+A forced retry checks up to 64 compatible predecessor jobs. It reuses only parseable,
+current-contract results with matching source identity and a job ID in that chain.
+Prior results that the original forced rebuild never reached still run, as do failures
+and changed source facts. Missing, incompatible or cyclic history cannot extend the
+reuse set. If voice is enabled, a full context is reusable from a predecessor only
+when its voice stage completed successfully; optional voice failures remain eligible
+for the forced retry. A newly requested forced job still recomputes every completed
+recording. Existing partial audio checkpoints retain their voice-stage resume behavior.
+
+Five regressions use the real context handler, bounded executor, durable coordinator
+and SQLite, with a controlled synthetic analyzer so interruption points are repeatable:
+
+- Two cancellations and retries preserve completed checkpoints from both predecessors,
+  including their job attribution, while finishing work still required by the rebuild.
+- Graceful shutdown, database close/reopen and coordinator restart preserve committed
+  work and finish the same job on its second attempt.
+- A missing file stays failed while other tracks finish; restoring it and starting
+  ordinary analysis replaces the failure without repeating successful recordings.
+- Changing indexed source facts after cancellation forces that recording to be
+  analyzed again even though its earlier result belongs to the retry chain.
+- A full context with an unavailable optional voice stage is attempted again on a
+  forced retry. With `MUSIC_TEST_VOICE_MODEL` and FFmpeg configured, the real pinned
+  voice worker processes deliberately invalid synthetic inputs; decoder failures stay
+  visible and never become successful classifications. The explicit model must load.
+
+The tests check call counts, exact retained context rows, visible failures, preserved
+manual tags and unchanged synthetic input files. The optional regression exercises
+real worker loading and decoder failure, not successful inference or vocal accuracy.
+Private-song analysis, abrupt process-kill recovery, concurrent playback and production
+resource measurements remain separate from this durable-job acceptance.
+
+The final batch passed all 524 Rust tests with the pinned voice model and FFmpeg
+configured, workspace check, strict workspace/fuzz Clippy, formatting, architecture,
+doc tests and generated contracts. All 56 checked documentation links/anchors passed.
+
 ## Resource boundary and production acceptance
 
 Linux counters come from `/proc/self/status`. Their scope is **this probe process

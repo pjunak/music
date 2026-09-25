@@ -27,6 +27,8 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** forward schema-15/16 reset of generated analysis and proposal reviews,
   old-job supersession and audit preservation, current-only context parsing, updated
   existing review/inspector UI. Accepted/manual tags and authored playlists survive.
+  Forced retries now preserve current completed results from compatible predecessor
+  jobs; restart/retry, missing-file recovery and stale-source regressions use SQLite.
 - **Implemented:** read-only factual and voice acceptance probes using the real extractors,
   with bounded repeats, explicit cancellation outcomes and shared input/memory helpers.
   Voice reports readiness, per-track work and each worker start/join separately; scores
@@ -69,19 +71,17 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Across completed batches, Windows GNU validation passed 519 Rust tests, workspace
-and fuzz Clippy, formatting, architecture, generated contracts, doctor/migration
-coverage and the headless release build. Earlier batches also passed all 361 frontend
-tests, frontend lint/typecheck/production build and 23 grouped mood-pilot tests.
-The preceding model-pairing batch passed 26 reference-tool tests. Original TensorFlow and
-ONNX comparisons passed on 71 patches. The metadata-bearing formats reproduce
-all 66 selected patches and 226 patches plus the summary of one complete track
-exactly; that track also passes native comparison. Earlier frame fixtures and
-workflow gates are unchanged. The listening-scope batch passed 29 pilot tests,
-all 361 frontend tests, lint, typecheck, production build and 55 local documentation
-link/anchor checks. Its UI-export integration fixture uses the frozen duration and
-checks independent report identity. Application Rust behavior is unchanged; Rust
-and reference-model gates were not rerun for this batch.
+The forced-retry batch passed all 524 Rust tests on Windows GNU with the real pinned
+voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz Clippy,
+formatting, architecture, doc tests, generated contracts and 56 documentation links/anchors.
+The five new recovery regressions exercise the real job/coordinator/SQLite path.
+
+Earlier batches passed the headless release build, all 361 frontend tests, frontend
+lint/typecheck/production build, 29 grouped mood-pilot tests and 26 reference-tool tests.
+Original TensorFlow/ONNX comparisons passed on 71 patches; the metadata-bearing formats
+reproduced all 66 selected patches and a complete 226-patch track with its summary.
+Frontend, pilot, model-reference tools and packaging are unchanged by this batch;
+their separate gates were not rerun.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -94,24 +94,28 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** fixed an acceptance flaw: assisted and excerpt judgments could
-enter the same scores as independent whole-recording judgments. Declaring
-whole-track scope previously required only one nonempty listening interval.
+**Latest batch:** repaired forced-rebuild retry behavior in the application. After
+cancellation, an explicit retry created a new job ID and decoded completed recordings
+again. A SQLite-backed regression reproduced the overwritten checkpoint before the fix.
 
-The current v2 pilot freezes the original recording duration with file identity and
-group membership. Independent scoring and paired comparison require blind judgments
-covering the entire recording without gaps for every selected track. A missed beginning,
-interior section or ending fails. Assisted/excerpt data remains useful through explicit
-`--diagnostic` reports, marked on the comparison and both candidates. The complete
-frozen cohort remains present, including missing results; there is no automatic
-selection of a cleaner-looking subset. No legacy pilot reader was added.
+Retries now recognize current successes from the same compatible retry chain, bounded
+to 64 predecessors. Earlier results the forced rebuild never reached still run.
+Changed source facts and failures still require analysis. A deliberately new forced
+job recomputes every completed track; no legacy result reader or fallback was added.
 
-Validation: 29 pilot tests passed, including malformed/mutated durations, ending and
-gap controls, biased judgments, confirmation isolation, missing outcomes and actual
-CLI invocations in both modes. All 361 frontend tests, lint, typecheck and production
-build passed, including the UI-export-to-CLI regression with frozen duration and
-independent report identity. All 55 checked documentation links/anchors passed.
-Duration and blinding remain listener declarations, not proof of listening or audio-file identity.
+Five durable regressions pass: repeated cancellation/retry, graceful shutdown plus
+database reopen, missing-file recovery without repeated successes, changed-source
+reanalysis, and a full context whose optional voice stage failed. They verify exact
+saved rows, call counts, failures, preserved manual tags and unchanged synthetic inputs.
+The actual handler/coordinator/storage execute; factual extraction is controlled for
+repeatable interruptions. The optional case also loads the real pinned voice worker
+and confirms decoder failures stay visible. See the
+[recovery evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#durable-rebuild-recovery-25-september-2026).
+This closes an application recovery defect, not production resource or listening
+acceptance. All 524 Rust tests passed with the pinned voice model and FFmpeg, along
+with workspace/fuzz Clippy, workspace check, formatting, architecture, doc tests,
+generated contracts and 56 documentation links/anchors. Numerical analysis, model
+contracts, provider behavior and wire shapes are unchanged.
 
 **Fully implemented in the application:** factual whole-track context and optional
 voice analysis; attributed catalog evidence; structured per-tag model proposals and
@@ -151,7 +155,7 @@ options survey; this plan determines the narrower implementation scope.
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
-| SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
+| SQLite / durable jobs / review guards | Existing persistence; forced retries repeated completed analysis | Current-only reset/freshness; compatible retry-chain reuse and SQLite recovery regressions | Keep | Core: resume completed new work without skipping stale/unattempted tracks, preserve authored tags and reject stale reviews. |
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, independent whole-recording scoring, marked diagnostics and paired comparison | Collect independent judgments; evaluate development, then confirmation | Essential: prevents selection and listening-scope bias; keeps missing outcomes and useful diagnostic data without a dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
