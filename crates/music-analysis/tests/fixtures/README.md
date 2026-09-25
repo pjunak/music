@@ -174,6 +174,98 @@ or certify musical usefulness. The fixed explicit framing policy is tested
 mechanically; the rejected convenience helper is not its temporal oracle.
 Independent owner listening and the complete-path gates still determine adoption.
 
+## Whole-track stream reference, 25 September 2026
+
+The offline [stream exporter](../../../../tools/effnet-stream.mjs) uses the same
+pinned local packages and exact owned model snapshots as the patch exporter.
+It runs each centered frame once and one graph batch at a time. Its data buffers
+retain 512 PCM samples, a 1,024-byte read buffer, 128 by 96 mel values and one
+embedding/output set, independent of track length. Each inference disposes its
+tensors; session cleanup is attempted on success, failure and cancellation.
+It neither installs models nor changes the application dependency graph.
+
+```powershell
+node tools/effnet-stream.mjs --inputs private-pcm-paths.json --essentia ./reference/node_modules/essentia.js --ort ./reference/node_modules/onnxruntime-web --models ./private-models --output private-effnet-stream.jsonl
+node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs
+```
+
+Limits remain 1-32 explicit PCM files, 16 kHz mono float32-le, at most 15 minutes
+per recording and enough input for a complete 128-frame patch. Short inputs fail;
+the tool does not fabricate repeated frames. Regular starts are 0, 62, 124, ...
+frames, followed by one patch anchored at the final centered frame if it is not
+already on that grid. Silent frames stay at their original positions. Only frame
+boundary padding is zero-filled; no ending audio is dropped or repeated. This
+explicit ending policy still differs from the upstream wrapper's discard/repeat
+options and does not claim complete TensorFlow-wrapper parity.
+
+For aggregation, each sample belongs to the nearest patch center: boundaries
+are midpoints between adjacent centers, clipped to the real recording endpoints.
+These non-overlapping weights sum to the decoded sample count and lie inside
+their patch's valid support, including the off-grid ending. The versioned
+`nearest_patch_center_time_partition/v1` convention produces weighted means and
+population standard deviations; per-label maxima preserve brief high scores.
+Scores remain uncalibrated. Weights are a summary convention, not independent
+votes, identified mood changes or estimated mood duration. Quantiles, selected
+interval projections and application storage still need an actual pilot consumer.
+
+The current-only `effnet-stream-reference/v1` JSONL contains a provenance header,
+ordered patch outputs with frame/support/weight positions, then each completed
+track's PCM hash, coverage, counts and bounded summaries. It streams diagnostic
+embeddings and head vectors to the private reference file, not an in-memory or
+library-wide cache. It omits raw samples and mel tensors. Keep all audio-derived
+outputs private and outside Git. A final completion marker appears only after
+all tracks and runtime cleanup succeed; require it, matching counts and a
+successful process exit. Cancellation emits a cancelled marker, returns CLI
+exit 130 and never emits a completed summary for the partial track. Other
+failures leave incomplete output. Existing output paths are always refused.
+
+Checks detect truncated/growing PCM and changes to descriptor/path identity,
+size or high-resolution timestamps. The PCM hash identifies exactly the bytes
+consumed; these metadata checks do not make concurrent filesystem reads atomic.
+Cooperative cancellation is checked while framing and around graph calls, with
+an event-loop yield per patch so pending signals can run. A wedged synchronous
+WASM inference call is not forcibly interruptible. Closing a session does not
+prove that its allocator returns all memory to the operating system.
+
+The same 22 approved recordings (91.1579 minutes) completed all 5,503 patches.
+An isolated Rust comparator streamed the same PCM independently, used the shared
+Rust mel frontend and Tract 0.23.7, verified the exact model byte snapshots, and
+compared every patch's position, embedding and head outputs. Its independent
+weighted sum/sum-of-squares/max calculation matched the incremental reference
+summaries. All PCM hashes and coverage/counts agreed. A passing control and four
+negative controls confirm that altered frame positions, changed head scores,
+corrupted summaries and missing completion records cannot pass the native gate.
+
+| Check | Fixed gate | Worst real-track observation |
+|---|---|---|
+| Patch embeddings | Cosine >= 0.999 | Minimum 0.999999999974 |
+| Mood/theme outputs | Absolute error <= 0.001 | 0.0000025332 |
+| Instrument outputs | Absolute error <= 0.001 | 0.0000019968 |
+| Weighted means, standard deviations and maxima | Absolute error <= 0.001 | 0.0000013709 |
+
+A separate 15-minute synthetic recording containing silence and a final
+4,096-sample tone also passed all 907 patches and summary checks. Source audio
+hashes, sizes and modification times, and the three model hashes, stayed unchanged.
+Three actual-runtime cancellation controls returned no successful run or partial
+track summary, including the CLI SIGINT handler exercised through Node's signal
+event. This is cooperative handler evidence, not an OS forced-termination test.
+The 66 earlier selected-patch references regenerated exactly after sharing the
+runtime; the original 1,152-feature synthetic fixture also remained identical.
+
+On this Windows host the reference pass took 184.93 seconds with a process peak
+RSS of 226.75 MiB; the native comparator took 36.28 seconds including 126.7 ms of
+graph loading, about 0.398 seconds per audio minute. The separate 15-minute
+reference used 204.88 MiB peak process RSS. These are single development runs,
+including private-reference I/O, not isolated inference benchmarks. They exclude
+source decoding, the application server, playback and Linux cgroups; no production
+CPU/RAM or memory-release acceptance follows from them. Native probe sources,
+graphs and reports remain ignored research artifacts.
+
+Twenty-one dependency-free reference tests now cover framing, exact sample
+partitioning, incremental/batch summary agreement, peaks, changed input files,
+failures and cancellation. Eight workflow-policy tests also pass. No application
+runtime, schema, provider projection or accepted/manual tag behavior changed.
+
 ## Voice decoding and ending acceptance, 25 September 2026
 
 The optional voice path now normalizes FFmpeg's stereo-to-mono matrix before
@@ -257,8 +349,9 @@ memory/cancellation benchmark.
 
 ## Remaining acceptance
 
-The EffNet comparisons establish synthetic and selected real-patch feature/same-export
-ONNX graph parity on common PCM. The 25 September voice checks establish basic
+The EffNet comparisons establish synthetic/selected-patch feature parity and
+complete-track same-export ONNX parity with time-weighted summaries on common PCM.
+The 25 September voice checks establish basic
 mono/stereo decoding,
 resampling counts, ending coverage and actual pinned-graph execution on this host.
 Neither establishes original TensorFlow/ONNX encoder equivalence, full resampling
@@ -268,10 +361,12 @@ centering; they did not exercise a complete EffNet wrapper.
 
 The voice acceptance probes now cover repeated real-file runs and cooperative
 cancellation on Windows. Live Linux RSS/cgroup memory and concurrent playback remain
-open; the EffNet experiment has not qualified a full streaming/cancellable worker.
+open. The EffNet reference supports bounded streaming and cooperative cancellation;
+its native production worker and memory-release lifecycle are not implemented or qualified.
 Voice cancellation/expiry is checked before and after each Tract call;
 a wedged in-process inference call cannot be interrupted midway. No new model was
 enabled, no production rebuild ran, and no owner listening labels were invented.
-An EffNet candidate still needs development recordings, its own bounded extraction/tail
-checks and the production resource gate before integration. Keep only the heads that
+An EffNet candidate still needs independently judged development recordings,
+original TensorFlow-export comparison and production lifecycle/resource gates
+before integration. Keep only the heads that
 improve the owner's listening/session decisions.

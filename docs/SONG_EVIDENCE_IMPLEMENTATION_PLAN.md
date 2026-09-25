@@ -43,12 +43,13 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Implemented:** each voice worker verifies the exact owned model bytes it parses,
   with bounded input and replacement/deletion/recovery regressions. The artifact/v2
   identity retires contexts produced under the previous startup-only verification.
-- **Native probe:** five synthetic patches and 66 beginning/interior/ending patches
-  from 22 owner-approved recordings pass fixed feature/ONNX numerical gates. A
-  bounded development exporter preserves silent-frame positions and verifies the
-  pinned references/models. Complete streaming/tail aggregation, original TensorFlow
-  equivalence, cancellation, production resources and listening usefulness remain
-  open; no new application model runtime or weights are bundled.
+- **Native probe:** five synthetic patches, 66 selected real patches and all 5,503
+  patches across the 22 approved recordings pass fixed numerical gates. The offline
+  reference now streams centered frames, preserves silence/endings, partitions time
+  for summaries and handles cooperative cancellation. A 15-minute synthetic limit
+  case also passes native comparison. Original TensorFlow equivalence, a production
+  worker's lifecycle/resources and independent listening usefulness remain open;
+  no application model runtime or weights are bundled.
 - **Implemented:** tagger output v5 / analyzer v8 with per-tag support, reasons,
   validated supporting/conflicting observation IDs and explicit abstention. Current-only
   save/review contracts, strict fixtures, disclosure and existing review UI are updated.
@@ -67,8 +68,9 @@ Across completed batches, Windows GNU validation passed 519 Rust tests, workspac
 and fuzz Clippy, formatting, architecture, generated contracts, doctor/migration
 coverage and the headless release build. Earlier batches also passed all 361 frontend
 tests, frontend lint/typecheck/production build and 23 grouped mood-pilot tests.
-This development-reference batch passed 10 new reference-tool tests and 8 workflow
-policy checks; the existing 1,152-value pinned frame fixture remains identical.
+This whole-track reference batch passed 21 reference-tool tests and 8 workflow
+policy checks; the existing 1,152-value frame fixture and 66 selected real patches
+remain numerically identical. Application Rust/frontend gates were not rerun.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -81,35 +83,40 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** made the optional EffNet numerical experiment usable on real audio.
-The pinned Essentia.js convenience FrameGenerator drops silent frames; it removed
-1-59 frames in 20 of the 22 approved recordings. Indexing its output as a complete
-timeline would shift later patches. A small development-only reference exporter
-now cuts centered frames explicitly, retaining silence, real sample offsets and
-boundary padding. It shares the pinned Essentia loader with the existing fixture
-generator, verifies the ONNX reference/model artifacts and refuses output overwrite.
+**Latest batch:** completed whole-track numerical qualification of the optional
+EffNet experiment on the approved albums. The development-only stream exporter
+reuses the pinned reference runtime and retains one PCM frame, one mel patch and
+one inference result at a time. It evaluates every 62-frame patch plus an ending
+patch, keeping silent frames and checking the input file before completion.
 
-The tool selects beginning, interior and ending patches from bounded private 16 kHz
-mono PCM. All 66 patches passed the unchanged feature, embedding and head gates
-against the shared Rust preprocessing and isolated Tract probe. This establishes
-selected-patch parity on common decoded input, not decoder or complete wrapper
-equivalence. Original audio hashes, sizes and modification times stayed unchanged.
+Overlapping scores use a nearest-patch-center partition of valid sample time;
+weights cover the recording exactly once. Means, variation and maxima stay
+bounded. This is an explicit aggregation convention, not calibrated mood duration.
+Cancellation, failed inference, changed inputs and failed cleanup cannot produce
+a successful run; partial tracks receive no completed summary. Shared runtime
+cleanup now releases each patch's tensors and attempts every session release.
 
-Validation: 10 reference-tool tests and 8 workflow-policy tests passed; existing
-synthetic fixtures reproduced exactly. Real-tool controls rejected overwritten
-outputs and modified weights, and a deliberately perturbed reference failed the
-numerical gate. CI runs only the dependency-free unit tests. Application runtime,
-frontend, Rust dependency graphs, schemas and provider behavior are unchanged;
-their earlier gates were not rerun. See the
-[reference ledger](../crates/music-analysis/tests/fixtures/README.md#real-audio-patch-reference-25-september-2026)
-for commands, observed errors and the framing limitation.
+All 5,503 patches across 22 recordings (91.16 minutes) matched independent Rust
+streaming and Tract inference. Worst head error was 0.000002534; worst summary
+error was 0.000001371, below the unchanged 0.001 gate. A 15-minute silence/ending
+case passed all 907 patches. Three actual-reference cancellation controls passed,
+and the earlier 66 selected-patch outputs reproduced exactly. Four negative
+controls failed the native gate as intended. Original audio
+hashes, sizes and modification times, and model hashes remained unchanged.
 
-Independent listening and real-library candidate usefulness remain open. EffNet
-also needs full streaming/aggregation, original TensorFlow-export equivalence and
-resource/cancellation qualification before adoption. Docker and WSL are unavailable
-on this host, so production resource/concurrent-playback measurements and the
-operator-started rebuild remain separate gates. No application model, audio upload,
-paid call, authored-tag change or deployment was added.
+Validation: 21 reference tests, 8 workflow-policy checks and the unchanged pinned
+frame fixture passed. CI needs no optional models or reference packages. The
+[reference ledger](../crates/music-analysis/tests/fixtures/README.md#whole-track-stream-reference-25-september-2026)
+records numerical errors, exact semantics, commands and Windows measurements.
+Application runtime, frontend, dependency graphs, schemas and provider behavior
+are unchanged; their earlier gates were not rerun.
+
+Remaining: owner listening and candidate usefulness, original TensorFlow-export
+equivalence, a production worker's cancellation/memory lifecycle, Linux/container
+resources with concurrent playback, then an operator-started rebuild. Docker and
+WSL are unavailable here. The prototype's Windows numbers do not satisfy the
+production resource gate. No application model, upload, paid call, authored-tag
+change, push or deployment was added.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -127,15 +134,15 @@ options survey; this plan determines the narrower implementation scope.
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
 | MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries and exact model snapshot verification per worker | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |
-| Essentia.js / ONNX Runtime Web references | Synthetic frame/patch checks | Pinned offline references; explicit framing preserves silence and ending offsets | Keep development-only; reject FrameGenerator as a timeline oracle | High: avoid validating shifted patches; the convenience helper drops silent frames. No production dependency. |
+| Essentia.js / ONNX Runtime Web references | Synthetic frame/patch checks | Pinned patch and whole-track streams; bounded buffers, time-weighted summaries and cancellation | Keep development-only; reject FrameGenerator as a timeline oracle | High: repeatable complete-track checks preserve silent frames and ending offsets. No production dependency. |
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
 | JSONL listening pilot + grouped bootstrap | Small pilot, then inventory derived from successful results | Explicit selected inventory, saved vocabulary, frozen groups, paired comparison and empty-run exports | Collect independent judgments; evaluate development, then confirmation | Essential: prevents success-only selection and distinguishes useful tags, abstentions and missing outcomes without a dataset application. |
-| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Five synthetic and 66 real-audio patches pass fixed feature/ONNX gates | Qualify full extraction, TensorFlow equivalence, resources and usefulness before adoption | Conditional high value: richer evidence; common-PCM patch parity does not certify complete inference or mood quality. |
-| tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated synthetic and real-patch comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; the WASM oracle is development-only. |
+| Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | All 5,503 real-track and 907 long synthetic patches pass native comparison; summaries agree | Qualify TensorFlow equivalence, production lifecycle/resources and usefulness before adoption | Conditional high value: complete-track numerical evidence is promising; it does not certify mood quality or a production worker. |
+| tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
 | TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
@@ -180,7 +187,10 @@ The 25 September real-audio extension passed 66 selected patches from the two ap
 albums using the same gates. It replaces the silence-dropping convenience frame helper
 with explicit positions in the shared decoded PCM. The
 [reference ledger](../crates/music-analysis/tests/fixtures/README.md#real-audio-patch-reference-25-september-2026)
-records the new exporter, 811,008 feature comparisons and remaining complete-path limits.
+records the patch exporter and 811,008 feature comparisons. The subsequent
+[whole-track experiment](../crates/music-analysis/tests/fixtures/README.md#whole-track-stream-reference-25-september-2026)
+compares all 5,503 real-audio patches and time-weighted summaries, plus a 907-patch
+synthetic limit case. Decoder/export equivalence and production acceptance remain open.
 
 ## Product purpose and admission rule
 
