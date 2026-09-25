@@ -17,6 +17,8 @@ use rustfft::num_complex::Complex;
 use rustfft::{Fft, FftPlanner};
 use serde_json::{Map, Value, json};
 
+use crate::decoder_process::{DecoderWaitError, wait_for_decoder};
+
 const CONTEXT_SAMPLE_RATE: u32 = 16_000;
 const CONTEXT_FRAME_SECONDS: f64 = 0.5;
 const CONTEXT_TIMELINE_SECONDS: f64 = 2.0;
@@ -28,6 +30,7 @@ const MAX_AUDIO_SECONDS: u64 = 24 * 60 * 60;
 const FRAMES_PER_CHUNK: usize = 8_192;
 const CAPTURE_LIMIT: usize = 64 * 1_024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+const DECODE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const LOUDNESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +66,7 @@ pub enum AudioContextError {
     Io(io::Error),
     TooShort,
     TooLong,
+    DeadlineExceeded,
     Cancelled,
 }
 
@@ -75,8 +79,19 @@ impl Display for AudioContextError {
             Self::Io(_) => "audio analysis process could not be read",
             Self::TooShort => "decoded audio is empty or too short to analyze",
             Self::TooLong => "decoded audio exceeds the 24-hour analysis limit",
+            Self::DeadlineExceeded => "audio context decoding exceeded its 30-minute deadline",
             Self::Cancelled => "audio context analysis was cancelled",
         })
+    }
+}
+
+impl From<DecoderWaitError> for AudioContextError {
+    fn from(error: DecoderWaitError) -> Self {
+        match error {
+            DecoderWaitError::Cancelled => Self::Cancelled,
+            DecoderWaitError::DeadlineExceeded => Self::DeadlineExceeded,
+            DecoderWaitError::Io(error) => Self::Io(error),
+        }
     }
 }
 
@@ -698,7 +713,16 @@ fn decode_context(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let deadline = Instant::now() + DECODE_TIMEOUT;
     let mut child = command.spawn().map_err(AudioContextError::Spawn)?;
+    decode_context_child(&mut child, cancelled, deadline)
+}
+
+fn decode_context_child(
+    child: &mut Child,
+    cancelled: &AtomicBool,
+    deadline: Instant,
+) -> Result<(Vec<Frame>, Vec<f64>, GlobalMetrics, f64), AudioContextError> {
     let stdout = child.stdout.take().ok_or(AudioContextError::Decode)?;
     let stderr = child.stderr.take().ok_or(AudioContextError::Decode)?;
     let error_thread = thread::spawn(move || drain(stderr));
@@ -709,6 +733,9 @@ fn decode_context(
     let stream_result = 'stream: loop {
         if cancelled.load(Ordering::Relaxed) {
             break Err(AudioContextError::Cancelled);
+        }
+        if Instant::now() >= deadline {
+            break Err(AudioContextError::DeadlineExceeded);
         }
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(AudioRead::End) => {
@@ -747,16 +774,14 @@ fn decode_context(
     if stream_result.is_err() && child.try_wait().ok().flatten().is_none() {
         let _ = child.kill();
     }
-    let status = child.wait().map_err(AudioContextError::Io)?;
+    let status = wait_for_decoder(child, deadline, cancelled).map_err(AudioContextError::from);
     let _ = audio_thread.join();
     let _ = error_thread.join();
-    if matches!(&stream_result, Err(AudioContextError::Cancelled)) {
-        return Err(AudioContextError::Cancelled);
+    match stream_result {
+        Err(error) => Err(error),
+        Ok(output) if status?.success() => Ok(output),
+        Ok(_) => Err(AudioContextError::Decode),
     }
-    if !status.success() {
-        return Err(AudioContextError::Decode);
-    }
-    stream_result
 }
 
 enum AudioRead {
@@ -2223,6 +2248,26 @@ mod tests {
             let sample = (value.clamp(-1.0, 1.0) * 32_767.0).round_ties_even() as i16;
             output.write_all(&sample.to_le_bytes())?;
         }
+        Ok(())
+    }
+
+    #[test]
+    fn stalled_factual_decoder_reaches_deadline_and_is_reaped()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_directory, mut child) = crate::decoder_process::tests::sleeping_decoder()?;
+        let result = super::decode_context_child(
+            &mut child,
+            &AtomicBool::new(false),
+            std::time::Instant::now() + std::time::Duration::from_millis(50),
+        );
+        assert!(
+            child.try_wait()?.is_some(),
+            "decoder must be reaped before returning"
+        );
+        assert!(
+            matches!(result, Err(super::AudioContextError::DeadlineExceeded)),
+            "stalled decoder returned {result:?}"
+        );
         Ok(())
     }
 }

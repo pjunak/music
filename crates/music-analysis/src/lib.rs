@@ -10,6 +10,7 @@
 //! remain optional, checksum-pinned, operator supplied, and non-fatal.
 
 mod context;
+mod decoder_process;
 mod executor;
 mod musicnn;
 mod voice;

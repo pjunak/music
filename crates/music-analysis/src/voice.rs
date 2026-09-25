@@ -23,6 +23,7 @@ use tract_tensorflow::tract_hir::internal::{
     check_output_arity, ensure, inference_wrap,
 };
 
+use crate::decoder_process::{DecoderWaitError, wait_for_decoder};
 use crate::musicnn::{FRAME_SIZE, MEL_BANDS, MusicNnPreprocessor, SAMPLE_RATE};
 
 const FRAME_HOP: usize = 256;
@@ -147,6 +148,16 @@ impl Display for VoiceAnalysisError {
             Self::Inference => "voice classifier inference failed",
             Self::WorkerUnavailable => "voice-analysis worker is unavailable",
         })
+    }
+}
+
+impl From<DecoderWaitError> for VoiceAnalysisError {
+    fn from(error: DecoderWaitError) -> Self {
+        match error {
+            DecoderWaitError::Cancelled => Self::Cancelled,
+            DecoderWaitError::DeadlineExceeded => Self::DeadlineExceeded,
+            DecoderWaitError::Io(error) => Self::Io(error),
+        }
     }
 }
 
@@ -466,12 +477,13 @@ fn decode_and_predict_until(
     if stream_result.is_err() && child.try_wait().ok().flatten().is_none() {
         let _ = child.kill();
     }
-    let status = child.wait().map_err(VoiceAnalysisError::Io)?;
+    let status =
+        wait_for_decoder(&mut child, deadline, cancelled).map_err(VoiceAnalysisError::from);
     let _ = audio_thread.join();
     let _ = error_thread.join();
     match stream_result {
         Err(error) => Err(error),
-        Ok(output) if status.success() => Ok(output),
+        Ok(output) if status?.success() => Ok(output),
         Ok(_) => Err(VoiceAnalysisError::Decode),
     }
 }

@@ -404,6 +404,34 @@ Workspace check, workspace/fuzz Clippy, formatting, architecture, doc tests,
 generated contracts and documentation links/anchors also passed. Production
 resource/playback and owner listening acceptance remain separate.
 
+## Decoder deadlines and process exit (25 September 2026)
+
+A subprocess fixture reproduced the missing factual decode deadline. The caller supplied
+50 milliseconds, but the original stream reader waited until the fixture exited two seconds
+later and returned a short-input error. Factual decode/frame accumulation now has a
+30-minute budget, with checks during streaming and until FFmpeg exits. A timeout is a
+failed extraction; the factual probe emits `error_code: timeout` without completed
+coverage, duration or loudness measurements. Existing stream errors retain their cause
+when cleanup terminates the decoder.
+
+Both factual and voice paths now use a shared controlled exit wait. Audio EOF does not
+prove that the decoder process exited. Cancellation and the current stage deadline remain
+active during that wait; failure stops and reaps the child before joining its pipe readers.
+The voice budget remains 30 minutes, including preprocessing and inference. The separate
+ffprobe and loudnorm budgets remain 30 seconds and 30 minutes. No numerical algorithm,
+model identity, dependency, storage contract or authored data changed.
+
+Three subprocess regressions cover the stalled factual stream, deadline expiry during
+process-exit waiting, and cancellation taking precedence over an already elapsed deadline.
+Each verifies that the child is reaped. The probe regression verifies that a timeout never
+claims completed coverage. The fixtures exercise the application's process control; they
+do not certify Linux container behavior or interrupt an in-process Tract call midway.
+
+All 532 Rust tests passed with the real pinned voice model and FFmpeg configured.
+Workspace check, strict workspace/fuzz Clippy, formatting, architecture, doc tests,
+generated contracts and all 150 local documentation links/anchors passed. Production
+resource/playback, independent listening and the operator-started rebuild remain open.
+
 ## Resource boundary and production acceptance
 
 Linux counters come from `/proc/self/status`. Their scope is **this probe process

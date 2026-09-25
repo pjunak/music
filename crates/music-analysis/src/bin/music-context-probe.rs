@@ -218,6 +218,7 @@ fn probe_record(
                 AudioContextError::Io(_) => "read_failed",
                 AudioContextError::TooShort => "too_short",
                 AudioContextError::TooLong => "too_long",
+                AudioContextError::DeadlineExceeded => "timeout",
                 AudioContextError::Cancelled => "cancelled",
             });
         }
@@ -381,6 +382,20 @@ mod tests {
         assert!(!record.to_string().contains("private"));
         assert!(record.get("coverage").is_none());
         assert!(record.get("loudness").is_none());
+        let timed_out = probe_record(
+            2,
+            1,
+            &analyzer,
+            &Err(AudioContextError::DeadlineExceeded),
+            1800.0,
+            None,
+            false,
+        );
+        assert_eq!(timed_out["status"], "error");
+        assert_eq!(timed_out["error_code"], "timeout");
+        assert!(timed_out.get("coverage").is_none());
+        assert!(timed_out.get("audio_seconds").is_none());
+        assert!(timed_out.get("loudness").is_none());
         let cancelled = probe_record(
             2,
             1,

@@ -40,7 +40,9 @@ The status below identifies delivered contracts; conditional stages remain propo
   added. Production container totals and concurrent playback need separate measurement.
 - **Implemented:** bounded final loudness-report capture survives verbose embedded notes;
   factual decode/loudness codec and filter pools are limited. The acceptance probe exposes
-  numeric measurements. The direct ebur128 substitution failed end-of-file/short-signal
+  numeric measurements. Factual decoding has a 30-minute budget; factual and voice
+  cancellation/deadlines remain active through decoder exit, with typed timeout failures.
+  The direct ebur128 substitution failed end-of-file/short-signal
   checks and was rejected; no faster loudness algorithm has been adopted.
 - **Implemented:** shared MusiCNN frame preprocessing with independently generated,
   checksum-pinned numerical fixtures and reusable FFT scratch. All 1,152 synthetic
@@ -75,12 +77,13 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-The worker-isolation batch passed all 528 Rust tests on Windows GNU with the real
+The decoder-deadline batch passed all 532 Rust tests on Windows GNU with the real
 pinned voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz
-Clippy, formatting, architecture, doc tests and generated contracts. Documentation
-links and anchors were checked. Eight recovery regressions exercise the actual
-job/coordinator/SQLite path; a separate worker test preserves its thread through
-three task panics.
+Clippy, formatting, architecture, doc tests and generated contracts. All 150 local
+documentation links/anchors passed. Three subprocess regressions verify deadline,
+cancellation and reaping; the probe rejects completed measurements after timeout.
+Eight existing recovery regressions exercise the actual job/coordinator/SQLite path;
+a separate worker test preserves its thread through three task panics.
 
 Earlier batches passed the headless release build, all 361 frontend tests, frontend
 lint/typecheck/production build, 29 grouped mood-pilot tests and 26 reference-tool tests.
@@ -100,22 +103,19 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** isolated analyzer task panics inside the fixed worker pool. A
-controlled second-recording panic reproduced worker loss: the original job failed,
-then its explicit retry also failed until the pool was recreated.
+**Latest batch:** bounded factual decoding and preserved cancellation/deadlines through
+FFmpeg process exit for both factual and voice analysis. A subprocess regression reproduced
+the missing factual deadline: a 50-millisecond budget was ignored until the child exited
+two seconds later. Factual decode/frame accumulation now has a 30-minute stage budget.
 
-The failed task now returns a typed error while its worker remains available. The
-context job records a fixed panic diagnostic, and an explicit retry reuses completed
-checkpoints on the same coordinator/pool. No automatic replay, extra threads,
-dependency, model or legacy path was added. Critical owner and model-thread failure
-boundaries remain unchanged.
+Audio EOF no longer starts an uncontrolled wait for FFmpeg to exit. Both paths keep their
+control checks active, stop/reap the child on failure and retain the original stream error.
+The factual probe reports a typed timeout without completed measurements. No new tool,
+dependency, model, schema, legacy path or numerical identity was added.
 
-The worker regression preserves the same thread through three panics. The eighth
-SQLite-backed recovery case preserves the completed first track while retrying the
-failed and unattempted recordings, with authored tags and source bytes unchanged.
-See the [panic recovery evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#analyzer-panic-recovery-25-september-2026).
-The architecture reference also now identifies the retained loudnorm pass and
-marks production cgroup benchmarking as outstanding, matching the acceptance ledger.
+Three subprocess regressions verify the stalled stream and controlled process-exit wait,
+including cancellation precedence and child cleanup. The probe regression rejects completed
+coverage on timeout. See the [decoder acceptance evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#decoder-deadlines-and-process-exit-25-september-2026).
 
 **Fully implemented in the application:** factual whole-track context and optional
 voice analysis; attributed catalog evidence; structured per-tag model proposals and
@@ -144,12 +144,12 @@ options survey; this plan determines the narrower implementation scope.
 |---|---|---|---|---|
 | Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
-| FFmpeg / ffprobe | Decode and technical inspection | Bounded pools, reliable loudness capture and normalized voice downmix | Keep | Core: correct input levels and complete original-audio evidence; stereo defaults previously boosted voice input by about 3 dB. |
+| FFmpeg / ffprobe | Decode and technical inspection | Bounded pools, normalized downmix, reliable loudness capture and controlled decoder deadlines/exit | Keep | Core: correct original-audio evidence and recoverable decoder stalls; preserve input levels and failure causes. |
 | FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
-| music-context-probe / music-voice-probe | No factual acceptance CLI; basic single-pass voice probe | Current v2 reports; bounded repeats/cancellation, factual coverage and voice worker lifecycle | Keep for rebuild acceptance | High: measure actual original-audio extraction and cleanup before a large rebuild; process RSS is not whole-container evidence. |
+| music-context-probe / music-voice-probe | No factual acceptance CLI; basic single-pass voice probe | Current v2 reports; bounded repeats/cancellation, explicit timeout failures, factual coverage and voice worker lifecycle | Keep for rebuild acceptance | High: measure actual original-audio extraction and cleanup before a large rebuild; process RSS is not whole-container evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
-| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries, verified model bytes and selective failed-stage retry | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |
+| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries, verified model bytes, selective failed-stage retry and controlled decoder exit | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |
 | Essentia.js / ONNX Runtime Web / TensorFlow references | Synthetic frame/patch checks | Whole-track checks, original-export comparison and checksum-bound label order | Keep development-only; TensorFlow stays outside the repository/image | High: establishes numerical pairing and score meanings without adding an application runtime. |
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |

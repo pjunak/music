@@ -634,8 +634,13 @@ Independent tracks run on a dedicated fixed CPU pool rather than Tokio's general
 FFmpeg is constrained to one thread per track. Results return to the coordinator, which alone writes
 SQLite checkpoints. Concurrency is configuration-bounded; production acceptance still requires
 benchmarking under the three-CPU cgroup rather than inferring capacity from host CPU count.
-Cancellation is cooperative in Rust loops and actively
-terminates the owned FFmpeg child. Per-track timing documents are folded into constant-size running
+Cancellation is cooperative in Rust loops and actively terminates and reaps the owned
+FFmpeg child. Factual decoding and frame accumulation have a 30-minute budget, checked
+through decoder exit as well as during streaming; audio EOF alone does not release this
+control boundary. Expiry returns a typed timeout without publishing partial measurements.
+The separate ffprobe and loudnorm budgets remain 30 seconds and 30 minutes respectively;
+these are stage budgets, not one combined job deadline. Stream errors retain their original
+cause after decoder cleanup. Per-track timing documents are folded into constant-size running
 stage/voice aggregates as results arrive; job summaries do not retain a second library-sized timing
 collection.
 
@@ -674,8 +679,9 @@ path-free model/runtime/preprocessor identity. FFmpeg decoding, 512-sample frame
 and 187-frame patches are streamed through fixed-size buffers. The decoder explicitly normalizes
 its mono/stereo mixing matrix before 16 kHz resampling; codec and filter pools are limited to one
 thread each. Cancellation and the 30-minute per-track deadline are checked while decoding and
-before/after every prediction, including the ending. Expiry terminates the decoder and returns
-a typed timeout failure; a single in-process Tract call cannot be interrupted midway. A panic
+before/after every prediction, including the ending, and until the decoder exits. Expiry
+terminates and reaps the decoder and returns a typed timeout failure; a single in-process
+Tract call cannot be interrupted midway. A panic
 closes the response channel, marks the worker dead, and makes subsequent optional work unavailable
 without taking down the server.
 
