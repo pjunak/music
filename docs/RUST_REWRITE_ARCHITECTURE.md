@@ -737,8 +737,11 @@ fixed zero-input output, end-to-end FFmpeg-to-worker inference, bounded score ag
 patch counts, and cancellation-aware streaming. A normal full-library context build after rollout
 exercises the actual media, model mount, and durable job path. The pinned frame fixtures
 cover controlled numerical preprocessing; basic mono/stereo level/count, ending and real-graph
-checks also passed on Windows GNU on 25 September 2026. Full resampling/multichannel reference
-comparison and a long repeated-run RSS/cancellation soak remain separate acceptance work.
+checks also passed on Windows GNU on 25 September 2026. Analytic stereo passband and
+out-of-band suppression checks now cover 44.1/48 kHz input through real decoding;
+a degraded-filter control fails despite correct frame/window counts. Full upstream
+resampler/multichannel reference comparison and a long repeated-run RSS/cancellation
+soak remain separate acceptance work.
 The existing [voice acceptance probe](AUDIO_ANALYSIS_ACCEPTANCE.md#voice-repetition-and-lifecycle-probe)
 now measures initialization, repeated job-scoped workers, explicit cancellation and
 post-join process memory separately, without opening a library or changing analysis

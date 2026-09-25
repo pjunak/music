@@ -457,6 +457,20 @@ generated contracts and all 150 local documentation links/anchors passed. No liv
 Linux/cgroup counter or concurrent-playback test ran: Docker/Podman and WSL are
 unavailable on this host. Independent listening and production acceptance remain open.
 
+## Decoder spectral acceptance (25 September 2026)
+
+The actual voice decoder now has analytic stereo passband and out-of-band rejection
+regressions at 44.1/48 kHz. Distinct left/right tones match the expected mono mel
+features within 0.00003485; all four high-frequency cases exceed the 60 dB suppression
+gate. A deliberately degraded filter preserved frame/window counts but failed the
+spectral gate at 3.06 dB. Production settings were restored and remain unchanged.
+See the [fixture evidence and limits](../crates/music-analysis/tests/fixtures/README.md#decoder-spectral-checks-25-september-2026).
+All 544 Rust tests passed with the pinned voice model and FFmpeg configured. Workspace
+check, strict workspace/fuzz Clippy, formatting, architecture, doc tests, generated
+contracts and all 151 local documentation links/anchors passed. These checks narrow
+a local validation gap; they do not establish full upstream resampler parity,
+multichannel behavior, mood accuracy or production readiness.
+
 ## Resource boundary and production acceptance
 
 Process counters come from `/proc/self/status`. Their scope remains **this probe

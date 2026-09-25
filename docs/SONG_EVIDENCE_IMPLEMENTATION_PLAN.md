@@ -51,6 +51,8 @@ The status below identifies delivered contracts; conditional stages remain propo
   frame features pass the fixed tolerance; the frame transform definition is unchanged.
 - **Implemented:** complete ending windows and constant-storage voice summaries, strict
   invalid-value/cancellation handling, normalized stereo input and bounded FFmpeg pools.
+  Analytic stereo spectra and out-of-band suppression pass at 44.1/48 kHz; a degraded
+  filter fails the new gate despite correct counts. Full resampler parity remains open.
   The exact pinned graph and real FFmpeg/worker tests now run; decoder/window identities
   make older generated contexts stale without changing accepted/manual tags.
 - **Implemented:** each voice worker verifies the exact owned model bytes it parses,
@@ -77,17 +79,36 @@ The status below identifies delivered contracts; conditional stages remain propo
 - **Conditional:** learned audio integration follows its parity/usefulness gates. Jev,
   training, extra encoders/datasets and a new annotation UI are not release dependencies.
 
+### Estimated progress and remaining acceptance
+
+Estimate for the agreed lean scope, recorded 25 September 2026. These are engineering
+judgments, not test coverage or mood-accuracy percentages. Count required delivery and
+acceptance work; do not count an optional model as delivered or assume every research
+option must be implemented. Revisit the estimate if listening or production tests expose
+required changes.
+
+| Workstream | Weight | Estimated completion | Evidence or remaining work |
+|---|---|---|---|
+| Core application implementation and clean cutover | 60% | 100% | Current factual/voice/evidence/review contracts, reset, retry/recovery and legacy removal implemented. |
+| Automated and local technical qualification | 20% | 90% | Numerical, synthetic, approved-original and recovery checks exist; full resampler/multichannel qualification remains incomplete. |
+| Independent listening and session usefulness | 10% | 0% validated | Pilot tooling exists, but no owner-labeled cohort or independent benefit result is available. |
+| Production resource/playback acceptance and full rebuild | 10% | 0% validated | Tooling is ready; target-container observations and an accepted rebuild are not recorded. |
+
+Weighted completion is **78%, rounded to approximately 80% overall**. Core code being
+implemented does not make the delivery production-accepted. EffNet/Jev adoption and the
+other conditional alternatives are outside this estimate until an observed need admits
+them into scope; their experimental state remains visible in the inventory below.
+
 ### Local validation and release boundary
 
-The resource-observation batch passed all 542 Rust tests on Windows GNU with the real
+The spectral-validation batch passed all 544 Rust tests on Windows GNU with the real
 pinned voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz
-Clippy, formatting, architecture, doc tests and generated contracts. All 150 local
-documentation links/anchors passed. Five shared cgroup fixture cases run in both probes;
-real-model tests cover initialization, failed/successful tracks and worker release.
-Three actual CLI smoke runs emitted five path-free v3 records on synthetic audio,
-correctly marking cgroup measurement not requested or unsupported on Windows. Live
-Linux/cgroup measurement remains unverified; neither Docker/Podman nor WSL is available.
-Existing decoder, panic and eight SQLite-backed recovery regressions still pass.
+Clippy, formatting, architecture, doc tests and generated contracts. All 151 local
+documentation links/anchors passed. Six synthetic decoder cases verify stereo spectra
+and out-of-band rejection. The degraded-filter negative control failed its spectral
+gate while retaining frame/window counts; the restored production filter passes.
+Existing resource, decoder, panic and eight SQLite-backed recovery cases still pass.
+No live Linux/cgroup or production-playback validation ran in this batch.
 
 Earlier batches passed the headless release build, all 361 frontend tests, frontend
 lint/typecheck/production build, 29 grouped mood-pilot tests and 26 reference-tool tests.
@@ -107,21 +128,15 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** added optional cgroup v2 snapshots to the existing factual and voice
-probes. Process RSS excluded FFmpeg and other application processes, so it could not
-supply the container observations needed for production qualification. Operators now
-select the cgroup explicitly with `--cgroup-dir`; the current-only v3 reports include
-before/after readings and voice worker start/release observations.
+**Latest batch:** added real-decoder spectral regressions using analytic input signals.
+At 44.1/48 kHz, distinct stereo tones retain their expected mono mel features and
+9/12 kHz energy is suppressed by at least 60 dB before reaching voice-model features.
+All six cases preserve frame/window coverage. A deliberately degraded resampler still
+passed counts but failed the spectral check at 3.06 dB, demonstrating the new guard.
 
-Reads are bounded and contain no paths or raw errors. Missing/malformed counters stay
-unknown; unlimited limits are distinct from unavailable limits. Peak and CPU/event
-counters are explicitly cumulative, local limits do not imply effective ancestor limits,
-and the reports make no automatic production-acceptance decision. There is no new
-service, dependency, application runtime or cgroup v1 compatibility path.
-
-Five shared fixture cases run in both probes. The real-model voice test covers all
-initialization/track/pass report points, including failed tracks. Live Linux cgroup
-and playback acceptance remain open. See the [cgroup tooling evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#cgroup-observation-tooling-25-september-2026).
+No production algorithm, model, dependency, identity or compatibility path changed.
+The pinned WASM reference threw during sample-rate conversion, so full upstream
+resampler parity remains unverified. See the [spectral acceptance evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#decoder-spectral-acceptance-25-september-2026).
 
 **Fully implemented in the application:** factual whole-track context and optional
 voice analysis; attributed catalog evidence; structured per-tag model proposals and
@@ -150,7 +165,7 @@ options survey; this plan determines the narrower implementation scope.
 |---|---|---|---|---|
 | Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
-| FFmpeg / ffprobe | Decode and technical inspection | Bounded pools, normalized downmix, reliable loudness capture and controlled decoder deadlines/exit | Keep | Core: correct original-audio evidence and recoverable decoder stalls; preserve input levels and failure causes. |
+| FFmpeg / ffprobe | Decode and technical inspection | Bounded pools/downmix/deadlines plus analytic spectral and alias-suppression checks | Keep | Core: preserve original-audio content and detect spectral damage that correct duration/counts can miss. |
 | FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
 | music-context-probe / music-voice-probe | No factual acceptance CLI; basic single-pass voice probe | Current v3 reports; repeats/cancellation/timeouts, coverage, worker lifecycle and optional scoped cgroup snapshots | Keep for rebuild acceptance | High: observe decoder-inclusive resource scope without inventing totals from process RSS; live production/playback checks remain required. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
@@ -451,8 +466,9 @@ may trigger fresh analysis initially; measure that cost before adding another ca
   native-rate, 44.1/48 kHz count/level, ending, invalid-value and cancellation regressions.
   One final full patch covers the ending without repeating tail frames; summaries use
   constant storage. Decoder/window identities invalidate previous generated contexts.
-  Full resampling spectral parity, multichannel behavior and the production resource
-  gate remain separate from these basic checks.
+  Analytic 1/4 kHz stereo spectral and 9/12 kHz stopband checks now pass at 44.1/48 kHz.
+  They catch a degraded resampler that retains correct counts. Full upstream resampler
+  parity, multichannel behavior and the production resource gate remain separate.
 - Stop treating the current loudness-heavy intensity proxy as independent evidence
   of emotional arousal, or duration/activity heuristics as calibrated accuracy.
   Keep absolute loudness for technical uses; trial relative dynamics where it helps

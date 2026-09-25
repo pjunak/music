@@ -454,3 +454,37 @@ An EffNet candidate still needs independently judged development recordings,
 production lifecycle/resource gates
 before integration. Keep only the heads that
 improve the owner's listening/session decisions.
+
+## Decoder spectral checks, 25 September 2026
+
+Two real-FFmpeg regressions now exercise the complete decoder-to-voice-feature path
+at 44.1 and 48 kHz. The four-second PCM fixtures are generated during the tests; no
+recordings, model weights or new reference dependency are required.
+
+- Distinct 1 kHz left and 4 kHz right tones are compared with an analytic arithmetic-
+  mean signal at 16 kHz, transformed by the already fixture-verified mel frontend.
+  Three interior frames check all 96 bands. The gate is 0.02 absolute log10-feature
+  units, approximately 0.2 dB in `1 + 10000 * mel power`; this does not alter the
+  separate 0.0001 transform-reference tolerance. Maximum observed error was
+  0.00003485 at 44.1 kHz and 0.00001574 at 48 kHz.
+- 9 and 12 kHz mono tones must be suppressed before they can alias into the model's
+  lower bands. The gate is at least 60 dB attenuation of maximum interior mel power
+  relative to an unfiltered aliased tone of the same amplitude. Log compression is
+  inverted before computing the ratio; an absolute compressed-feature value is not
+  a decibel measurement. Worst observed attenuation was 61.47 dB; all four cases
+  ranged from 61.47 to 103.50 dB.
+
+All six input cases retained 251 centered frames and two prediction windows. A
+controlled run temporarily used `filter_size=1:phase_shift=0:linear_interp=0`:
+frame/window counts still passed, but the spectral gate failed at only 3.06 dB
+attenuation. The exact production filter was then restored. These tests add a guard
+against spectral damage that level/count tests alone could miss.
+
+The pinned Essentia.js package exposed `Resample` but threw during valid synthetic
+conversion on this host. No full reference-resampler comparison was obtained.
+Upstream [Essentia Resample](https://essentia.upf.edu/reference/std_Resample.html)
+uses SRC, while [FFmpeg's default resampler](https://ffmpeg.org/ffmpeg-resampler.html)
+is SWR. Analytic passband/stopband checks do not establish equivalence between those
+filters, their transition bands or edge policies. Full upstream resampler parity,
+multichannel acceptance, Linux production resources and listening quality remain open.
+No production decoder setting, numerical identity or model score semantics changed.

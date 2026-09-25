@@ -1303,6 +1303,122 @@ mod tests {
     }
 
     #[test]
+    fn decoder_preserves_stereo_tone_spectra_at_common_rates_when_available()
+    -> Result<(), Box<dyn Error>> {
+        let Some(ffmpeg) = test_ffmpeg() else {
+            return Ok(());
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("stereo-tones.wav");
+        let cancelled = AtomicBool::new(false);
+        let mut preprocessor = MusicNnPreprocessor::new();
+        for rate in [44_100, 48_000] {
+            // Distinct channels catch dropped channels and an incorrect mono matrix.
+            // f64 generation avoids phase drift in the independent analytic reference.
+            let samples: Vec<i16> = (0..rate * 4)
+                .flat_map(|index| {
+                    [1_000.0, 4_000.0].map(|hz| {
+                        (8_192.0
+                            * (std::f64::consts::TAU * hz * f64::from(index) / f64::from(rate))
+                                .sin())
+                        .round() as i16
+                    })
+                })
+                .collect();
+            write_pcm_wav(&path, rate, 2, &samples)?;
+            let mut model = RecordingPredictor::default();
+            let output = decode_and_predict(&mut model, &ffmpeg, &path, &cancelled)?;
+            assert_eq!(output.emitted_frames, 251);
+            assert_eq!(output.summary.windows, 2);
+            // Interior frames avoid treating a resampler's edge-padding policy as
+            // passband distortion. Beginning and ending coverage have separate tests.
+            for frame_index in [50, 100, 150] {
+                let start = frame_index * FRAME_HOP - FRAME_SIZE / 2;
+                let frame = std::array::from_fn(|index| {
+                    [1_000.0, 4_000.0]
+                        .iter()
+                        .map(|hz| {
+                            0.125
+                                * (std::f64::consts::TAU * hz * (start + index) as f64
+                                    / f64::from(SAMPLE_RATE))
+                                .sin()
+                        })
+                        .sum::<f64>() as f32
+                });
+                let expected = preprocessor.transform(&frame);
+                let actual =
+                    &model.patches[0][frame_index * MEL_BANDS..(frame_index + 1) * MEL_BANDS];
+                let maximum = actual
+                    .iter()
+                    .zip(expected)
+                    .map(|(actual, expected)| (actual - expected).abs())
+                    .fold(0.0_f32, f32::max);
+                eprintln!("rate {rate}, frame {frame_index}: max stereo mel error {maximum:.8}");
+                // 0.02 log10 units is about 0.2 dB in (1 + 10000 * mel power).
+                // This is an analytic signal gate, not exact upstream SRC parity.
+                assert!(
+                    maximum <= 0.02,
+                    "rate {rate}, frame {frame_index}: max mel error {maximum}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn decoder_rejects_out_of_band_energy_before_voice_features_when_available()
+    -> Result<(), Box<dyn Error>> {
+        let Some(ffmpeg) = test_ffmpeg() else {
+            return Ok(());
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("out-of-band.wav");
+        for rate in [44_100, 48_000] {
+            for hz in [9_000.0, 12_000.0] {
+                let samples: Vec<i16> = (0..rate * 4)
+                    .map(|index| {
+                        (8_192.0
+                            * (std::f64::consts::TAU * hz * f64::from(index) / f64::from(rate))
+                                .sin())
+                        .round() as i16
+                    })
+                    .collect();
+                write_pcm_wav(&path, rate, 1, &samples)?;
+                let mut model = RecordingPredictor::default();
+                let output =
+                    decode_and_predict(&mut model, &ffmpeg, &path, &AtomicBool::new(false))?;
+                assert_eq!(output.emitted_frames, 251);
+                assert_eq!(output.summary.windows, 2);
+                let maximum = model.patches[0][50 * MEL_BANDS..151 * MEL_BANDS]
+                    .iter()
+                    .copied()
+                    .fold(0.0_f32, f32::max);
+                // Compare linear mel power with an unfiltered aliased tone of
+                // the same amplitude. Absolute log-feature values are not dB.
+                let unfiltered = std::array::from_fn(|index| {
+                    (0.25
+                        * (std::f64::consts::TAU * hz * index as f64 / f64::from(SAMPLE_RATE))
+                            .sin()) as f32
+                });
+                let reference = MusicNnPreprocessor::new()
+                    .transform(&unfiltered)
+                    .into_iter()
+                    .fold(0.0_f32, f32::max);
+                let attenuation_db = 10.0
+                    * ((10.0_f64.powf(f64::from(maximum)) - 1.0)
+                        / (10.0_f64.powf(f64::from(reference)) - 1.0))
+                        .log10();
+                assert!(
+                    attenuation_db <= -60.0,
+                    "rate {rate}, tone {hz}: alias attenuation {attenuation_db} dB"
+                );
+                eprintln!("rate {rate}, tone {hz}: alias attenuation {attenuation_db:.2} dB");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn decoder_cleans_up_after_cancellation_when_available() -> Result<(), Box<dyn Error>> {
         let Some(ffmpeg) = test_ffmpeg() else {
             return Ok(());
