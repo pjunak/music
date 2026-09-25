@@ -132,8 +132,12 @@ the fraction of windows where voice led instrumental. These are classifier measu
 calibrated probability or guarantee; library-specific threshold calibration is not required for
 this bounded factual-evidence use.
 Disabling or changing the model also requires a normal context rebuild. A per-track optional-stage
-failure keeps the rest of that track context and reports voice as `unavailable`; a worker failure
-leaves unprocessed rows as partial checkpoints for the next retry.
+or worker-start failure keeps the factual context and reports voice as `unavailable`.
+After resolving the cause, use **Analyze new and changed tracks** to retry failed voice stages
+without repeating current factual analysis or successful voice classifications. **Retry last job**
+also retains current factual checkpoints. Restarting the same job preserves its recorded failures;
+a new job is needed for another attempt. **Rebuild all profiles** deliberately recomputes completed
+factual profiles as well.
 
 ## 3. Enable encrypted provider credentials
 

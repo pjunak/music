@@ -550,16 +550,10 @@ async fn forced_retry_reanalyzes_a_completed_recording_when_its_source_changed()
 }
 
 #[tokio::test]
-async fn forced_retry_does_not_reuse_a_full_context_with_failed_optional_voice() -> TestResult {
-    let Some(model) = std::env::var_os("MUSIC_TEST_VOICE_MODEL") else {
+async fn forced_retry_retries_failed_voice_without_rebuilding_factual_context() -> TestResult {
+    let Some(voice) = configured_voice()? else {
         return Ok(());
     };
-    let ffmpeg = std::env::var_os("MUSIC_TEST_FFMPEG").unwrap_or_else(|| "ffmpeg".into());
-    let voice = VoiceBackend::initialize(Some(Path::new(&model)), ffmpeg);
-    assert!(
-        voice.status.is_ready(),
-        "explicit voice fixture must be ready"
-    );
     let signature = voice
         .status
         .source_signature
@@ -603,8 +597,8 @@ async fn forced_retry_does_not_reuse_a_full_context_with_failed_optional_voice()
     stop(coordinator).await?;
     assert_eq!(
         fixture.analyzer.calls("a.wav")?,
-        2,
-        "failed optional stages must remain eligible for forced retry"
+        1,
+        "failed voice must be retried without repeating its completed factual pass"
     );
     let retried = fixture.state(0).await?;
     assert_eq!(retried.job_id, retry.id);
@@ -614,6 +608,175 @@ async fn forced_retry_does_not_reuse_a_full_context_with_failed_optional_voice()
     assert_eq!(result["voice_performance"]["tracks_profiled"], 3);
     // The deliberately invalid synthetic audio fails real decoding. It must stay a
     // visible voice failure, never become a completed classification on retry.
+    assert_eq!(result["passes"]["voice_detection"]["failed_tracks"], 3);
+    assert_eq!(result["passes"]["voice_detection"]["completed_tracks"], 0);
+    fixture.check_authored_state().await
+}
+
+#[tokio::test]
+async fn new_analysis_retries_only_failed_voice_without_repeating_current_facts() -> TestResult {
+    let Some(voice) = configured_voice()? else {
+        return Ok(());
+    };
+    let signature = voice
+        .status
+        .source_signature
+        .clone()
+        .ok_or("voice signature missing")?;
+    let fixture = Fixture::new().await?;
+    let coordinator = fixture.start_with_voice(voice).await?;
+    let original = coordinator
+        .service
+        .enqueue(LIBRARY_CONTEXT_JOB_KIND, fixture.parameters(false))
+        .await?;
+    let first = wait_for(&coordinator.service, &original.id, JobStatus::Succeeded).await?;
+    assert_eq!(
+        first.result.as_ref().ok_or("missing result")?["voice_performance"]["tracks_profiled"],
+        3
+    );
+    let saved = fixture.state(0).await?;
+
+    // Keep a previously classified row beside the two actual decoder failures.
+    // This is controlled recovery state, not a listening judgment.
+    let classified = VoiceAnalysisDocument {
+        summary: Map::from_iter([
+            ("status".to_owned(), json!("classified")),
+            ("voice_score".to_owned(), json!(0.2)),
+        ]),
+        stage: Map::from_iter([("status".to_owned(), json!("complete"))]),
+        elapsed_seconds: 0.0,
+        prediction_windows: 1,
+    };
+    let write = context_with_voice(fixture.tracks[2].id, &fixture.state(2).await?, classified)?;
+    assert!(
+        fixture
+            .storage
+            .store_context(
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                Some(&signature),
+                &original.id,
+                &write
+            )
+            .await?
+    );
+    let complete = fixture.state(2).await?;
+
+    let retry = coordinator
+        .service
+        .enqueue(LIBRARY_CONTEXT_JOB_KIND, fixture.parameters(false))
+        .await?;
+    let retried = wait_for(&coordinator.service, &retry.id, JobStatus::Succeeded).await?;
+    stop(coordinator).await?;
+    let result = retried.result.as_ref().ok_or("missing result")?;
+    assert_eq!(
+        result["voice_performance"]["tracks_profiled"], 2,
+        "new analysis must retry unavailable voice, without redoing successful voice"
+    );
+    assert_eq!(result["performance"]["tracks_profiled"], 0);
+    assert_eq!(result["passes"]["voice_detection"]["failed_tracks"], 2);
+    assert_eq!(result["passes"]["voice_detection"]["completed_tracks"], 1);
+    assert_eq!(fixture.state(2).await?, complete);
+    let after = fixture.state(0).await?;
+    assert_eq!(after.job_id, retry.id);
+    assert_eq!(after.source_signature, saved.source_signature);
+    assert_eq!(after.summary_json, saved.summary_json);
+    assert_eq!(after.timeline_json, saved.timeline_json);
+    assert_eq!(after.sections_json, saved.sections_json);
+    assert_eq!(after.technical_json, saved.technical_json);
+    assert_eq!(after.stages_json, saved.stages_json);
+    for name in ["a.wav", "b.wav", "c.wav"] {
+        assert_eq!(fixture.analyzer.calls(name)?, 1);
+    }
+
+    // Force still requests a new factual pass, even for previous voice failures.
+    let coordinator = fixture
+        .start_with_voice(configured_voice()?.ok_or("voice fixture missing")?)
+        .await?;
+    let forced = coordinator
+        .service
+        .enqueue(LIBRARY_CONTEXT_JOB_KIND, fixture.parameters(true))
+        .await?;
+    let rebuilt = wait_for(&coordinator.service, &forced.id, JobStatus::Succeeded).await?;
+    stop(coordinator).await?;
+    assert_eq!(
+        rebuilt.result.as_ref().ok_or("missing result")?["performance"]["tracks_profiled"],
+        3
+    );
+    assert_eq!(
+        rebuilt.result.as_ref().ok_or("missing result")?["voice_performance"]["tracks_profiled"],
+        3
+    );
+    for name in ["a.wav", "b.wav", "c.wav"] {
+        assert_eq!(fixture.analyzer.calls(name)?, 2);
+    }
+    fixture.check_authored_state().await
+}
+
+fn configured_voice() -> TestResult<Option<VoiceBackend>> {
+    let Some(model) = std::env::var_os("MUSIC_TEST_VOICE_MODEL") else {
+        return Ok(None);
+    };
+    let ffmpeg = std::env::var_os("MUSIC_TEST_FFMPEG").unwrap_or_else(|| "ffmpeg".into());
+    let voice = VoiceBackend::initialize(Some(Path::new(&model)), ffmpeg);
+    assert!(
+        voice.status.is_ready(),
+        "explicit voice fixture must be ready"
+    );
+    Ok(Some(voice))
+}
+
+#[tokio::test]
+async fn same_job_restart_keeps_voice_failures_without_repeating_the_attempt() -> TestResult {
+    let Some(voice) = configured_voice()? else {
+        return Ok(());
+    };
+    let signature = voice
+        .status
+        .source_signature
+        .clone()
+        .ok_or("voice signature missing")?;
+    let fixture = Fixture::new().await?;
+    fixture.analyzer.hold(Some("b.wav"))?;
+    let coordinator = fixture.start_with_voice(voice).await?;
+    let original = coordinator
+        .service
+        .enqueue(LIBRARY_CONTEXT_JOB_KIND, fixture.parameters(true))
+        .await?;
+    fixture.analyzer.wait_until_held().await?;
+    stop(coordinator).await?;
+
+    // Recreate a committed voice failure before a restart, while other recordings
+    // still need work. Same-job recovery must retain this completed attempt.
+    let write = context_with_voice(
+        fixture.tracks[0].id,
+        &fixture.state(0).await?,
+        VoiceAnalysisDocument::unavailable(&VoiceAnalysisError::Decode, 0.0),
+    )?;
+    assert!(
+        fixture
+            .storage
+            .store_context(
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                Some(&signature),
+                &original.id,
+                &write
+            )
+            .await?
+    );
+    let failed = fixture.state(0).await?;
+    fixture.analyzer.hold(None)?;
+    let resumed = fixture
+        .start_with_voice(configured_voice()?.ok_or("voice fixture missing")?)
+        .await?;
+    let finished = wait_for(&resumed.service, &original.id, JobStatus::Succeeded).await?;
+    stop(resumed).await?;
+    assert_eq!(finished.attempts, 2);
+    assert_eq!(fixture.state(0).await?, failed);
+    assert_eq!(fixture.analyzer.calls("a.wav")?, 1);
+    let result = finished.result.as_ref().ok_or("missing result")?;
+    assert_eq!(result["voice_performance"]["tracks_profiled"], 2);
     assert_eq!(result["passes"]["voice_detection"]["failed_tracks"], 3);
     assert_eq!(result["passes"]["voice_detection"]["completed_tracks"], 0);
     fixture.check_authored_state().await

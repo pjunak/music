@@ -177,11 +177,14 @@ old submissions are not replayed. Context, tagging and batch-collection jobs use
 Restart preserves completed new analysis; all tracks require the initial source-audio
 rebuild. Explicit retries of a cancelled/failed forced context job also reuse current
 successes from that job's compatible retry chain; a new forced job recomputes all
-completed tracks. Unfinished or stale results remain work; when voice is enabled,
-a full context with failed voice is also retried. History lookup is limited
-to 64 predecessors with the same job contract and parameters; missing, incompatible
-or cyclic history ends reuse lookup, so results outside the validated chain are
-recomputed. Existing partial audio checkpoints still resume their voice stage.
+completed tracks. Unfinished or stale results remain work. A full factual context
+with unavailable voice can be reused without repeating its signal pass: a new
+ordinary analysis job or compatible forced retry attempts only the failed voice
+stage. A saved failure from the same job is retained during restart, so recovery
+cannot loop on that attempt. Pending voice checkpoints still resume, and completed
+classifications are retained. History lookup is limited to 64 predecessors with
+the same job contract and parameters; missing, incompatible or cyclic history ends
+reuse lookup, so forced results outside the validated chain are recomputed.
 No old-context reader or model-ID prefix fallback is retained.
 
 `ModelBatchTransport` is the separate asynchronous port; `model_jobs/batch.rs` owns the

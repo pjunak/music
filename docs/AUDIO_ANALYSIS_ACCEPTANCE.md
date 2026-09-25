@@ -316,10 +316,10 @@ A forced retry checks up to 64 compatible predecessor jobs. It reuses only parse
 current-contract results with matching source identity and a job ID in that chain.
 Prior results that the original forced rebuild never reached still run, as do failures
 and changed source facts. Missing, incompatible or cyclic history cannot extend the
-reuse set. If voice is enabled, a full context is reusable from a predecessor only
-when its voice stage completed successfully; optional voice failures remain eligible
-for the forced retry. A newly requested forced job still recomputes every completed
-recording. Existing partial audio checkpoints retain their voice-stage resume behavior.
+reuse set. Failed optional voice stages remain eligible while their current factual
+context is retained; the follow-up below isolates their retry to the voice pass.
+A newly requested forced job still recomputes every completed recording. Existing
+partial audio checkpoints retain their voice-stage resume behavior.
 
 Five regressions use the real context handler, bounded executor, durable coordinator
 and SQLite, with a controlled synthetic analyzer so interruption points are repeatable:
@@ -333,7 +333,7 @@ and SQLite, with a controlled synthetic analyzer so interruption points are repe
 - Changing indexed source facts after cancellation forces that recording to be
   analyzed again even though its earlier result belongs to the retry chain.
 - A full context with an unavailable optional voice stage is attempted again on a
-  forced retry. With `MUSIC_TEST_VOICE_MODEL` and FFmpeg configured, the real pinned
+  forced retry, now without repeating its factual pass. With `MUSIC_TEST_VOICE_MODEL` and FFmpeg configured, the real pinned
   voice worker processes deliberately invalid synthetic inputs; decoder failures stay
   visible and never become successful classifications. The explicit model must load.
 
@@ -343,9 +343,39 @@ real worker loading and decoder failure, not successful inference or vocal accur
 Private-song analysis, abrupt process-kill recovery, concurrent playback and production
 resource measurements remain separate from this durable-job acceptance.
 
-The final batch passed all 524 Rust tests with the pinned voice model and FFmpeg
+The original forced-retry batch passed all 524 Rust tests with the pinned voice model and FFmpeg
 configured, workspace check, strict workspace/fuzz Clippy, formatting, architecture,
 doc tests and generated contracts. All 56 checked documentation links/anchors passed.
+
+## Retry failed voice without repeating facts (25 September 2026)
+
+A normal follow-up job previously treated a full factual context as finished even
+when its optional voice stage was unavailable. A regression reproduced zero voice
+attempts for two failed tracks. A forced retry could attempt voice again, but repeated
+the completed factual pass first.
+
+A new ordinary job now retries unavailable voice from earlier jobs while retaining
+current factual measurements and successful voice classifications. Compatible forced
+retries use the same boundary. Pending voice always resumes; an unavailable result
+already saved by the same job is counted as failed without another attempt on restart.
+This is one local attempt per requested job, with no background retry loop. Source,
+implementation and model freshness checks still apply; a new forced rebuild still
+recomputes completed factual profiles. No evidence identity or wire shape changed.
+
+The recovery suite now has seven cases. Two new tests cover a normal follow-up with
+mixed successful/failed voice results and same-job restart after a recorded failure.
+The forced-voice regression also checks that factual extraction is not repeated.
+The tests use the real handler, coordinator, SQLite, pinned worker and FFmpeg, with
+controlled factual extraction and deliberately invalid synthetic audio. Exact
+retained factual fields, successful context rows, manual tags and input bytes are
+checked. The successful voice row in the mixed fixture is seeded recovery state,
+not a listening judgment; actual retry decoding failures remain visible.
+
+All 526 Rust tests passed with the real pinned model and FFmpeg configured, including
+all seven recovery cases. Workspace check, workspace/fuzz Clippy, architecture,
+formatting, doc tests, generated contracts and documentation links/anchors passed.
+These checks do not establish vocal accuracy, production resource limits or playback
+behavior, and no private originals or deployed library were changed.
 
 ## Resource boundary and production acceptance
 

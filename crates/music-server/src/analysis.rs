@@ -249,7 +249,7 @@ impl JobHandler for ContextAnalysisJobHandler {
             let mut signal_work = Vec::new();
             let mut audio_completed = 0_usize;
             let mut audio_failed = 0_usize;
-            let mut initially_pending_voice = 0_usize;
+            let mut initial_voice_work = 0_usize;
             let mut checkpointed = 0_u64;
             for track in &tracks {
                 let signature = context_source_signature(
@@ -284,16 +284,16 @@ impl JobHandler for ContextAnalysisJobHandler {
                     parsed.completeness == "partial"
                         || !parameters.force
                         || completed_by_job
-                        || (completed_by_retry
-                            && (!voice_enabled
-                                || context_voice_stage_status(parsed) == Some("complete")))
+                        || completed_by_retry
                 });
                 if signal_is_current && !current_failure {
                     audio_completed = audio_completed.saturating_add(1);
                     if voice_enabled
-                        && parsed.as_ref().and_then(context_voice_stage_status) == Some("pending")
+                        && state.zip(parsed.as_ref()).is_some_and(|(state, parsed)| {
+                            voice_needs_attempt(parsed, state, context.job_id())
+                        })
                     {
-                        initially_pending_voice = initially_pending_voice.saturating_add(1);
+                        initial_voice_work = initial_voice_work.saturating_add(1);
                     }
                     continue;
                 }
@@ -314,7 +314,7 @@ impl JobHandler for ContextAnalysisJobHandler {
             let signal_work_count = u64::try_from(signal_work.len())
                 .map_err(|_| JobHandlerError::new("context analysis is too large"))?;
             let expected_voice_count = if voice_enabled {
-                u64::try_from(signal_work.len().saturating_add(initially_pending_voice))
+                u64::try_from(signal_work.len().saturating_add(initial_voice_work))
                     .map_err(|_| JobHandlerError::new("context analysis is too large"))?
             } else {
                 0
@@ -498,15 +498,14 @@ impl JobHandler for ContextAnalysisJobHandler {
                     .copied()
                     .filter(|state| state.source_signature == signature);
                 let parsed = current_state.and_then(parse_context_state);
-                if let Some(parsed) = parsed {
+                if let (Some(state), Some(parsed)) = (current_state, parsed) {
                     audio_completed = audio_completed.saturating_add(1);
                     if voice_enabled {
+                        if voice_needs_attempt(&parsed, state, context.job_id()) {
+                            voice_work.push((track.id, track.path.clone(), state.clone()));
+                            continue;
+                        }
                         match context_voice_stage_status(&parsed) {
-                            Some("pending") => {
-                                if let Some(state) = current_state {
-                                    voice_work.push((track.id, track.path.clone(), state.clone()));
-                                }
-                            }
                             Some("unavailable") => {
                                 voice_failed = voice_failed.saturating_add(1);
                             }
@@ -874,6 +873,16 @@ fn context_voice_stage_status(context: &CurrentTrackContext) -> Option<&str> {
         .and_then(Value::as_object)
         .and_then(|stage| stage.get("status"))
         .and_then(Value::as_str)
+}
+
+fn voice_needs_attempt(context: &CurrentTrackContext, state: &ContextState, job_id: &str) -> bool {
+    // Failures are complete factual checkpoints, not successful voice results.
+    // A new requested job can retry them; recovery of the same job cannot loop.
+    match context_voice_stage_status(context) {
+        Some("pending") => true,
+        Some("unavailable") => state.job_id != job_id,
+        _ => false,
+    }
 }
 
 fn context_with_voice(
