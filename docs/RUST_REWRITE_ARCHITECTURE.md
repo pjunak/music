@@ -150,8 +150,8 @@ remain ordinary Rust modules inside `music-application`; concrete transport and 
 | Audio metadata | Lofty for its native formats; FFmpeg/ffprobe adapter for ASF/WMA | Keeps the common path in-process and typed without pretending Lofty supports WMA; both remain isolated behind one tag adapter. |
 | Decoding/probing | FFmpeg and ffprobe subprocesses | Preserves the existing broad format support, including formats pure-Rust decoders do not cover. |
 | DSP | RustFFT plus reusable buffers | Native SIMD-capable FFT without materializing Python lists or NumPy arrays. |
-| CPU execution | Bounded dedicated worker threads | The application's CPU budget is explicit and separate from Tokio's general blocking pool. |
-| Loudness | `ebur128` from the decoded stream | Standards-tested implementation; removes a second whole-file FFmpeg measurement pass after parity. |
+| CPU execution | Bounded dedicated worker threads with per-task unwind isolation | A failed analysis task stays visible without permanently reducing pool capacity or automatically repeating work. |
+| Loudness | Separate bounded FFmpeg `loudnorm` pass | Retained after the direct `ebur128` replacement failed ending-peak and short-signal parity checks. |
 | Voice inference | `tract` candidate behind `VoiceBackend` | Try one model-owning Rust thread; select a Rust subprocess only if the feasibility gate proves isolation necessary. |
 | YAML | Typed adapter; candidate selected by corpus/security gate | Avoid deprecated `serde_yaml`/`serde_yml`; keep parser exposure small and input bounded. |
 | Headless playback | mpv subprocess JSON IPC | Keeps proven playback while avoiding an unsafe libmpv FFI layer in project code. |
@@ -632,11 +632,19 @@ FFmpeg measurement pass is not a Python compatibility path.
 
 Independent tracks run on a dedicated fixed CPU pool rather than Tokio's general blocking pool.
 FFmpeg is constrained to one thread per track. Results return to the coordinator, which alone writes
-SQLite checkpoints. Concurrency is configuration-bounded and benchmarked under the three-CPU cgroup
-rather than inferred from host CPU count. Cancellation is cooperative in Rust loops and actively
+SQLite checkpoints. Concurrency is configuration-bounded; production acceptance still requires
+benchmarking under the three-CPU cgroup rather than inferring capacity from host CPU count.
+Cancellation is cooperative in Rust loops and actively
 terminates the owned FFmpeg child. Per-track timing documents are folded into constant-size running
 stage/voice aggregates as results arrive; job summaries do not retain a second library-sized timing
 collection.
+
+Each submitted analysis task has an unwind boundary. A Rust panic returns a typed
+`TaskPanicked` failure, discards that task and preserves the fixed worker for later
+submissions. The context coordinator marks the job failed with a fixed diagnostic;
+an explicit retry reuses committed context checkpoints. Work is never automatically
+replayed. This does not recover process aborts, native faults or a task that never
+returns. The separate model-owning voice thread still discards its model after a panic.
 
 The current `local-context/v3` analyzer is checked against synthetic probes and an
 approved private corpus. Numeric tolerances are field-specific; no semantic tags are added.

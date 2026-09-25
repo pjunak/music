@@ -31,6 +31,8 @@ The status below identifies delivered contracts; conditional stages remain propo
   jobs; restart/retry, missing-file recovery and stale-source regressions use SQLite.
   New jobs retry failed optional voice without repeating current factual extraction;
   same-job restart retains its saved failures without repeated attempts.
+  Analyzer task panics fail the job while preserving fixed worker capacity for an
+  explicit retry; completed checkpoints survive the failure.
 - **Implemented:** read-only factual and voice acceptance probes using the real extractors,
   with bounded repeats, explicit cancellation outcomes and shared input/memory helpers.
   Voice reports readiness, per-track work and each worker start/join separately; scores
@@ -73,11 +75,12 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-The voice-retry batch passed all 526 Rust tests on Windows GNU with the real pinned
-voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz Clippy,
-formatting, architecture, doc tests and generated contracts. Documentation links and
-anchors were checked. Seven recovery regressions exercise the real job/coordinator/
-SQLite path, including selective voice retry and same-job failure retention.
+The worker-isolation batch passed all 528 Rust tests on Windows GNU with the real
+pinned voice model and FFmpeg configured, plus workspace check, strict workspace/fuzz
+Clippy, formatting, architecture, doc tests and generated contracts. Documentation
+links and anchors were checked. Eight recovery regressions exercise the actual
+job/coordinator/SQLite path; a separate worker test preserves its thread through
+three task panics.
 
 Earlier batches passed the headless release build, all 361 frontend tests, frontend
 lint/typecheck/production build, 29 grouped mood-pilot tests and 26 reference-tool tests.
@@ -97,24 +100,22 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** repaired failed optional-voice recovery. A normal follow-up job
-previously attempted zero of two unavailable voice results because their factual
-context was full. Forced retry could recover voice only by repeating the signal pass.
+**Latest batch:** isolated analyzer task panics inside the fixed worker pool. A
+controlled second-recording panic reproduced worker loss: the original job failed,
+then its explicit retry also failed until the pool was recreated.
 
-New ordinary analysis jobs and compatible forced retries now retry just unavailable
-voice from earlier jobs. They retain current factual measurements and successful
-classifications. Same-job restart retains recorded failures instead of retrying them
-again. Pending voice checkpoints still resume; source freshness and explicitly new
-full rebuilds retain their existing behavior. No new runtime, setting, model, legacy
-reader or wire contract was added.
+The failed task now returns a typed error while its worker remains available. The
+context job records a fixed panic diagnostic, and an explicit retry reuses completed
+checkpoints on the same coordinator/pool. No automatic replay, extra threads,
+dependency, model or legacy path was added. Critical owner and model-thread failure
+boundaries remain unchanged.
 
-Seven SQLite-backed recovery regressions pass with the real pinned voice worker and
-FFmpeg. The two new cases cover selective voice retry beside a completed classification
-and same-job failure retention; the forced-voice case now requires no repeated factual
-pass. They preserve authored tags and source bytes. See the
-[voice recovery evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#retry-failed-voice-without-repeating-facts-25-september-2026).
-This fixes wasted work and a persistent failure state; production resource/playback
-and owner listening acceptance remain open.
+The worker regression preserves the same thread through three panics. The eighth
+SQLite-backed recovery case preserves the completed first track while retrying the
+failed and unattempted recordings, with authored tags and source bytes unchanged.
+See the [panic recovery evidence](AUDIO_ANALYSIS_ACCEPTANCE.md#analyzer-panic-recovery-25-september-2026).
+The architecture reference also now identifies the retained loudnorm pass and
+marks production cgroup benchmarking as outstanding, matching the acceptance ledger.
 
 **Fully implemented in the application:** factual whole-track context and optional
 voice analysis; attributed catalog evidence; structured per-tag model proposals and
@@ -155,6 +156,7 @@ options survey; this plan determines the narrower implementation scope.
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Forced retries repeated facts; normal runs retained failed voice indefinitely | Current-only reset/freshness, compatible retry-chain reuse and voice-only failure recovery | Keep | Core: retry failed work without repeating current facts or looping on same-job failures; preserve authored tags and reject stale reviews. |
+| Bounded Rust analysis executor | A task panic permanently removed a worker | Typed panic failure; same fixed worker remains usable | Keep | High reliability: an unexpected extraction failure cannot disable later analysis; no automatic retries or larger pool. |
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, independent whole-recording scoring, marked diagnostics and paired comparison | Collect independent judgments; evaluate development, then confirmation | Essential: prevents selection and listening-scope bias; keeps missing outcomes and useful diagnostic data without a dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |

@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -18,6 +19,7 @@ pub enum AnalysisExecutorError {
     InvalidWorkerCount,
     SpawnFailed,
     Busy,
+    TaskPanicked,
     Stopped,
 }
 
@@ -27,6 +29,7 @@ impl Display for AnalysisExecutorError {
             Self::InvalidWorkerCount => "analysis worker count must be between 1 and 4",
             Self::SpawnFailed => "analysis worker could not be started",
             Self::Busy => "analysis worker queue is full",
+            Self::TaskPanicked => "analysis task panicked",
             Self::Stopped => "analysis executor has stopped",
         })
     }
@@ -105,7 +108,11 @@ impl AnalysisExecutor {
     {
         let (sender, receiver) = oneshot::channel();
         let task = Message::Run(Box::new(move || {
-            let _ = sender.send(work());
+            // Each submitted task owns its unwind boundary. Discard the failed
+            // task without losing a fixed worker or replaying the operation.
+            let result = catch_unwind(AssertUnwindSafe(work))
+                .map_err(|_| AnalysisExecutorError::TaskPanicked);
+            let _ = sender.send(result);
         }));
         self.inner
             .sender
@@ -114,7 +121,7 @@ impl AnalysisExecutor {
                 TrySendError::Full(_) => AnalysisExecutorError::Busy,
                 TrySendError::Disconnected(_) => AnalysisExecutorError::Stopped,
             })?;
-        receiver.await.map_err(|_| AnalysisExecutorError::Stopped)
+        receiver.await.map_err(|_| AnalysisExecutorError::Stopped)?
     }
 
     #[must_use]
@@ -157,6 +164,30 @@ mod tests {
             })
             .await?;
         assert!(thread_name.starts_with("music-analysis-"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[allow(clippy::panic)] // Deliberate fault injection, including a repeated failure.
+    async fn panicking_tasks_fail_without_losing_the_fixed_worker()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let executor = AnalysisExecutor::new(1)?;
+        let worker_id = executor.execute(|| std::thread::current().id()).await?;
+        for _ in 0..3 {
+            let failed = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                executor.execute::<(), _>(|| panic!("controlled analysis task panic")),
+            )
+            .await?;
+            assert_eq!(failed, Err(AnalysisExecutorError::TaskPanicked));
+            let next_worker = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                executor.execute(|| std::thread::current().id()),
+            )
+            .await??;
+            assert_eq!(next_worker, worker_id);
+            assert_eq!(executor.worker_count(), 1);
+        }
         Ok(())
     }
 }

@@ -362,7 +362,7 @@ This is one local attempt per requested job, with no background retry loop. Sour
 implementation and model freshness checks still apply; a new forced rebuild still
 recomputes completed factual profiles. No evidence identity or wire shape changed.
 
-The recovery suite now has seven cases. Two new tests cover a normal follow-up with
+The voice-retry batch brought the recovery suite to seven cases. Two new tests cover a normal follow-up with
 mixed successful/failed voice results and same-job restart after a recorded failure.
 The forced-voice regression also checks that factual extraction is not repeated.
 The tests use the real handler, coordinator, SQLite, pinned worker and FFmpeg, with
@@ -371,11 +371,38 @@ retained factual fields, successful context rows, manual tags and input bytes ar
 checked. The successful voice row in the mixed fixture is seeded recovery state,
 not a listening judgment; actual retry decoding failures remain visible.
 
-All 526 Rust tests passed with the real pinned model and FFmpeg configured, including
+The voice-retry batch passed all 526 Rust tests with the pinned model and FFmpeg, including
 all seven recovery cases. Workspace check, workspace/fuzz Clippy, architecture,
 formatting, doc tests, generated contracts and documentation links/anchors passed.
 These checks do not establish vocal accuracy, production resource limits or playback
 behavior, and no private originals or deployed library were changed.
+
+## Analyzer panic recovery (25 September 2026)
+
+A controlled analyzer panic reproduced permanent loss of the only analysis worker.
+The first job failed as expected, but an explicit retry on the same coordinator also
+failed because the pool could no longer execute extraction. A server restart was
+previously needed to recreate its worker.
+
+The fixed pool now catches a panic at the submitted-task boundary and returns
+`TaskPanicked`. The job remains failed, with the fixed diagnostic
+`context analysis task panicked`; panic payloads are not stored in the job error.
+The same worker can execute subsequent tasks. Pool size, queue bounds, source
+freshness, explicit retry and authored-state contracts are unchanged. No operation
+is automatically repeated and no new runtime or dependency is added.
+
+Two regressions cover this failure: three successive task panics preserve the same
+worker thread identity, and the eighth SQLite-backed recovery case fails extraction
+on the second recording then completes an explicit retry without restarting the
+pool. That case retains the first recording's exact saved context, finishes the
+remaining recordings, and preserves manual tags and source bytes. These fixtures
+exercise Rust unwinding with controlled analysis; they do not reproduce a native
+process crash, memory exhaustion or a production-library decoder defect.
+
+All 528 Rust tests passed with the real pinned voice model and FFmpeg configured.
+Workspace check, workspace/fuzz Clippy, formatting, architecture, doc tests,
+generated contracts and documentation links/anchors also passed. Production
+resource/playback and owner listening acceptance remain separate.
 
 ## Resource boundary and production acceptance
 

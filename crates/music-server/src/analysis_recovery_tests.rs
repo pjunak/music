@@ -39,12 +39,18 @@ const DEADLINE: Duration = Duration::from_secs(10);
 struct ControlledAnalyzer {
     calls: Mutex<BTreeMap<String, usize>>,
     blocked: Mutex<Option<String>>,
+    panic_once: Mutex<Option<String>>,
     entered: Notify,
 }
 
 impl ControlledAnalyzer {
     fn hold(&self, name: Option<&str>) -> TestResult {
         *self.blocked.lock().map_err(|_| "analysis gate poisoned")? = name.map(str::to_owned);
+        Ok(())
+    }
+
+    fn panic_once(&self, name: &str) -> TestResult {
+        *self.panic_once.lock().map_err(|_| "panic gate poisoned")? = Some(name.to_owned());
         Ok(())
     }
 
@@ -95,6 +101,7 @@ impl AudioContextAnalyzer for ControlledAnalyzer {
         LOCAL_CONTEXT_IMPLEMENTATION_ID
     }
 
+    #[allow(clippy::panic)] // Deliberate fault injection for the worker boundary.
     fn analyze(
         &self,
         path: &Path,
@@ -111,6 +118,21 @@ impl AudioContextAnalyzer for ControlledAnalyzer {
             .map_err(|_| AudioContextError::Decode)?
             .entry(name.to_owned())
             .or_default() += 1;
+        let should_panic = {
+            let mut selected = self
+                .panic_once
+                .lock()
+                .map_err(|_| AudioContextError::Decode)?;
+            if selected.as_deref() == Some(name) {
+                selected.take();
+                true
+            } else {
+                false
+            }
+        };
+        if should_panic {
+            panic!("controlled audio analyzer panic");
+        }
         let deadline = Instant::now() + DEADLINE;
         if self
             .blocked
@@ -779,5 +801,46 @@ async fn same_job_restart_keeps_voice_failures_without_repeating_the_attempt() -
     assert_eq!(result["voice_performance"]["tracks_profiled"], 2);
     assert_eq!(result["passes"]["voice_detection"]["failed_tracks"], 3);
     assert_eq!(result["passes"]["voice_detection"]["completed_tracks"], 0);
+    fixture.check_authored_state().await
+}
+
+#[tokio::test]
+async fn failed_extraction_can_retry_without_restarting_the_worker_pool() -> TestResult {
+    let fixture = Fixture::new().await?;
+    fixture.analyzer.panic_once("b.wav")?;
+    let coordinator = fixture.start().await?;
+    let original = coordinator
+        .service
+        .enqueue(LIBRARY_CONTEXT_JOB_KIND, fixture.parameters(true))
+        .await?;
+    let failed = wait_for(&coordinator.service, &original.id, JobStatus::Failed).await?;
+    let saved = fixture.state(0).await?;
+    assert_eq!(saved.job_id, original.id);
+    assert_eq!(
+        failed.error.as_deref(),
+        Some("context analysis task panicked")
+    );
+
+    // Reuse the same coordinator and fixed pool: a failed task must not take the
+    // only worker away from all subsequent library analysis until server restart.
+    let retry = coordinator.service.retry(&original.id).await?;
+    let outcome = wait_for(&coordinator.service, &retry.id, JobStatus::Succeeded).await;
+    stop(coordinator).await?;
+    let finished = outcome?;
+    assert_eq!(fixture.state(0).await?, saved);
+    assert_eq!(fixture.state(1).await?.job_id, retry.id);
+    assert_eq!(fixture.state(2).await?.job_id, retry.id);
+    assert_eq!(
+        [
+            fixture.analyzer.calls("a.wav")?,
+            fixture.analyzer.calls("b.wav")?,
+            fixture.analyzer.calls("c.wav")?,
+        ],
+        [1, 2, 1]
+    );
+    assert_eq!(
+        finished.result.as_ref().ok_or("missing result")?["current_contexts"],
+        3
+    );
     fixture.check_authored_state().await
 }

@@ -96,7 +96,7 @@ impl ContextAnalysisJobHandler {
                 result = &mut task => {
                     drop(guard);
                     return result
-                        .map_err(|_| JobHandlerError::new("context analysis executor failed"));
+                        .map_err(|error| JobHandlerError::new(format!("context {error}")));
                 }
                 () = tokio::time::sleep(CANCELLATION_POLL_INTERVAL) => {
                     if let Err(error) = context.check_cancelled().await {
