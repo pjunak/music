@@ -33,8 +33,9 @@ Initialization rejects retained run exports. Deriving the sample from returned
 answers would exclude failed or missing tracks before freezing and bias the
 comparison. Export selected IDs first, including tracks that have never been tagged.
 
-The first JSONL line is the `song-mood-judgments/v1` manifest; subsequent lines are
-judgments. There is one current format, with no old 30-track cohort parser. Edit:
+The first JSONL line is the `song-mood-judgments/v2` manifest; subsequent lines are
+judgments. There is one current format. Superseded manifests are rejected; prepare
+and freeze a new pilot instead of adapting old results. Edit:
 
 - Manifest: set `annotator`, choose a small `core_tag_ids` set, describe actual
   `session_requests` and sampling in `selection_notes`. Keep the initial seed fixed.
@@ -42,6 +43,10 @@ judgments. There is one current format, with no old 30-track cohort parser. Edit
   an unchanged private file reference) and `recording_group`. Related editions,
   duplicates and excerpts must share that group; use `duplicate_group` to connect
   independently identified copies. The tool cannot discover unidentified duplicates.
+- Set `duration_seconds` from the complete original recording before freezing. It
+  must be a finite positive number, at most 86,400 seconds; fractional seconds are
+  supported. Initialization leaves it unknown rather than estimating it from results
+  or the amount you happened to listen to.
 - Record stable album and composer identities where known. `separate_by` can contain
   `album` and/or `composer` to keep those together too. Groups combine transitively;
   if everything becomes one group, add independent recordings. Do not split related
@@ -56,17 +61,25 @@ node tools/mood-pilot.mjs freeze draft.jsonl vocabulary.json pilot.jsonl
 ```
 
 The seed assigns about 30% of independent groups to confirmation and the rest to
-development. Track counts may differ. Grouping, core tags, vocabulary and partitions
-are fingerprinted. Scoring rejects accidental changes; this is an audit mechanism,
-not protection against someone deliberately rewriting the manifest. Commands refuse
+development. Track counts may differ. File references, durations, grouping, core
+tags, vocabulary and partitions are fingerprinted. Scoring rejects accidental
+changes; this is an audit mechanism, not protection against someone deliberately rewriting the manifest. Commands refuse
 to overwrite an existing file. Preserve the original frozen copy privately.
 
 ## Listen independently
 
-In each selected row, record ordered `listened_intervals` as seconds, for example
-`[[0, 150]]`. Set `scope` to `whole_track` or `excerpt`; excerpt judgments cannot
-certify a whole recording. Set the initially unknown `blind` field explicitly: `true` only for independent
-listening, or `false` if predictions were visible or influenced the judgment. Mark `reviewed: true` only after listening.
+In each selected row, record ordered, non-overlapping `listened_intervals` in seconds,
+within the frozen duration. For a 150-second recording, `[[0, 150]]` or adjacent
+intervals `[[0, 60], [60, 150]]` cover the complete track. Set `scope` to `whole_track`
+only when those intervals cover the beginning, every intervening section and the
+exact recorded ending without gaps. Use `excerpt` for partial listening; it cannot
+certify a whole recording. Both scoring modes reject inconsistent whole-track claims.
+
+Set the initially unknown `blind` field explicitly: `true` only for independent
+listening before seeing candidate predictions, or `false` if predictions were visible
+or influenced the judgment. Re-listening after seeing predictions does not restore
+blinding. Mark `reviewed: true` only after listening. These fields record listener
+declarations; the tool cannot verify that listening occurred or that a duration is correct.
 
 Use vocabulary IDs in `labels`, for example:
 
@@ -96,6 +109,13 @@ node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json -
 node --test tools/mood-pilot.test.mjs
 ```
 
+Normal scoring and comparison require blind, whole-track judgments for **every**
+recording in the selected split. A single assisted or excerpt judgment prevents an
+independent report; the tool never drops inconvenient tracks to improve the score.
+Reports use `song-mood-score/v2` or `song-mood-comparison/v2` and record
+`assessment_mode: "independent"`. This describes the declared listening conditions,
+not certification, representative sampling or proof of accuracy.
+
 Normal scoring does not read confirmation judgments into its metrics or require
 them to be completed. Use the explicit confirmation switch only after freezing
 candidate settings. Repeated tuning against it makes it development data.
@@ -111,8 +131,8 @@ is unknown. Group bootstrap intervals resample whole independent groups 1,000 ti
 intervals with fewer than 900 defined replicates remain unknown. Reports include
 the number of independent groups, attempted replicates and defined replicates for
 precision, recall and useful-track coverage. Small samples and rare tags
-cannot establish general accuracy. Album/composer overlap and assisted/excerpt
-judgments are reported, including when those identities were not used for splitting.
+cannot establish general accuracy. Album/composer overlap and listening conditions
+are reported, including when those identities were not used for splitting.
 
 The report retains candidate source signatures for audit. These signatures include
 analysis/provider configuration and can legitimately differ between candidates;
@@ -165,6 +185,26 @@ Choose settings on development results before opening confirmation. Use the same
 listening/session requests to record auditioning time, corrections and disruptive
 false positives alongside the numbers. Repeated confirmation-guided changes require
 new independent confirmation recordings.
+
+## Assisted or excerpt diagnostics
+
+Assisted corrections and partial listening can help investigate failures. To inspect
+those judgments, use the explicit diagnostic mode with the same frozen cohort:
+
+```powershell
+node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json --diagnostic > diagnostic-score.json
+node tools/mood-pilot.mjs compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json --diagnostic > diagnostic-comparison.json
+```
+
+Every report, including both sides of a comparison, records
+`assessment_mode: "diagnostic"`. These numbers cannot establish independent
+whole-recording accuracy or gains, even if precision is high. Read the assisted and
+excerpt counts alongside them. All selected tracks, including missing results, stay
+in the denominator; the tool does not substitute a smaller blind subset. Diagnostic
+mode still requires completed listening declarations and consistent intervals/scope.
+It never changes a judgment, reassigns a split or implies that excerpt judgments
+apply to unheard sections. Confirmation remains unopened unless `--confirmation`
+is explicitly added; both flags can be supplied in either order.
 
 ## Native model gate
 

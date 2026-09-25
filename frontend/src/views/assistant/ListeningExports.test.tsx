@@ -115,7 +115,7 @@ it("consumes real UI exports in the pilot CLI without dropping a failed cohort",
     // Only this synthetic regression fixture supplies judgments. Initialization does not.
     Object.assign(rows[0], { annotator: "test", core_tag_ids: ["mood.calm"] });
     rows.slice(1).forEach((row, i) => Object.assign(row, { file_reference: "fixture-" + i, recording_group: "group-" + i,
-      reviewed: true, blind: true, listened_intervals: [[0, 1]], labels: { "mood.calm": "positive" } }));
+      duration_seconds: 1, reviewed: true, blind: true, listened_intervals: [[0, 1]], labels: { "mood.calm": "positive" } }));
     await writeFile(draftPath, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
     await command(process.execPath, [cli, "freeze", draftPath, vocabularyPath, pilotPath]);
     view.rerender(<TaggingRunExport id="no-retained-results" result={null} />);
@@ -123,6 +123,8 @@ it("consumes real UI exports in the pilot CLI without dropping a failed cohort",
     await writeFile(runPath, JSON.stringify(vi.mocked(downloadJson).mock.calls[1][0]));
     const { stdout } = await command(process.execPath, [cli, "score", pilotPath, runPath, vocabularyPath]);
     const score = JSON.parse(stdout);
+    expect(score.schema_version).toBe("song-mood-score/v2");
+    expect(score.assessment_mode).toBe("independent");
     expect(score.categories.all.tracks).toBe(1);
     expect(score.categories.all.missing_results).toBe(1);
     expect(score.categories.all.empty_results).toBe(0);

@@ -13,8 +13,11 @@ The status below identifies delivered contracts; conditional stages remain propo
   the grouped JSONL pilot before model calls. Frozen recording groups, four-state
   labels, development/confirmation scoring, per-tag counts, known-positive recall
   and paired group-bootstrap comparisons remain. Empty/failed run exports preserve
-  missing outcomes; model-success-based initialization is removed. Freezing works
-  before listening. The owner has no labeled dataset yet; listening remains open.
+  missing outcomes; model-success-based initialization is removed. The current v2
+  pilot freezes recording duration and requires blind, complete-recording judgments
+  for independent scores. Assisted/excerpt comparisons require explicit diagnostic
+  mode and retain the entire cohort. Freezing works before listening. The owner has
+  no labeled dataset yet; listening remains open.
 - **Implemented:** context v3 with gain-invariant relative dynamics, explicit coverage,
   no whole-track context confidence, `voice_score`, and coarse local tempo withheld from
   the model projection. Existing bounded execution and source-audio decoding are reused.
@@ -70,11 +73,15 @@ Across completed batches, Windows GNU validation passed 519 Rust tests, workspac
 and fuzz Clippy, formatting, architecture, generated contracts, doctor/migration
 coverage and the headless release build. Earlier batches also passed all 361 frontend
 tests, frontend lint/typecheck/production build and 23 grouped mood-pilot tests.
-This model-pairing batch passed 26 reference-tool tests. Original TensorFlow and
+The preceding model-pairing batch passed 26 reference-tool tests. Original TensorFlow and
 ONNX comparisons passed on 71 patches. The metadata-bearing formats reproduce
 all 66 selected patches and 226 patches plus the summary of one complete track
 exactly; that track also passes native comparison. Earlier frame fixtures and
-workflow gates are unchanged. Application Rust/frontend gates were not rerun.
+workflow gates are unchanged. The listening-scope batch passed 29 pilot tests,
+all 361 frontend tests, lint, typecheck, production build and 55 local documentation
+link/anchor checks. Its UI-export integration fixture uses the frozen duration and
+checks independent report identity. Application Rust behavior is unchanged; Rust
+and reference-model gates were not rerun for this batch.
 The migration test starts with the old schema, verifies the backup/reset, parses a
 preserved automatic rule with its new tag source, and confirms fresh results survive
 reopening. Browser guards reject the retired result shape.
@@ -87,40 +94,41 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch:** verified the original TensorFlow-to-ONNX model pairing and bound
-reference scores to their exact label meanings. The published mood/instrument
-metadata names the fixed-batch TensorFlow encoder; dimensions alone did not prove
-that the dynamic-batch ONNX encoder produced the same embedding space.
+**Latest batch:** fixed an acceptance flaw: assisted and excerpt judgments could
+enter the same scores as independent whole-recording judgments. Declaring
+whole-track scope previously required only one nonempty listening interval.
 
-The original TensorFlow 2.8 graphs agree with the pinned ONNX stack on five
-synthetic and 66 approved real-audio patches. Minimum embedding cosine was
-0.999999999986; worst complete encoder/head score error was 0.000001014 against
-the unchanged 0.001 gate. Heads also agree when fed identical embeddings, and
-moving selected patches to different batch slots/neighbours changed no embedding
-values. Wrong embedding order and modified scores fail the comparison.
+The current v2 pilot freezes the original recording duration with file identity and
+group membership. Independent scoring and paired comparison require blind judgments
+covering the entire recording without gaps for every selected track. A missed beginning,
+interior section or ending fails. Assisted/excerpt data remains useful through explicit
+`--diagnostic` reports, marked on the comparison and both candidates. The complete
+frozen cohort remains present, including missing results; there is no automatic
+selection of a cleaner-looking subset. No legacy pilot reader was added.
 
-Both offline exporters now require checksum-pinned model metadata alongside the
-weights, validate the documented encoder pairing and preserve exact head label
-order. Their v2 headers carry the 56 mood/theme and 40 instrument labels once;
-unused encoder style labels are omitted. Changed metadata fails before runtime
-loading. These labels identify uncalibrated outputs; they do not map themselves
-to the owner's vocabulary or become listening judgments.
+Validation: 29 pilot tests passed, including malformed/mutated durations, ending and
+gap controls, biased judgments, confirmation isolation, missing outcomes and actual
+CLI invocations in both modes. All 361 frontend tests, lint, typecheck and production
+build passed, including the UI-export-to-CLI regression with frozen duration and
+independent report identity. All 55 checked documentation links/anchors passed.
+Duration and blinding remain listener declarations, not proof of listening or audio-file identity.
 
-Validation: 26 dependency-free reference tests passed. All 66 selected patches
-and one full 226-patch track with its summaries reproduced exactly under the
-new headers; the track passed the native comparator too. Reordered metadata was
-rejected in a real-tool control. Source audio and ONNX model hashes remain
-unchanged. The [reference ledger](../crates/music-analysis/tests/fixtures/README.md#original-export-pairing-and-label-identity-25-september-2026)
-records original graph/metadata hashes, runtime provenance and fixed tolerances.
-TensorFlow and its Python helper remain in a temporary reference environment
-outside the repository and release image; no application dependency was added.
+**Fully implemented in the application:** factual whole-track context and optional
+voice analysis; attributed catalog evidence; structured per-tag model proposals and
+abstention; stale-result/review guards; current-only reset/resume; removal of the
+old keyword/audio mood heuristics; accepted-tag playlist behavior. Read-only probes,
+pilot inventory/run exports and offline comparison tools are also implemented.
 
-Remaining: independent owner listening and candidate usefulness, production
-worker cancellation/memory lifecycle, Linux/container resources with concurrent
-playback, then an operator-started rebuild. Matching graphs on common mel input
-does not establish independent decoder/resampler parity or complete upstream
-wrapper equivalence; the deliberate ending policy is unchanged. No provider
-call, upload, authored-tag change, push or deployment was made.
+**Experimental only:** EffNet and its matching heads pass numerical qualification,
+including whole-track native comparison and original TensorFlow/ONNX pairing. They
+are not integrated into application workers, evidence, storage or review. Jev and
+other conditional alternatives have no application adapter or adoption commitment.
+
+**Still open:** owner labels and listening/session-use comparison, application/container
+resources with concurrent playback, and an operator-started full-library rebuild.
+EffNet still needs production worker integration/lifecycle qualification if adopted.
+No model has earned a mood-accuracy claim. No provider call,
+audio upload, authored-tag change, push or deployment was made.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -144,7 +152,7 @@ options survey; this plan determines the narrower implementation scope.
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
 | Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Existing persistence and execution | One-way generated-data reset; current evidence identities | Keep | Core safeguards: resumable local work, stale-result rejection and preservation of authored state. |
-| JSONL listening pilot + grouped bootstrap | Small pilot, then inventory derived from successful results | Explicit selected inventory, saved vocabulary, frozen groups, paired comparison and empty-run exports | Collect independent judgments; evaluate development, then confirmation | Essential: prevents success-only selection and distinguishes useful tags, abstentions and missing outcomes without a dataset application. |
+| JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, independent whole-recording scoring, marked diagnostics and paired comparison | Collect independent judgments; evaluate development, then confirmation | Essential: prevents selection and listening-scope bias; keeps missing outcomes and useful diagnostic data without a dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
 | TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |
@@ -272,13 +280,16 @@ needs are met. The conditional backlog is not a commitment.
   recordings if available, including actual failures and a random library sample.
   This is a pilot size, not a statistical claim or a prerequisite for correcting defects.
 - Store stable recording/file references, vocabulary revision, grouping, split seed,
-  annotator, listened intervals and blind/assisted status. Keep related versions,
-  duplicates and excerpts in one partition. Separate composers/albums where feasible;
+  annotator, complete-recording duration, listened intervals and blind/assisted status.
+  Keep related versions, duplicates and excerpts in one partition. Separate composers/albums where feasible;
   report residual overlap. Use grouped development and untouched confirmation cohorts
   initially; a training/calibration split becomes necessary only for fitted models.
 - Label `positive | negative | uncertain | unjudged`; omission is unjudged. Score only
   judged positives/negatives and report judgment coverage. Do not turn all unselected
-  tags into negatives. Record whole-track versus excerpt scope explicitly.
+  tags into negatives. Record whole-track versus excerpt scope explicitly. Independent
+  scoring requires blind judgments covering the complete frozen duration without gaps
+  for the whole selected split; assisted/excerpt scores require marked diagnostic mode.
+  Never improve apparent quality by silently dropping those tracks from the cohort.
 - Collect perceived-mood judgments without showing predictions where practicable;
   collect session-use judgments separately. The owner's preferences are the primary
   product target. A second listener can investigate ambiguity; broad multi-listener

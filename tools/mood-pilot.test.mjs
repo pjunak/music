@@ -14,7 +14,7 @@ const run = (tags = ["calm", "rest"]) => ({ schema_version: "assistant-mood-run-
 function draft() {
   const rows = createPilot(inventory(), vocabulary);
   Object.assign(rows[0], { annotator: "owner", core_tag_ids: ["m.calm", "m.urgent", "m.sad", "s.rest"] });
-  rows.slice(1).forEach((track) => Object.assign(track, { recording_group: `recording-${track.track_id}`, file_reference: `sha256-${track.track_id}`, reviewed: true, blind: true, listened_intervals: [[0, 120]], labels: { "m.calm": "positive", "m.urgent": "negative", "m.sad": "uncertain", "s.rest": "positive" } }));
+  rows.slice(1).forEach((track) => Object.assign(track, { recording_group: `recording-${track.track_id}`, file_reference: `sha256-${track.track_id}`, duration_seconds: 120, reviewed: true, blind: true, listened_intervals: [[0, 120]], labels: { "m.calm": "positive", "m.urgent": "negative", "m.sad": "uncertain", "s.rest": "positive" } }));
   return rows;
 }
 const pilot = () => freezePilot(draft(), vocabulary);
@@ -24,6 +24,7 @@ test("inventory initialization is independent of model results and does not inve
   assert.deepEqual(parsePilot(serializePilot(rows)), rows);
   assert.deepEqual(rows[1].labels, {});
   assert.equal(rows[1].recording_group, "");
+  assert.equal(rows[1].duration_seconds, null);
   assert.throws(() => freezePilot(rows, vocabulary), /annotator/);
   assert.throws(() => parsePilot(JSON.stringify({ schema_version: "assistant-mood-pilot/v1", tracks: [] })), /JSONL/);
 });
@@ -132,12 +133,12 @@ test("development scoring never requires or scores untouched confirmation labels
 test("reports residual overlap, listening limitations and candidate signatures without hiding missing data", () => {
   const rows = draft(); rows.slice(1).forEach((t) => { t.album = "shared"; t.composers = ["shared-composer"]; t.scope = "excerpt"; t.blind = false; });
   const frozen = freezePilot(rows, vocabulary);
-  const result = scorePilot(frozen, run(), vocabulary, "confirmation");
+  const result = scorePilot(frozen, run(), vocabulary, "confirmation", "diagnostic");
   assert.deepEqual(result.residual_overlap, { albums: ["shared"], composers: ["shared-composer"] });
   assert.equal(result.listening.assisted_tracks, result.categories.all.tracks);
   assert.equal(result.listening.excerpt_tracks, result.categories.all.tracks);
   assert.equal(Object.keys(result.run_source_signatures).length, result.categories.all.tracks);
-  assert.deepEqual(result, scorePilot(frozen, run(), vocabulary, "confirmation"));
+  assert.deepEqual(result, scorePilot(frozen, run(), vocabulary, "confirmation", "diagnostic"));
 });
 
 test("rejects changed vocabulary, malformed intervals, ambiguous identity and untrusted run rows", () => {
@@ -172,7 +173,7 @@ test("freeze precedes listening without inventing a blinding answer", () => {
   rows.slice(1).forEach((track) => Object.assign(track, { reviewed: false, blind: null, labels: {}, listened_intervals: [] }));
   const frozen = freezePilot(rows, vocabulary);
   assert.equal(frozen[1].blind, null);
-  assert.throws(() => scorePilot(frozen, run(), vocabulary), /Finish independent listening/);
+  assert.throws(() => scorePilot(frozen, run(), vocabulary), /Finish listening/);
   const selected = frozen.slice(1).filter((track) => track.split === "development");
   selected.forEach((track) => Object.assign(track, { reviewed: true, listened_intervals: [[0, 120]] }));
   assert.throws(() => scorePilot(frozen, run(), vocabulary), /blinding status/);
@@ -198,7 +199,7 @@ test("recall includes known positives missed by abstentions or unavailable resul
 test("paired comparison reports gains, per-tag losses avoided and category deltas", () => {
   const rows = pilot(), result = comparePilot(rows, run(["calm", "urgent"]), run(), vocabulary);
   const n = result.baseline.categories.all.tracks;
-  assert.equal(result.schema_version, "song-mood-comparison/v1");
+  assert.equal(result.schema_version, "song-mood-comparison/v2");
   assert.equal(result.delta.categories.all.precision, 0.5);
   assert.equal(result.delta.categories.all.recall, 0.5);
   assert.equal(result.delta.categories.all.useful_track_coverage, 0);
@@ -296,7 +297,7 @@ test("comparison excludes confirmation judgments and extra results until explici
   assert.equal(result.differences.length, 0);
   assert.equal(result.candidate.usage.total_tokens, 500);
   assert.equal(result.baseline.judgments_fingerprint, result.candidate.judgments_fingerprint);
-  assert.throws(() => comparePilot(rows, baseline, candidate, vocabulary, "confirmation"), /Finish independent listening/);
+  assert.throws(() => comparePilot(rows, baseline, candidate, vocabulary, "confirmation"), /Finish listening/);
   const opened = comparePilot(judged, baseline, candidate, vocabulary, "confirmation");
   assert.equal(opened.tracks_with_regressions, confirmation.length);
   assert.equal(opened.delta.categories.all.precision, -1);
@@ -344,6 +345,124 @@ test("CLI compares private snapshots without modifying them and requires the exp
     const confirmation = await command(process.execPath, ["tools/mood-pilot.mjs", "compare", ...paths, "--confirmation"]);
     assert.equal(JSON.parse(confirmation.stdout).split, "confirmation");
     await assert.rejects(command(process.execPath, ["tools/mood-pilot.mjs", "compare", ...paths, "--all"]), /Usage/);
+    assert.deepEqual(await Promise.all(paths.map((path) => readFile(path, "utf8"))), values);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+
+test("the current pilot requires frozen recording durations and rejects superseded manifests", () => {
+  for (const duration of [undefined, null, 0, -1, NaN, Infinity, "120", 86401]) {
+    const rows = draft(); rows[1].duration_seconds = duration;
+    assert.throws(() => freezePilot(rows, vocabulary), /recording duration/);
+  }
+  const current = pilot();
+  assert.equal(current[0].schema_version, "song-mood-judgments/v2");
+  const retired = structuredClone(current); retired[0].schema_version = "song-mood-judgments/v1";
+  assert.throws(() => scorePilot(retired, run(), vocabulary), /Unsupported pilot contract/);
+  current[1].duration_seconds = 121;
+  assert.throws(() => scorePilot(current, run(), vocabulary), /partition/);
+  assert.throws(() => comparePilot(current, run(), run(), vocabulary), /partition/);
+});
+
+test("whole-track listening covers the beginning, every interval and the complete ending in both modes", () => {
+  const rows = draft();
+  rows.slice(1).forEach((track) => Object.assign(track, { duration_seconds: 120.5, listened_intervals: [[0, 20], [20, 120.5]] }));
+  const frozen = freezePilot(rows, vocabulary);
+  assert.equal(scorePilot(frozen, run(), vocabulary).assessment_mode, "independent");
+  const track = frozen.slice(1).find((row) => row.split === "development");
+  for (const intervals of [[[1, 120.5]], [[0, 20], [21, 120.5]], [[0, 120]]]) {
+    track.listened_intervals = intervals;
+    for (const mode of ["independent", "diagnostic"]) {
+      assert.throws(() => scorePilot(frozen, run(), vocabulary, "development", mode), /complete frozen duration without gaps/);
+      assert.throws(() => comparePilot(frozen, run(), run(), vocabulary, "development", mode), /complete frozen duration without gaps/);
+    }
+  }
+  track.listened_intervals = [[0, 121]];
+  assert.throws(() => scorePilot(frozen, run(), vocabulary), /within the recording duration/);
+  track.listened_intervals = [[0, 120]];
+  track.scope = "excerpt";
+  assert.equal(scorePilot(frozen, run(), vocabulary, "development", "diagnostic").listening.excerpt_tracks, 1);
+});
+
+test("one assisted or excerpt judgment cannot silently enter independent scores or shrink the frozen cohort", () => {
+  for (const limitation of [
+    { blind: false },
+    { scope: "excerpt", listened_intervals: [[10, 30]] },
+    { blind: false, scope: "excerpt", listened_intervals: [[10, 30]] },
+  ]) {
+    const rows = pilot(), selected = rows.slice(1).filter((track) => track.split === "development");
+    Object.assign(selected[0], limitation);
+    const candidate = run();
+    candidate.track_results = candidate.track_results.filter((result) => result.track_id !== selected[0].track_id);
+    assert.throws(() => scorePilot(rows, candidate, vocabulary), /Independent scoring requires blind, whole-track judgments/);
+    assert.throws(() => comparePilot(rows, run(), candidate, vocabulary), /Use --diagnostic/);
+    const score = scorePilot(rows, candidate, vocabulary, "development", "diagnostic");
+    assert.equal(score.schema_version, "song-mood-score/v2");
+    assert.equal(score.assessment_mode, "diagnostic");
+    assert.equal(score.categories.all.tracks, selected.length);
+    assert.equal(score.categories.all.missing_results, 1);
+    assert.equal(score.categories.all.recall, (selected.length - 1) / selected.length);
+    const result = comparePilot(rows, run(), candidate, vocabulary, "development", "diagnostic");
+    assert.equal(result.assessment_mode, "diagnostic");
+    assert.equal(result.baseline.assessment_mode, "diagnostic");
+    assert.equal(result.candidate.assessment_mode, "diagnostic");
+    assert.equal(result.result_availability.baseline_only, 1);
+    assert.equal(result.tracks_with_regressions, 1);
+    assert.match(result.scope_note, /cannot establish independent whole-recording gains/);
+  }
+});
+
+test("diagnostic mode does not invent listening or turn unfinished judgments into scores", () => {
+  const rows = pilot(), selected = rows.slice(1).find((track) => track.split === "development");
+  selected.reviewed = false; selected.blind = null; selected.listened_intervals = [];
+  assert.throws(() => scorePilot(rows, run(), vocabulary, "development", "diagnostic"), /Finish listening/);
+  assert.throws(() => comparePilot(rows, run(), run(), vocabulary, "development", "diagnostic"), /Finish listening/);
+  assert.throws(() => scorePilot(pilot(), run(), vocabulary, "development", "anything"), /independent or diagnostic/);
+});
+
+test("confirmation listening limitations neither alter development metrics nor become independent confirmation", () => {
+  const rows = pilot(), expected = scorePilot(rows, run(), vocabulary);
+  const confirmation = rows.slice(1).filter((track) => track.split === "confirmation");
+  confirmation.forEach((track) => Object.assign(track, { blind: false, scope: "excerpt", listened_intervals: [[20, 30]] }));
+  assert.deepEqual(scorePilot(rows, run(), vocabulary), expected);
+  assert.equal(comparePilot(rows, run(), run(), vocabulary).assessment_mode, "independent");
+  assert.throws(() => scorePilot(rows, run(), vocabulary, "confirmation"), /Independent scoring/);
+  assert.throws(() => comparePilot(rows, run(), run(), vocabulary, "confirmation"), /Independent scoring/);
+  const diagnostic = scorePilot(rows, run(), vocabulary, "confirmation", "diagnostic");
+  assert.equal(diagnostic.categories.all.tracks, confirmation.length);
+  assert.equal(diagnostic.listening.assisted_tracks, confirmation.length);
+  assert.equal(diagnostic.listening.excerpt_tracks, confirmation.length);
+  // An inconsistent, unfinished whole-track declaration in unopened confirmation is not scored.
+  confirmation.forEach((track) => Object.assign(track, { reviewed: false, scope: "whole_track", blind: null }));
+  assert.deepEqual(scorePilot(rows, run(), vocabulary), expected);
+});
+
+test("CLI requires an explicit diagnostic flag for assisted excerpts and keeps confirmation explicit in either flag order", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "music-pilot-scope-"));
+  try {
+    const rows = pilot();
+    rows.slice(1).forEach((track) => Object.assign(track, { blind: false, scope: "excerpt", listened_intervals: [[10, 30]] }));
+    const values = [serializePilot(rows), JSON.stringify(run(["calm", "urgent"])), JSON.stringify(run()), JSON.stringify(vocabulary)];
+    const paths = ["pilot.jsonl", "baseline.json", "candidate.json", "vocabulary.json"].map((name) => join(directory, name));
+    await Promise.all(paths.map((path, index) => writeFile(path, values[index])));
+    const command = promisify(execFile);
+    for (const operation of ["score", "compare"]) {
+      const inputs = operation === "score" ? [paths[0], paths[2], paths[3]] : paths;
+      const args = ["tools/mood-pilot.mjs", operation, ...inputs];
+      await assert.rejects(command(process.execPath, args), /Independent scoring requires/);
+      await assert.rejects(command(process.execPath, [...args, "--confirmation"]), /Independent scoring requires/);
+      const { stdout } = await command(process.execPath, [...args, "--diagnostic"]);
+      assert.equal(JSON.parse(stdout).assessment_mode, "diagnostic");
+      assert.equal(JSON.parse(stdout).split, "development");
+      for (const flags of [["--diagnostic", "--confirmation"], ["--confirmation", "--diagnostic"]]) {
+        const result = JSON.parse((await command(process.execPath, [...args, ...flags])).stdout);
+        assert.equal(result.assessment_mode, "diagnostic");
+        assert.equal(result.split, "confirmation");
+      }
+      for (const flags of [["--all"], ["--diagnostic", "--diagnostic"], ["--confirmation", "--confirmation"], ["--diagnostic", "--all"], ["extra-file.json"]]) {
+        await assert.rejects(command(process.execPath, [...args, ...flags]), /Usage/);
+      }
+    }
     assert.deepEqual(await Promise.all(paths.map((path) => readFile(path, "utf8"))), values);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
