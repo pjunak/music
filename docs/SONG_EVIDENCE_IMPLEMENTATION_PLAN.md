@@ -38,6 +38,9 @@ The status below identifies delivered contracts; conditional stages remain propo
   invalid-value/cancellation handling, normalized stereo input and bounded FFmpeg pools.
   The exact pinned graph and real FFmpeg/worker tests now run; decoder/window identities
   make older generated contexts stale without changing accepted/manual tags.
+- **Implemented:** each voice worker verifies the exact owned model bytes it parses,
+  with bounded input and replacement/deletion/recovery regressions. The artifact/v2
+  identity retires contexts produced under the previous startup-only verification.
 - **Native probe:** five synthetic patches pass frontend and ONNX graph parity against
   pinned Essentia.js and ONNX Runtime Web references. Real-audio decoding/tails,
   original TensorFlow-export equivalence, cancellation, production resource bounds
@@ -56,7 +59,7 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ### Local validation and release boundary
 
-Across completed batches, Windows GNU validation passed: 511 Rust tests, 342 frontend
+Across completed batches, Windows GNU validation passed: 514 Rust tests, 342 frontend
 tests and 48 pilot/policy checks; workspace and fuzz Clippy, formatting, architecture,
 generated contracts, doctor/migration coverage, frontend production build and the
 headless release build.
@@ -72,44 +75,30 @@ library judgments were invented, and no provider calls, push or deployment occur
 
 ### Batch progress and tool inventory
 
-**Latest batch — CI repair:** [secret-scan run 36072259587](https://github.com/pjunak/music/actions/runs/36072259587)
-flagged the public Essentia JavaScript artifact checksum as a generic API key.
-The generator now uses `core_artifact_sha256`; regenerated inputs and all 1,152
-reference values are unchanged. One exact historical fingerprint is ignored so
-push scans can traverse the introducing commit without excluding the file or rule.
-Gitleaks 8.30.1 reproduced the finding before the fix and passed the same five-commit
-range afterward. The current fixture/generator scan, synthetic new-key detection
-control, reference regeneration and Rust numerical regression passed. Audio behavior
-and the tool inventory below retain the previous batch's status; this is a local
-CI correction, with no push or deployment.
+**Latest batch:** made voice-model provenance hold at every worker start. Previously,
+startup checked the file checksum but later workers reopened the path without
+verification. A regression reproduced acceptance of a graph with altered output
+weights under the original model identity.
 
-**Previous analysis batch:** repaired the optional voice path's ending coverage and stereo input.
-A four-second fixture with sound only in its final second previously produced one
-silent prediction window. The analyzer now adds one full, ending-aligned window when
-needed, using actual retained frames; it never repeats a short tail or duplicates an
-already aligned window. Recordings too short for one complete patch remain unavailable.
+Startup and worker model reads are now bounded to 4 MiB (plus one byte to detect
+overflow). Each worker hashes an owned byte snapshot and parses that same snapshot
+before applying the pinned-graph compatibility adjustments. A changed, missing or
+unreadable model fails the optional stage; restoring the exact model allows a new
+worker. No live file mapping or post-check reopen is used for graph parsing.
 
-Real FFmpeg checks also exposed a roughly 3 dB stereo gain mismatch against the pinned
-Essentia MonoMixer. Explicit matrix normalization corrects it, with codec/filter pools
-bounded. Prediction summaries now use constant storage and a reused input buffer.
-Invalid PCM/scores, cancellation and expiry fail explicitly instead of producing a
-partial complete result. Window counts reach the existing evidence projection.
-The changed decoder/window identities invalidate older generated voice contexts;
-the frame transform and authored state retain their existing contracts.
+The `+artifact/v2` identity invalidates older generated voice contexts. Accepted/manual
+tags are preserved. Golden model outputs and decoded-audio regressions still pass;
+no model, provider, dependency or general storage layer was added.
 
-The exact official voice model was downloaded only to ignored developer test output
-and its existing SHA-256 pin verified. Both the graph golden-output test and the real
-FFmpeg/worker test now ran successfully. The [dated acceptance notes](../crates/music-analysis/tests/fixtures/README.md)
-record the decoder checks, model identity and remaining limits. No application model
-download, new dependency, legacy reader or production rebuild was introduced.
-
-Validation for that analysis batch: all 511 Rust tests passed with FFmpeg and the pinned voice
-model explicitly configured, including both previously unexercised graph/worker checks.
-Strict workspace Clippy, formatting, architecture, workspace check, doc-test and
-generated-contract gates passed. The pinned reference reproduced all 1,152 features;
-42 local documentation links/anchors passed. Frontend, pilot, fuzz and production
-dependency graphs are unchanged; their prior gates were not rerun.
-The listening pilot is ready; owner judgments remain outstanding.
+Validation: all 514 Rust tests passed with the real pinned model and FFmpeg configured,
+including replacement/recovery, bounded reads, golden outputs and worker inference.
+Formatting, workspace check, strict Clippy, architecture, doc tests and generated
+contracts passed. Local documentation links and the changed-source secret scans passed.
+Frontend, pilot, fuzz and dependency graphs are unchanged; their prior gates were not
+rerun. The [dated acceptance notes](../crates/music-analysis/tests/fixtures/README.md)
+record the exact model and validation boundary.
+The listening pilot is ready. Owner judgments, EffNet's complete audio path, production
+resource/concurrent-playback measurements and the operator-started rebuild remain open.
 
 For every subsequent batch, update the delivered work, checks, remaining gate and
 this inventory. Importance reflects this product's needs, not model popularity.
@@ -126,7 +115,7 @@ options survey; this plan determines the narrower implementation scope.
 | music-context-probe | No factual extractor acceptance CLI | Current v2 reports with numeric loudness, coverage/timing and cancellation checks | Keep for rebuild acceptance | High: measure the actual extractor before a large rebuild; process RSS is not whole-container resource evidence. |
 | RustFFT factual context | Older DSP and global confidence | Context v3, relative dynamics and coverage | Keep and measure | Core: local changes, endings and dynamics can help reject unsuitable session music; confidence is not inferred from duration. |
 | Coarse tempo estimator | 20 Hz integer-lag estimate | Local inspection only; omitted from tagger evidence | 100 Hz onset/interpolation only if rhythm errors matter | Conditional: improve pulse accuracy when it changes actual selection; no rhythm project by default. |
-| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Complete ending windows, constant-storage summaries, corrected stereo and real-model tests | Keep optional | High session value: avoid missed ending vocals and partial-success reports; window scores remain uncalibrated. |
+| MusiCNN voice classifier + tract-tensorflow | Optional local voice estimate | Ending coverage, bounded summaries and exact model snapshot verification per worker | Keep optional | High session value: audible vocals need correct input and dependable model attribution; window scores remain uncalibrated. |
 | Essentia.js / ONNX Runtime Web references | No retained numerical reference fixtures | Pinned local verification only; absent from production dependencies | Keep offline fixtures; run references when changing models/frontend | High validation value: independently check feature/graph calculations without another application runtime. |
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
@@ -304,7 +293,9 @@ starting parity criteria: normalized embedding cosine >=0.999 and head absolute
 error <=1e-3 on nonsilent fixtures, with separate near-zero handling. Investigate
 systematic differences; do not loosen tolerances to hide a preprocessing mismatch.
 Run within the documented [three-CPU/4 GB resource contract](RUST_REWRITE_ARCHITECTURE.md#non-functional-requirements)
-before production adoption.
+before production adoption. Verify the exact bytes imported by each worker, not only
+a file hash observed at service startup. The voice path now enforces this with a
+bounded owned snapshot; future model loaders must preserve that guarantee.
 A failed probe records rejection or justifies one alternative runtime; it does not block useful
 catalog/DSP corrections. Benchmark both heads, but ship only heads with a useful consumer.
 

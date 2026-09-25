@@ -32,8 +32,10 @@ const MAX_AUDIO_SECONDS: u64 = 24 * 60 * 60;
 const FRAMES_PER_CHUNK: usize = 8_192;
 const VOICE_REQUEST_CAPACITY: usize = 1;
 const VOICE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+// The only supported graph is about 3.1 MiB; bound input before protobuf parsing.
+const MAX_VOICE_MODEL_BYTES: u64 = 4 * 1_024 * 1_024;
 const TRACT_RUNTIME_ID: &str =
-    "tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2";
+    "tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2+artifact/v2";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoiceAnalysisDocument {
@@ -682,7 +684,16 @@ impl TractVoiceModel {
         tensorflow
             .op_register
             .insert("MusicMusiCnnPad", fixed_musicnn_pad);
-        let mut graph = tensorflow.read_frozen_from_path(path)?;
+        let mut graph = {
+            // Hash and parse one immutable snapshot. Reopening or mapping the path
+            // after verification could execute different bytes under the pinned identity.
+            let bytes = read_voice_model_bytes(File::open(path)?)?;
+            ensure!(
+                format!("{:x}", Sha256::digest(&bytes)) == VOICE_MODEL_SHA256,
+                "voice model checksum does not match the supported artifact"
+            );
+            tensorflow.read_frozen_model(&mut bytes.as_slice())?
+        };
         normalize_musicnn_graph(&mut graph)?;
         let mut model = tensorflow.model_for_proto_model(&graph)?;
         model.set_input_names(["model/Placeholder"])?;
@@ -882,18 +893,23 @@ fn classification_note(voice_score: f64, vocal_coverage: f64) -> String {
     )
 }
 
-fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut source = File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut bytes = vec![0_u8; 1024 * 1024];
-    loop {
-        let read = source.read(&mut bytes)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&bytes[..read]);
+fn read_voice_model_bytes(source: impl Read) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    source
+        .take(MAX_VOICE_MODEL_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_VOICE_MODEL_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "voice model exceeds the supported artifact size limit",
+        ));
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(bytes)
+}
+
+fn sha256_file(path: &Path) -> io::Result<String> {
+    let bytes = read_voice_model_bytes(File::open(path)?)?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
 fn round_five(value: f64) -> f64 {
@@ -951,7 +967,7 @@ mod tests {
             .as_deref()
             .ok_or("configured unavailable backend has no source signature")?;
         assert!(!signature.contains(&unsupported_path.display().to_string()));
-        assert!(signature.contains("+windows/v2:"));
+        assert!(signature.contains("+artifact/v2:"));
         Ok(())
     }
 
@@ -1339,6 +1355,113 @@ mod tests {
         assert_eq!(output.emitted_frames, expected_frames);
         assert_eq!(output.summary.windows, expected_patches);
         assert_eq!(model.calls, expected_patches);
+        Ok(())
+    }
+
+    #[test]
+    fn model_snapshot_reads_are_bounded_and_preserve_io_errors() -> Result<(), Box<dyn Error>> {
+        struct EndlessModel {
+            bytes_read: u64,
+        }
+        impl Read for EndlessModel {
+            fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+                output.fill(0);
+                self.bytes_read += output.len() as u64;
+                Ok(output.len())
+            }
+        }
+        let mut source = EndlessModel { bytes_read: 0 };
+        let error = read_voice_model_bytes(&mut source)
+            .err()
+            .ok_or("oversized model accepted")?;
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(source.bytes_read, MAX_VOICE_MODEL_BYTES + 1);
+
+        struct UnreadableModel;
+        impl Read for UnreadableModel {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::from(io::ErrorKind::PermissionDenied))
+            }
+        }
+        let error = read_voice_model_bytes(UnreadableModel)
+            .err()
+            .ok_or("read failure lost")?;
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            read_voice_model_bytes(b"complete input".as_slice())?,
+            b"complete input"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unverified_graph_is_rejected_before_tensorflow_import() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("empty-graph.pb");
+        tract_tensorflow::tfpb::graph().save_to(&path)?;
+        let error = TractVoiceModel::load(&path)
+            .err()
+            .ok_or("unverified graph accepted")?;
+        assert_eq!(
+            error.to_string(),
+            "voice model checksum does not match the supported artifact"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn worker_rejects_model_replaced_after_startup_when_available() -> Result<(), Box<dyn Error>> {
+        let Some(model_path) = std::env::var_os("MUSIC_TEST_VOICE_MODEL").map(PathBuf::from) else {
+            return Ok(());
+        };
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join(VOICE_MODEL_FILENAME);
+        let original = std::fs::read(&model_path)?;
+        std::fs::write(&path, &original)?;
+        let backend = VoiceBackend::initialize(Some(&path), "unused-ffmpeg");
+        assert_eq!(backend.status.status, "ready");
+        let factory = backend
+            .worker_factory
+            .ok_or("missing ready worker factory")?;
+
+        let mut graph =
+            tract_tensorflow::tensorflow().read_frozen_model(&mut original.as_slice())?;
+        let bias = graph
+            .node
+            .iter_mut()
+            .find(|node| node.name == "dense_2/bias")
+            .ok_or("official graph has no output bias")?;
+        let Some(tract_tensorflow::tfpb::tensorflow::attr_value::Value::Tensor(tensor)) = bias
+            .attr
+            .get_mut("value")
+            .and_then(|attribute| attribute.value.as_mut())
+        else {
+            return Err("official output bias is not a constant tensor".into());
+        };
+        assert_eq!(tensor.tensor_content.len(), 8);
+        tensor.tensor_content[..4].copy_from_slice(&100.0_f32.to_le_bytes());
+        graph.save_to(&path)?;
+        assert_ne!(sha256_file(&path)?, VOICE_MODEL_SHA256);
+
+        assert!(
+            matches!(factory.start(), Err(VoiceAnalysisError::WorkerUnavailable)),
+            "a replacement graph must not run under the startup model's identity"
+        );
+        let unavailable = VoiceBackend::initialize(Some(&path), "unused-ffmpeg");
+        assert_eq!(
+            unavailable.status.reason.as_deref(),
+            Some("unsupported_model")
+        );
+
+        std::fs::write(&path, original)?;
+        let recovered = factory.start()?;
+        assert!(recovered.is_alive());
+        drop(recovered);
+        std::fs::remove_file(&path)?;
+        assert!(matches!(
+            factory.start(),
+            Err(VoiceAnalysisError::WorkerUnavailable)
+        ));
         Ok(())
     }
 

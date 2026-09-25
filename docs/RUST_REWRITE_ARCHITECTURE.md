@@ -676,6 +676,15 @@ validated as the expected fixed `(3, 3)` time-axis padding before replacement, a
 `FusedBatchNormV3` is normalized to tract's compatible frozen-graph operator. No rewritten model is
 persisted and no model is downloaded by the application.
 
+Every worker start revalidates the exact bytes it will import, even after startup
+readiness succeeded. Reads use an owned snapshot capped at 4 MiB, with one additional
+byte allowed only to detect overflow; the supported graph is about 3.1 MiB.
+SHA-256 verification and TensorFlow parsing consume that same snapshot. The configured
+path is not reopened or memory-mapped between those operations, and the temporary
+snapshot is released after parsing. Replaced, missing or unreadable models fail
+before inference; restoring the pinned artifact permits a new worker.
+The `+artifact/v2` identity expires results from the previous loading policy.
+
 Preprocessing independently implements the published MusiCNN parameters: mono 16 kHz audio,
 centered 512-sample symmetric Hann frames with a 256-sample hop, a 257-bin magnitude spectrum,
 96 Slaney-warped linear triangles with unit-triangle normalization and power accumulation,

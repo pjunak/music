@@ -137,7 +137,7 @@ request without killing the worker, and shut down within five seconds. Weights r
 ignored developer artifacts, separately licensed and never installed by the application.
 
 The source identity is now
-`tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2`.
+`tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2+artifact/v2`.
 Older generated voice contexts become stale through the existing identity check.
 No legacy reader or data migration is needed; accepted/manual tags are preserved.
 
@@ -152,6 +152,26 @@ cargo test --locked -p music-analysis --lib -- --nocapture
 Decoder regressions can use FFmpeg from PATH without model weights; graph/worker
 checks need both explicit variables. An invalid supplied executable or model fails
 the check rather than silently skipping it.
+
+## Model integrity follow-up, 25 September 2026
+
+A regression modified the official graph's output-layer bias in a temporary copy
+after startup validation. The previous worker factory accepted that graph under
+the original pinned identity. Every worker now reads a bounded byte snapshot,
+verifies its SHA-256 and parses that same owned snapshot before graph adaptation.
+The parser no longer reopens or memory-maps the configured path after verification.
+
+Model input is capped at 4 MiB; at most one additional byte is read to detect
+overflow. Startup identity checks use the same bounded reader. Tests reject an
+endless input and preserve read errors, reject an unverified graph before import,
+reject replaced/deleted models at worker start, and recover after the exact model
+is restored. The replacement/recovery check exercised the real licensed graph.
+Golden zero-input outputs and FFmpeg worker inference still pass.
+
+The added `+artifact/v2` identity makes results from the previous loading policy
+stale. No new model or compatibility reader is introduced. This establishes
+artifact attribution and bounded input handling, not mood accuracy or a production
+memory/cancellation benchmark.
 
 ## Remaining acceptance
 
