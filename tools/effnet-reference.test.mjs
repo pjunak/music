@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { decodePcm, frameCount, MAX_SAMPLES, patchSamples, readBounded, readInputs, selectPatches } from "./effnet-reference.mjs";
+import { decodePcm, frameCount, MAX_SAMPLES, patchSamples, readBounded, readInputs, selectPatches, projectModelMetadata, loadModelMetadata } from "./effnet-reference.mjs";
 
 test("float32-le input retains quiet and signed values without normalization", () => {
   const expected = [0, -0, 0.25, -2, Math.fround(1e-20)], bytes = Buffer.alloc(expected.length * 4);
@@ -120,4 +120,74 @@ test("failed CLI does not print private paths, tensors or a reference completion
     assert.match(error.stderr, /EffNet reference failed/);
     assert.doesNotMatch(error.stderr, /private-recording-name|stack|at main/);
   }
+});
+
+function headMetadata(role = "mood") {
+  const length = role === "mood" ? 56 : 40;
+  return {
+    name: role === "mood" ? "mtg_jamendo_moodtheme" : "mtg_jamendo_instrument", version: "1",
+    classes: Array.from({ length }, (_, i) => "label-" + i),
+    inference: { sample_rate: 16000, embedding_model: { model_name: "discogs-effnet-bs64-1" } },
+    schema: { outputs: [{ output_purpose: "predictions", shape: [length] }] },
+  };
+}
+
+test("head metadata retains the exact label positions independently of its input object", () => {
+  for (const role of ["mood", "instrument"]) {
+    const metadata = headMetadata(role);
+    metadata.classes[0] = "z-last-alphabetically"; metadata.classes[1] = "A-first-alphabetically";
+    const result = projectModelMetadata(role, metadata);
+    assert.deepEqual(result.labels, metadata.classes);
+    assert.notEqual(result.labels, metadata.classes);
+    metadata.classes.reverse();
+    assert.equal(result.labels[0], "z-last-alphabetically");
+    assert.equal(result.documented_encoder, "discogs-effnet-bs64-1");
+  }
+});
+
+test("label counts, duplicates and malformed names cannot define score meanings", () => {
+  const variants = [
+    m => m.classes.pop(), m => m.classes.push("extra"), m => { m.classes[0] = m.classes[1]; },
+    m => { m.classes[0] = ""; }, m => { m.classes[0] = " padded "; },
+    m => { m.classes[0] = 1; }, m => { m.classes[0] = "line\nbreak"; },
+    m => { m.classes[0] = "x".repeat(129); },
+  ];
+  for (const mutate of variants) {
+    const metadata = headMetadata(); mutate(metadata);
+    assert.throws(() => projectModelMetadata("mood", metadata), /label order/);
+  }
+});
+
+test("wrong model, version, sample rate, dimensions or encoder pairing fail explicitly", () => {
+  const variants = [
+    m => { m.name = "other-head"; }, m => { m.version = "2"; },
+    m => { m.inference.sample_rate = 44100; }, m => { m.schema.outputs[0].shape = [40]; },
+    m => { m.schema.outputs[0].output_purpose = "embeddings"; },
+    m => { m.schema.outputs.push(m.schema.outputs[0]); },
+    m => { m.inference.embedding_model.model_name = "other-1280-encoder"; },
+  ];
+  for (const mutate of variants) {
+    const metadata = headMetadata(); mutate(metadata);
+    assert.throws(() => projectModelMetadata("mood", metadata));
+  }
+  assert.throws(() => projectModelMetadata("constructor", headMetadata()), /Unknown model role/);
+});
+
+test("encoder metadata identifies embeddings without exporting unused style labels", () => {
+  const metadata = {
+    name: "EffnetDiscogs", version: "1", classes: Array.from({ length: 400 }, (_, i) => "style-" + i),
+    inference: { sample_rate: 16000 },
+    schema: { outputs: [{ output_purpose: "embeddings", shape: ["n", 1280] }] },
+  };
+  assert.deepEqual(projectModelMetadata("encoder", metadata),
+    { name: "EffnetDiscogs", version: "1", embedding_dimensions: 1280 });
+});
+
+test("unverified metadata fails before it can be used as a label map", async () => {
+  const directory = await fs.mkdtemp(path.join(tmpdir(), "music-model-metadata-"));
+  try {
+    const file = path.join(directory, "discogs-effnet-bsdynamic-1.json");
+    await fs.writeFile(file, JSON.stringify({ classes: ["looks-plausible"] }));
+    assert.throws(() => loadModelMetadata(directory), /Unverified model metadata/);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

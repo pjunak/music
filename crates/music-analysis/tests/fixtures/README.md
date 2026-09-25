@@ -137,7 +137,7 @@ finite PCM and output dimensions. Limits are a 1 MiB input manifest, 1-32 record
 one recording at a time and one graph patch at a time. This bounds a development
 experiment; it does not implement or certify a streaming production worker.
 
-The current-only `effnet-patch-reference/v1` JSONL contains a provenance header,
+The current-only `effnet-patch-reference/v2` JSONL contains a provenance header,
 patches with raw sample support, zero-based track/frame indices, valid sample
 intervals, PCM hashes, feature tensors and graph outputs, then a completion record.
 These private numerical exports contain audio samples: keep them outside Git.
@@ -208,7 +208,7 @@ Scores remain uncalibrated. Weights are a summary convention, not independent
 votes, identified mood changes or estimated mood duration. Quantiles, selected
 interval projections and application storage still need an actual pilot consumer.
 
-The current-only `effnet-stream-reference/v1` JSONL contains a provenance header,
+The current-only `effnet-stream-reference/v2` JSONL contains a provenance header,
 ordered patch outputs with frame/support/weight positions, then each completed
 track's PCM hash, coverage, counts and bounded summaries. It streams diagnostic
 embeddings and head vectors to the private reference file, not an in-memory or
@@ -261,10 +261,93 @@ source decoding, the application server, playback and Linux cgroups; no producti
 CPU/RAM or memory-release acceptance follows from them. Native probe sources,
 graphs and reports remain ignored research artifacts.
 
-Twenty-one dependency-free reference tests now cover framing, exact sample
-partitioning, incremental/batch summary agreement, peaks, changed input files,
-failures and cancellation. Eight workflow-policy tests also pass. No application
+The whole-track batch passed 21 dependency-free tests covering framing, exact
+sample partitioning, incremental/batch summary agreement, peaks, changed input
+files, failures and cancellation, plus eight workflow-policy tests. No application
 runtime, schema, provider projection or accepted/manual tag behavior changed.
+
+## Original export pairing and label identity, 25 September 2026
+
+The published [mood metadata](https://essentia.upf.edu/models/classification-heads/mtg_jamendo_moodtheme/mtg_jamendo_moodtheme-discogs-effnet-1.json)
+and [instrument metadata](https://essentia.upf.edu/models/classification-heads/mtg_jamendo_instrument/mtg_jamendo_instrument-discogs-effnet-1.json)
+name `discogs-effnet-bs64-1` as their encoder. The dynamic-batch ONNX encoder
+has matching dimensions, but that alone cannot qualify an embedding/head pairing.
+The original TensorFlow exports were therefore compared directly, independently
+of Tract and the ONNX Runtime reference.
+
+The three original graphs were downloaded from the official model catalog, with
+no private upload. Their exact owned bytes were checked before GraphDef parsing:
+
+| Original TensorFlow artifact | SHA-256 |
+|---|---|
+| `discogs-effnet-bs64-1.pb` | `3ed9af50d5367c0b9c795b294b00e7599e4943244f4cbd376869f3bfc87721b1` |
+| `mtg_jamendo_moodtheme-discogs-effnet-1.pb` | `03f2b047020aee4ab39f8880da7bdae2a36d06a1508d656c6d424ad4d6de07a9` |
+| `mtg_jamendo_instrument-discogs-effnet-1.pb` | `2e8c3003c722e098da371b6a1f7ad0ce62fac0dcfc09c7c7997d430941196c2a` |
+
+The external reference used TensorFlow 2.8.0, matching the graphs' declared
+framework version, CPython 3.10.21, NumPy 1.23.5 and protobuf 3.20.3. It used one
+intra-op/inter-op CPU thread, disabled GPU and oneDNN, and imported each GraphDef
+without rewriting operations. The hash-locked environment and Python helper
+are outside this Rust-only repository and its release image; they are not a new
+application runtime or supported Python subsystem. The official
+[Windows TensorFlow wheel](https://pypi.org/project/tensorflow/2.8.0/#files)
+has SHA-256 `b7170844ae6b048d82a9d7a61b2fa627f2e16cb829267bf0ce4b3a0de0a61054`.
+The installed native binding hash is
+`00a466654a00e03ca0c7e6bc515cf8578fa80fab870dfe96f61a8555d6c803ae`.
+
+Reproduction contract: feed common float32 mel tensors into
+`serving_default_melspectrogram:0` and read `PartitionedCall:1` from the
+original encoder, shape `[64,128,96] -> [64,1280]`. Fill unused batch slots
+with zero mel values and discard only their outputs. Each original head takes
+`model/Placeholder:0`, shape `[n,1280]`, and returns `model/Sigmoid:0`
+with 56 or 40 scores. These TensorFlow names differ from the actual ONNX names.
+Run each head both on TensorFlow-produced embeddings and on the identical
+reference ONNX embedding. Hash the float32 input bytes to prevent case mix-ups;
+require every case, finite outputs and successful session cleanup before
+writing a completed report.
+
+All five synthetic and 66 real selected patches passed the unchanged gates:
+
+| Comparison with the pinned ONNX stack | Gate | Worst observation |
+|---|---|---|
+| Encoder embedding cosine | >= 0.999 | Minimum 0.999999999986 |
+| Original encoder + mood head | Absolute error <= 0.001 | 0.0000010133 |
+| Original encoder + instrument head | Absolute error <= 0.001 | 0.0000007749 |
+| Mood head, identical embedding input | Absolute error <= 0.001 | 0.0000001789 |
+| Instrument head, identical embedding input | Absolute error <= 0.001 | 0.0000001491 |
+
+Eight selected patches were moved to different batch positions with changed
+neighbours and zero padding; embedding values were exactly identical.
+Permuted embedding coordinates and altered expected head scores each failed
+their negative-control run and produced no completed report. This qualifies
+the named graph pairing on the tested inputs, not mood usefulness or full
+decoder/resampler/upstream-wrapper equivalence. No source audio or ONNX weights
+changed. Private inputs, reports and the external helper remain outside Git.
+
+Both Node exporters now require matching `.json` metadata beside their ONNX
+graphs. They verify these exact files before loading a model runtime:
+
+| Metadata file | SHA-256 |
+|---|---|
+| `discogs-effnet-bsdynamic-1.json` | `a2e85b2e7372d5f8e0f35bdd6aeae1139f101087d183d0b2fb60b0ea0f01a0ff` |
+| `mtg_jamendo_moodtheme-discogs-effnet-1.json` | `d62cd90263e4d613fa7fcce7a831e339450394794af63685f96e065c1a896ab0` |
+| `mtg_jamendo_instrument-discogs-effnet-1.json` | `7d02204c6451b5615e2968ec6364bbae3b915c886e608f05f00d3a38dc5177c4` |
+
+Current patch/stream formats are v2. Header `artifacts.mood.metadata.labels`
+and `artifacts.instrument.metadata.labels` bind vector positions to the
+exact published 56/40 label order. Names, versions, sample rate, dimensions,
+unique nonempty labels and the documented encoder pairing are checked.
+No sorting, aliases or owner-vocabulary mapping is performed. Metadata includes
+its file/hash provenance; the unused 400 encoder style labels are not exported.
+Changed label order fails before runtime loading. Regenerate older private
+references to obtain this provenance; no compatibility mode was introduced.
+
+The 26 dependency-free reference tests pass. Current v2 generation reproduces
+all 66 selected patches and one full 226-patch track with its summaries exactly;
+that track also passes the updated native comparator. A real-tool control rejects
+a reversed metadata label array. The older full-corpus numerical result remains
+separate from this metadata-only repeat; no application model, provider projection,
+database, accepted/manual tag or production resource contract changed.
 
 ## Voice decoding and ending acceptance, 25 September 2026
 
@@ -354,8 +437,9 @@ complete-track same-export ONNX parity with time-weighted summaries on common PC
 The 25 September voice checks establish basic
 mono/stereo decoding,
 resampling counts, ending coverage and actual pinned-graph execution on this host.
-Neither establishes original TensorFlow/ONNX encoder equivalence, full resampling
-spectral parity, multichannel downmix parity, or usefulness on independently judged music.
+The separate 71-patch original-export comparison now qualifies the named
+TensorFlow/ONNX graph pairing. Full resampling spectral parity, multichannel
+downmix parity and usefulness on independently judged music remain open.
 Separate short/partial-hop constant-signal checks matched upstream frame counts and
 centering; they did not exercise a complete EffNet wrapper.
 
@@ -367,6 +451,6 @@ Voice cancellation/expiry is checked before and after each Tract call;
 a wedged in-process inference call cannot be interrupted midway. No new model was
 enabled, no production rebuild ran, and no owner listening labels were invented.
 An EffNet candidate still needs independently judged development recordings,
-original TensorFlow-export comparison and production lifecycle/resource gates
+production lifecycle/resource gates
 before integration. Keep only the heads that
 improve the owner's listening/session decisions.

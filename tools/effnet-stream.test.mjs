@@ -186,6 +186,7 @@ test("run completion follows cleanup and every track; output cannot overwrite an
   });
   const before = fs.readFileSync(output), rows = before.toString().trim().split("\n").map(JSON.parse);
   assert.equal(result.status, "complete"); assert.equal(result.tracks, 1);
+  assert.equal(rows[0].schema_version, "effnet-stream-reference/v2");
   assert.equal(rows.at(-2).record_type, "track"); assert.equal(rows.at(-1).record_type, "complete");
   assert.equal(rows.filter(row => row.record_type === "patch").length, result.patches);
   await assert.rejects(generateStreamReference({ inputs, output }), { code: "EEXIST" });

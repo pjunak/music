@@ -165,7 +165,7 @@ export async function generateStreamReference(options, withRuntime = withReferen
   try {
     await withRuntime(options, async runtime => {
       write({
-        record_type: "header", schema_version: "effnet-stream-reference/v1", ...runtime.header,
+        record_type: "header", schema_version: "effnet-stream-reference/v2", ...runtime.header,
         tracks: inputs.length, aggregation: AGGREGATION,
         scope: "Complete-track common-PCM ONNX reference; not decoder, original TensorFlow or mood-quality acceptance",
         limits: { tracks: 32, samples_per_track: MAX_SAMPLES, model_batch: 1, retained_mel_frames: PATCH_FRAMES,

@@ -15,6 +15,11 @@ const MODELS = [
   ["mood", "mtg_jamendo_moodtheme-discogs-effnet-1.onnx", "7d6270acaa5f4bba4b115a0d6849aca05ed6bd153dcb6d9da4f6ab9f99ef10ff"],
   ["instrument", "mtg_jamendo_instrument-discogs-effnet-1.onnx", "9ae2d9e763d66bd8eed654d1ac3aa171e6539cb8a0e11f3dcd53df1428980802"],
 ];
+const MODEL_METADATA = {
+  encoder: ["discogs-effnet-bsdynamic-1.json", "a2e85b2e7372d5f8e0f35bdd6aeae1139f101087d183d0b2fb60b0ea0f01a0ff", "EffnetDiscogs", 400],
+  mood: ["mtg_jamendo_moodtheme-discogs-effnet-1.json", "d62cd90263e4d613fa7fcce7a831e339450394794af63685f96e065c1a896ab0", "mtg_jamendo_moodtheme", 56],
+  instrument: ["mtg_jamendo_instrument-discogs-effnet-1.json", "7d02204c6451b5615e2968ec6364bbae3b915c886e608f05f00d3a38dc5177c4", "mtg_jamendo_instrument", 40],
+};
 const ORT_ARTIFACTS = [
   ["dist/ort-wasm-simd-threaded.mjs", "e13f7f94fc51b4ca72b12faeb1ee95f4ace6dfbc8939bc718aabdc0a27c4299b"],
   ["dist/ort.node.min.js", "f2ffa91920b249103bbfeb58a1a9b68bf92e9e9018bd164dc16da52bd14ee305"],
@@ -100,12 +105,44 @@ function outputValues(tensor, dimensions, unitInterval = false) {
   return values;
 }
 
+// Catalog tensor names describe TensorFlow exports, not the ONNX session interface.
+export function projectModelMetadata(role, metadata) {
+  assert(Object.hasOwn(MODEL_METADATA, role), "Unknown model role");
+  const [, , name, labels] = MODEL_METADATA[role];
+  assert.equal(metadata.name, name, "Wrong model metadata");
+  assert.equal(metadata.version, "1", "Metadata version changed");
+  assert.equal(metadata.inference?.sample_rate, SAMPLE_RATE, "Unexpected input sample rate");
+  assert(Array.isArray(metadata.classes) && metadata.classes.length === labels &&
+    metadata.classes.every(label => typeof label === "string" && label.length > 0 && label.length <= 128 &&
+      label.trim() === label && !/[\u0000-\u001f\u007f]/u.test(label)) &&
+    new Set(metadata.classes).size === labels, "Invalid label order");
+  const purpose = role === "encoder" ? "embeddings" : "predictions";
+  const outputs = metadata.schema?.outputs?.filter(output => output.output_purpose === purpose);
+  const width = role === "encoder" ? 1280 : labels;
+  assert(outputs?.length === 1 && Array.isArray(outputs[0].shape) &&
+    outputs[0].shape.at(-1) === width, "Unexpected documented output");
+  if (role === "encoder") return { name, version: metadata.version, embedding_dimensions: width };
+  const embeddingModel = metadata.inference?.embedding_model?.model_name;
+  assert.equal(embeddingModel, "discogs-effnet-bs64-1", "Unqualified head/encoder pairing");
+  // Preserve exact spelling and order; no sorting, aliases or vocabulary mapping.
+  return { name, version: metadata.version, labels: [...metadata.classes], documented_encoder: embeddingModel };
+}
+
+export function loadModelMetadata(directory) {
+  return Object.fromEntries(Object.entries(MODEL_METADATA).map(([role, [file, expected]]) => {
+    const bytes = readBounded(path.join(directory, file), 1024 * 1024);
+    assert.equal(sha256(bytes), expected, "Unverified model metadata");
+    return [role, { file, sha256: expected, ...projectModelMetadata(role, JSON.parse(bytes.toString("utf8"))) }];
+  }));
+}
+
 export function checkCancelled(signal) {
   if (signal?.aborted) throw new DOMException("Reference cancelled", "AbortError");
 }
 
 export async function withReferenceRuntime(options, consume) {
   checkCancelled(options.signal);
+  const metadata = loadModelMetadata(options.models);
   const ortRoot = path.resolve(options.ort);
   const manifest = JSON.parse(readBounded(path.join(ortRoot, "package.json"), 1024 * 1024));
   assert.equal(manifest.name, "onnxruntime-web");
@@ -127,13 +164,15 @@ export async function withReferenceRuntime(options, consume) {
       assert.equal(sha256(bytes), expected, "Unverified model artifact");
       sessions[name] = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"], graphOptimizationLevel: "all" });
       assert.equal(sessions[name].inputNames.length, 1);
-      artifacts[name] = { file, sha256: expected, inputs: sessions[name].inputNames, outputs: sessions[name].outputNames };
+      artifacts[name] = { file, sha256: expected, metadata: metadata[name],
+        inputs: sessions[name].inputNames, outputs: sessions[name].outputNames };
     }
     checkCancelled(options.signal);
     const header = {
       runtime: "onnxruntime-web/1.30.0; wasm, single thread",
       frontend: "essentia.js/0.1.3; TensorflowInputMusiCNN", frontend_artifacts: frontendArtifacts,
       runtime_artifacts: ORT_ARTIFACTS, artifacts,
+      score_semantics: "Uncalibrated head scores in the exact metadata label order; not listening judgments",
       framing: { sample_rate: SAMPLE_RATE, frame_size: FRAME_SIZE, hop: HOP, patch_frames: PATCH_FRAMES,
         patch_hop: PATCH_HOP, centered: true, silent_frames: "keep", final_patch: "anchor_at_last_frame" },
     };
@@ -186,7 +225,7 @@ export async function generateReference(options) {
     return await withReferenceRuntime(options, async runtime => {
       const write = record => fs.writeFileSync(output, JSON.stringify(record) + "\n");
       write({
-        record_type: "header", schema_version: "effnet-patch-reference/v1", ...runtime.header, tracks: inputs.length,
+        record_type: "header", schema_version: "effnet-patch-reference/v2", ...runtime.header, tracks: inputs.length,
         scope: "Selected patches from common decoded PCM; not decoder, TensorFlow-export or whole-track inference parity",
       });
       let count = 0;

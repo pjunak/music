@@ -625,9 +625,10 @@ EBU R128        downmix/resample to 16 kHz mono
          bounded context document
 ```
 
-The target is one decode pass for signal context and loudness. The first parity implementation may
-temporarily retain a separate FFmpeg loudness probe until `ebur128` agrees on the representative
-corpus; that adapter is removed before the Python runtime is removed.
+The Rust implementation retains separate bounded FFmpeg context and `loudnorm` passes.
+The direct `ebur128` replacement failed ending-peak and short-signal parity checks;
+combining passes remains conditional on independent numerical validation. The retained
+FFmpeg measurement pass is not a Python compatibility path.
 
 Independent tracks run on a dedicated fixed CPU pool rather than Tokio's general blocking pool.
 FFmpeg is constrained to one thread per track. Results return to the coordinator, which alone writes
@@ -637,10 +638,10 @@ terminates the owned FFmpeg child. Per-track timing documents are folded into co
 stage/voice aggregates as results arrive; job summaries do not retain a second library-sized timing
 collection.
 
-The Rust analyzer is calibrated against the synthetic probes that defined `local-context/v2` and a
-private representative corpus. Numeric tolerances are field-specific; no semantic tags are added.
-If measurement definitions change, use `local-context/v3`, retain per-field reliability, and make
-old rows stale explicitly.
+The current `local-context/v3` analyzer is checked against synthetic probes and an
+approved private corpus. Numeric tolerances are field-specific; no semantic tags are added.
+Measurement changes advance extractor identity and make generated rows stale; accepted/manual
+tags remain authored state. Coverage and measurement reliability do not certify mood accuracy.
 
 RustFFT supplies the SIMD-capable transform path
 ([RustFFT documentation](https://docs.rs/rustfft/latest/rustfft/)); the `ebur128` crate documents
