@@ -14,7 +14,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use super::{AssistantDependencyError, AssistantFuture};
+use super::{
+    AssistantDependencyError, AssistantFuture, MOOD_DECISIONS_CAPABILITY,
+    TYPED_DECISIONS_CAPABILITY, TYPESAFE_ADAPTER,
+};
 
 pub const OPENAI_COMPATIBLE_ADAPTER: &str = "openai-compatible/v1";
 pub const OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER: &str = "openai-compatible-json-schema/v1";
@@ -58,6 +61,16 @@ pub struct ModelRoleDefinition {
 
 pub const PROVIDER_CAPABILITIES: &[ProviderCapabilityDefinition] = &[
     ProviderCapabilityDefinition {
+        id: TYPED_DECISIONS_CAPABILITY,
+        label: "Typed decisions",
+        description: "Evaluates explicit closed questions without text generation or audio input.",
+    },
+    ProviderCapabilityDefinition {
+        id: MOOD_DECISIONS_CAPABILITY,
+        label: "Mood decisions",
+        description: "Produces validated, reviewable mood decisions through the task adapter.",
+    },
+    ProviderCapabilityDefinition {
         id: STRUCTURED_TEXT_CAPABILITY,
         label: "Structured text",
         description: "Sends text instructions and receives a validated machine-readable result.",
@@ -79,43 +92,69 @@ pub const PROVIDER_ADAPTERS: &[ProviderAdapterDefinition] = &[
         id: DEEPSEEK_CHAT_ADAPTER,
         label: "DeepSeek API",
         description: "DeepSeek Chat Completions with thinking effort controls, JSON-object output and strict local validation.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
+        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, MOOD_DECISIONS_CAPABILITY],
     },
     ProviderAdapterDefinition {
         id: DEEPSEEK_RESPONSES_ADAPTER,
         label: "DeepSeek API (Responses)",
         description: "DeepSeek's Responses API with native schema output. Test the exact model and task before use.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY],
+        capability_ids: &[
+            STRUCTURED_TEXT_CAPABILITY,
+            STRICT_JSON_SCHEMA_CAPABILITY,
+            MOOD_DECISIONS_CAPABILITY,
+        ],
     },
     ProviderAdapterDefinition {
         id: OPENAI_RESPONSES_ADAPTER,
         label: "OpenAI API (Responses)",
         description: "OpenAI's native Responses API with reasoning controls and strict JSON Schema output.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY],
+        capability_ids: &[
+            STRUCTURED_TEXT_CAPABILITY,
+            STRICT_JSON_SCHEMA_CAPABILITY,
+            MOOD_DECISIONS_CAPABILITY,
+        ],
     },
     ProviderAdapterDefinition {
         id: OPENAI_COMPATIBLE_ADAPTER,
         label: "Other OpenAI-compatible API",
         description: "Maximum third-party compatibility using JSON-object response mode plus strict local validation.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
+        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, MOOD_DECISIONS_CAPABILITY],
     },
     ProviderAdapterDefinition {
         id: OPENAI_COMPATIBLE_JSON_SCHEMA_ADAPTER,
         label: "OpenAI-compatible strict JSON Schema",
         description: "For compatible services that support response_format type json_schema. Use the standard adapter when the provider supports only json_object.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY],
+        capability_ids: &[
+            STRUCTURED_TEXT_CAPABILITY,
+            STRICT_JSON_SCHEMA_CAPABILITY,
+            MOOD_DECISIONS_CAPABILITY,
+        ],
     },
     ProviderAdapterDefinition {
         id: GOOGLE_GEMINI_OPENAI_ADAPTER,
         label: "Google Gemini API",
         description: "Gemini's OpenAI-compatible API with canonical model IDs, provider-specific thinking controls, and native JSON Schema output.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY],
+        capability_ids: &[
+            STRUCTURED_TEXT_CAPABILITY,
+            STRICT_JSON_SCHEMA_CAPABILITY,
+            MOOD_DECISIONS_CAPABILITY,
+        ],
     },
     ProviderAdapterDefinition {
         id: GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER,
         label: "Google Gemini API with strict JSON Schema",
         description: "Gemini's OpenAI-compatible API with canonical model IDs, provider-specific thinking controls, and native JSON Schema output.",
-        capability_ids: &[STRUCTURED_TEXT_CAPABILITY, STRICT_JSON_SCHEMA_CAPABILITY],
+        capability_ids: &[
+            STRUCTURED_TEXT_CAPABILITY,
+            STRICT_JSON_SCHEMA_CAPABILITY,
+            MOOD_DECISIONS_CAPABILITY,
+        ],
+    },
+    ProviderAdapterDefinition {
+        id: TYPESAFE_ADAPTER,
+        label: "TypeSafe Jev",
+        description: "Native System One decisions for mood tagging, with per-tag evidence gates and human review.",
+        capability_ids: &[TYPED_DECISIONS_CAPABILITY, MOOD_DECISIONS_CAPABILITY],
     },
 ];
 
@@ -124,7 +163,7 @@ pub const MODEL_ROLES: &[ModelRoleDefinition] = &[
         id: "music_tagger",
         label: "Mood tagging",
         description: "Suggest reviewable setting, period, scene, and mood database tags from approved track evidence.",
-        required_capability_ids: &[STRUCTURED_TEXT_CAPABILITY],
+        required_capability_ids: &[MOOD_DECISIONS_CAPABILITY],
         configuration_available: true,
         runtime_contract: "assistant-music-tagger-input/v24+output/v5+local-context/v3",
     },
@@ -786,14 +825,18 @@ impl ProviderConformanceTarget {
 
     #[must_use]
     pub fn evaluate(&self, result: StructuredModelResult) -> ProviderConformanceResult {
-        let passed = result.succeeded
-            && result.payload.as_ref()
-                == Some(&json!({
-                    "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
-                    "challenge": self.challenge,
-                    "checks": ["schema", "identity"],
-                    "accepted": true,
-                }));
+        let passed = if self.execution.adapter_id == TYPESAFE_ADAPTER {
+            super::typed_conformance_passed(&self.challenge, &result)
+        } else {
+            result.succeeded
+                && result.payload.as_ref()
+                    == Some(&json!({
+                        "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
+                        "challenge": self.challenge,
+                        "checks": ["schema", "identity"],
+                        "accepted": true,
+                    }))
+        };
         ProviderConformanceResult {
             passed,
             error_code: if passed {
@@ -1962,7 +2005,7 @@ fn validate_role_model_settings(
     super::validate_model_settings(&connection.adapter_id, model_id, mode, output_tokens)
         .map_err(|code| ProviderServiceError::public(
             ProviderServiceErrorKind::Invalid, code,
-            "The selected model does not support these reasoning or output settings. Choose a supported setting.",
+            if code == "pinned_model_required" { "Choose a pinned Jev version, such as jev-1.13.0, instead of a moving alias." } else { "The selected model does not support these reasoning or output settings. Choose a supported setting." },
         ))
 }
 

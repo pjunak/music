@@ -64,6 +64,7 @@ struct Handler {
     change_role: bool,
     change_output_limit: bool,
     token_budget: Option<u64>,
+    native: bool,
 }
 
 impl Handler {
@@ -75,6 +76,7 @@ impl Handler {
             change_role: false,
             change_output_limit: false,
             token_budget: None,
+            native: false,
         })
     }
 }
@@ -109,6 +111,12 @@ impl JobHandler for Handler {
                     thinking_mode: ThinkingMode::Enabled,
                 },
             };
+            if self.native {
+                role.execution.adapter_id =
+                    music_application::assistant::TYPESAFE_ADAPTER.to_owned();
+                role.execution.model_id = "jev-1.13.0".to_owned();
+                role.execution.thinking_mode = ThinkingMode::ProviderDefault;
+            }
             let manifest = ModelRunManifest::new(
                 context,
                 &role,
@@ -130,6 +138,19 @@ impl JobHandler for Handler {
                 role.execution.max_output_tokens = 200;
             }
             for index in 0..self.requests {
+                if self.native {
+                    music_application::assistant::execute_recorded_typed_request(
+                        context,
+                        self.transport.as_ref(),
+                        &role,
+                        &music_application::assistant::typed_conformance_request(&format!(
+                            "nonce-{index}"
+                        )),
+                        &mut usage,
+                    )
+                    .await?;
+                    continue;
+                }
                 execute_recorded_provider_request(
                     context,
                     self.transport.as_ref(),
@@ -279,6 +300,7 @@ async fn budgets_bound_requests_and_records_without_losing_aggregate_usage() -> 
         change_role: false,
         change_output_limit: false,
         token_budget: None,
+        native: false,
     });
     setup(&storage, &handler).await?;
     let coordinator = start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
@@ -347,6 +369,7 @@ async fn preflight_rejection_and_changed_role_never_send() -> TestResult {
             change_role,
             change_output_limit,
             token_budget: None,
+            native: false,
         });
         setup(&storage, &handler).await?;
         let coordinator =
@@ -381,6 +404,7 @@ async fn token_reservation_stops_before_a_second_paid_request() -> TestResult {
         change_role: false,
         change_output_limit: false,
         token_budget: Some(1500),
+        native: false,
     });
     setup(&storage, &handler).await?;
     let coordinator = start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
@@ -401,4 +425,300 @@ async fn token_reservation_stops_before_a_second_paid_request() -> TestResult {
             .is_some_and(|total| total <= 1500)
     );
     stop_coordinator(coordinator).await
+}
+
+// The same fault-injecting coordinator exercises the native ledger boundary.
+impl music_application::assistant::TypedDecisionTransport for Transport {
+    fn validate_typed_request(
+        &self,
+        target: &ProviderExecutionTarget,
+        request: &music_application::assistant::TypedDecisionRequest,
+    ) -> Result<(), ModelTaskError> {
+        request.validate()?;
+        self.validate_request(target, &request.accounting_request())
+    }
+    fn execute_typed_request<'a>(
+        &'a self,
+        target: &'a ProviderExecutionTarget,
+        _: &'a music_application::assistant::TypedDecisionRequest,
+    ) -> ModelTransportFuture<'a> {
+        Box::pin(async move {
+            self.execute_structured_model_request(
+                target,
+                &StructuredModelRequest {
+                    system_prompt: String::new(),
+                    user_prompt: String::new(),
+                    max_output_tokens: 0,
+                    output_schema_name: None,
+                    output_schema: None,
+                },
+            )
+            .await
+        })
+    }
+}
+
+#[tokio::test]
+async fn jev_attempt_is_checkpointed_before_io_and_not_replayed_after_shutdown() -> TestResult {
+    let directory = tempdir()?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("db"))).await?,
+    );
+    let handler = Arc::new(Handler {
+        transport: Arc::new(Transport {
+            wait: true,
+            ..Transport::default()
+        }),
+        max_attempts: 1,
+        requests: 1,
+        change_role: false,
+        change_output_limit: false,
+        token_budget: None,
+        native: true,
+    });
+    setup(&storage, &handler).await?;
+    let coordinator = start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
+    timeout(TEST_TIMEOUT, handler.transport.entered.notified()).await?;
+    let running = storage.get("attempt").await?.ok_or("job")?;
+    assert_eq!(usage(&running)?["uncertain_requests"], 1);
+    assert_eq!(usage(&running)?["attempts"][0]["max_output_tokens"], 0);
+    assert_eq!(usage(&running)?["run_manifest"]["output_token_ceiling"], 0);
+    assert!(!serde_json::to_string(usage(&running)?)?.contains("nonce-0"));
+    stop_coordinator(coordinator).await?;
+    let resumed = start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
+    assert_eq!(
+        storage.get("attempt").await?.ok_or("job")?.status,
+        JobStatus::Failed
+    );
+    assert_eq!(handler.transport.calls.load(Ordering::SeqCst), 1);
+    stop_coordinator(resumed).await
+}
+
+#[tokio::test]
+async fn jev_checkpoint_failure_and_token_budget_prevent_network_work() -> TestResult {
+    for fault in [true, false] {
+        let directory = tempdir()?;
+        let storage = Arc::new(
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("db"))).await?,
+        );
+        let handler = Arc::new(Handler {
+            transport: Arc::new(Transport::default()),
+            max_attempts: 1,
+            requests: 1,
+            change_role: false,
+            change_output_limit: false,
+            token_budget: Some(1),
+            native: true,
+        });
+        setup(&storage, &handler).await?;
+        if fault {
+            // Remove the token bound so that the injected checkpoint is the rejecting boundary.
+            let handler = Arc::new(Handler {
+                token_budget: None,
+                ..Arc::try_unwrap(handler).map_err(|_| "handler shared")?
+            });
+            let coordinator = start_job_coordinator(
+                Arc::new(FaultInjectingRepository::new(
+                    storage.clone(),
+                    FaultPoint::BeforeCheckpoint,
+                )),
+                one_handler(handler.clone()),
+            )
+            .await?;
+            assert_eq!(
+                await_lane(coordinator.provider_task).await?,
+                Err(JobCoordinatorError::Dependency)
+            );
+            stop_other_lane(&coordinator.service, coordinator.local_task).await?;
+            assert_eq!(handler.transport.calls.load(Ordering::SeqCst), 0);
+        } else {
+            let coordinator =
+                start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
+            let failed =
+                wait_for_job(&storage, "attempt", |job| job.status == JobStatus::Failed).await?;
+            assert_eq!(
+                failed.error.as_deref(),
+                Some("model_run_token_budget_exhausted")
+            );
+            assert_eq!(handler.transport.calls.load(Ordering::SeqCst), 0);
+            stop_coordinator(coordinator).await?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct JevFixture {
+    fail_second: bool,
+    calls: AtomicUsize,
+}
+impl music_application::assistant::TypedDecisionTransport for JevFixture {
+    fn validate_typed_request(
+        &self,
+        _: &ProviderExecutionTarget,
+        request: &music_application::assistant::TypedDecisionRequest,
+    ) -> Result<(), ModelTaskError> {
+        request.validate()
+    }
+    fn execute_typed_request<'a>(
+        &'a self,
+        _: &'a ProviderExecutionTarget,
+        request: &'a music_application::assistant::TypedDecisionRequest,
+    ) -> ModelTransportFuture<'a> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let answers=request.questions.iter().map(|(key,question)| {
+                let value=match question {
+                    music_application::assistant::TypedQuestion::Noul{instructions,..}=>json!({"type":"noul","noul":if instructions["tag"]["name"]=="combat"{0.95}else{0.05}}),
+                    music_application::assistant::TypedQuestion::Choice{criteria,..}=>{
+                        let choice=if key=="support"{"metadata.genre"}else{"no_observation"};
+                        json!({"type":"choice","choice":choice,"probabilities":criteria.keys().map(|id|(id.clone(),if id==choice{1.0}else{0.0})).collect::<BTreeMap<_,_>>(),"confidence":1.0})
+                    }
+                };
+                (key.clone(),value)
+            }).collect::<BTreeMap<_,_>>();
+            let invalid = self.fail_second
+                && request.state["observations"]["metadata.genre"] == "second recording"
+                && request.questions.contains_key("support");
+            StructuredModelResult {
+                token_details: Default::default(),
+                outcome: ProviderAttemptOutcome::ResponseReceived,
+                succeeded: true,
+                error_code: None,
+                payload: Some(if invalid { json!({}) } else { json!(answers) }),
+                provider_model_id: Some("jev-1.13.0".to_owned()),
+                finish_reason: None,
+                input_tokens: Some(40),
+                output_tokens: Some(5),
+            }
+        })
+    }
+}
+#[derive(Debug)]
+struct JevHandler {
+    transport: Arc<JevFixture>,
+}
+impl JobHandler for JevHandler {
+    fn definition(&self) -> JobDefinition {
+        definition("test.jev-pipeline", JobLane::Provider, false)
+    }
+    fn execute<'a>(
+        &'a self,
+        context: &'a music_application::jobs::JobExecutionContext,
+        _: Map<String, Value>,
+    ) -> JobHandlerFuture<'a> {
+        Box::pin(async move {
+            let role = ResolvedRoleExecution {
+                connection_id: "fixture".to_owned(),
+                role_id: "music_tagger".to_owned(),
+                connection_name: "fixture".to_owned(),
+                fingerprint: "a".repeat(64),
+                inference_fingerprint: "b".repeat(64),
+                role_configuration_fingerprint: "c".repeat(64),
+                connection_fingerprint: "d".repeat(64),
+                execution: ProviderExecutionTarget {
+                    adapter_id: music_application::assistant::TYPESAFE_ADAPTER.to_owned(),
+                    base_url: "https://unused.invalid".to_owned(),
+                    api_key: ProviderSecret::new("fixture-only"),
+                    allow_private_network: false,
+                    model_id: "jev-1.13.0".to_owned(),
+                    timeout_seconds: 30,
+                    max_output_tokens: 2000,
+                    thinking_mode: ThinkingMode::ProviderDefault,
+                },
+            };
+            let inputs=[(41,"first recording"),(77,"second recording")].map(|(id,genre)|json!({"track_id":id,"artist":"","album":"","origin":"","genre":genre}));
+            let tasks = music_application::assistant::plan_jev_tagging(
+                &inputs,
+                &music_application::assistant::default_vocabulary_snapshot()
+                    .map_err(|error| JobHandlerError::new(error.code))?,
+            )
+            .map_err(|error| JobHandlerError::new(error.code))?;
+            let mut usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(
+                context,
+                &role,
+                "fixture",
+                None,
+                &inputs,
+                &inputs,
+                tasks.iter().map(|task| task.max_requests).sum(),
+                ModelReviewDestination::TrackTagReview,
+            )?);
+            usage.limit_token_reservation(tasks.iter().map(|task| task.token_reservation).sum());
+            let mut completed = Vec::new();
+            for task in tasks {
+                let results = task
+                    .execute(context, &role, self.transport.as_ref(), &mut usage)
+                    .await?
+                    .map_err(|error| JobHandlerError::new(error.code))?;
+                for (id, result) in results {
+                    completed.push(
+                        json!({"track_id":id,"tags":result.tags,"decisions":result.decisions}),
+                    );
+                }
+                usage.set_feature_progress(json!({"track_results":completed}));
+                context
+                    .checkpoint(usage.checkpoint())
+                    .await
+                    .map_err(JobHandlerError::from_execution)?;
+            }
+            Ok(Value::Object(usage.checkpoint()))
+        })
+    }
+}
+#[tokio::test]
+async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_recordings()
+-> TestResult {
+    for fail_second in [false, true] {
+        let directory = tempdir()?;
+        let storage = Arc::new(
+            SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("db"))).await?,
+        );
+        let handler = Arc::new(JevHandler {
+            transport: Arc::new(JevFixture {
+                fail_second,
+                calls: AtomicUsize::new(0),
+            }),
+        });
+        storage
+            .create(&new_job("jev", handler.definition()))
+            .await?;
+        let coordinator =
+            start_job_coordinator(storage.clone(), one_handler(handler.clone())).await?;
+        let job = wait_for_job(&storage, "jev", |job| {
+            matches!(job.status, JobStatus::Failed | JobStatus::Succeeded)
+        })
+        .await?;
+        assert_eq!(
+            job.status,
+            if fail_second {
+                JobStatus::Failed
+            } else {
+                JobStatus::Succeeded
+            }
+        );
+        let result = job.result.as_ref().ok_or("result")?;
+        let tracks = result
+            .get("feature_progress")
+            .and_then(|progress| progress.get("track_results"))
+            .and_then(Value::as_array)
+            .ok_or("tracks")?;
+        assert_eq!(tracks.len(), if fail_second { 1 } else { 2 });
+        assert_eq!(tracks[0]["track_id"], 41);
+        assert_eq!(tracks[0]["tags"], json!(["combat"]));
+        assert_eq!(
+            tracks[0]["decisions"][0]["evidence_ids"],
+            json!(["metadata.genre"])
+        );
+        assert_eq!(
+            usage(&job)?["attempted_requests"],
+            handler.transport.calls.load(Ordering::SeqCst)
+        );
+        assert_eq!(usage(&job)?["uncertain_requests"], 0);
+        if fail_second {
+            assert_eq!(job.error.as_deref(), Some("invalid_typed_decisions"));
+        }
+        stop_coordinator(coordinator).await?;
+    }
+    Ok(())
 }

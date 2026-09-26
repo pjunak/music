@@ -24,6 +24,17 @@ pub struct ProviderModelProfile {
 
 use ThinkingMode::{Disabled, Enabled, High, Low, Max, Medium, ProviderDefault, Xhigh};
 
+const TYPESAFE_PROFILES: &[ProviderModelProfile] = &[ProviderModelProfile {
+    id: "typesafe-jev",
+    revision: "jev-1.13/2026-09-26",
+    model_ids: &["jev-1.13.0"],
+    reasoning_modes: &[ProviderDefault],
+    max_output_tokens: None,
+    documented: true,
+    notice: "Native typed decisions; pin a version such as jev-1.13.0. No thinking or generated-response allowance is sent. Questions and input reservations are bounded locally; output tokens are free.",
+    source_url: "https://docs.typesafe.ai/models",
+}];
+
 const UNKNOWN: ProviderModelProfile = ProviderModelProfile {
     id: "compatible-unverified",
     revision: "v1",
@@ -122,6 +133,7 @@ const GEMINI_PROFILES: &[ProviderModelProfile] = &[ProviderModelProfile {
 #[must_use]
 pub fn provider_model_profiles(adapter_id: &str) -> &'static [ProviderModelProfile] {
     match adapter_id {
+        super::TYPESAFE_ADAPTER => TYPESAFE_PROFILES,
         OPENAI_RESPONSES_ADAPTER => OPENAI_PROFILES,
         DEEPSEEK_CHAT_ADAPTER | DEEPSEEK_RESPONSES_ADAPTER => DEEPSEEK_PROFILES,
         GOOGLE_GEMINI_OPENAI_ADAPTER | GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER => GEMINI_PROFILES,
@@ -132,6 +144,12 @@ pub fn provider_model_profiles(adapter_id: &str) -> &'static [ProviderModelProfi
 #[must_use]
 pub fn default_model_profile(adapter_id: &str) -> ProviderModelProfile {
     match adapter_id {
+        super::TYPESAFE_ADAPTER => ProviderModelProfile {
+            id: "typesafe-unverified",
+            reasoning_modes: &[ProviderDefault],
+            notice: "Use a pinned Jev version. Native questions have no thinking or response-token setting. This version has no reviewed model profile; conformance and quality must pass before use.",
+            ..UNKNOWN
+        },
         OPENAI_RESPONSES_ADAPTER => OPENAI_UNKNOWN,
         DEEPSEEK_CHAT_ADAPTER | DEEPSEEK_RESPONSES_ADAPTER => DEEPSEEK_UNKNOWN,
         GOOGLE_GEMINI_OPENAI_ADAPTER | GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER => GEMINI_UNKNOWN,
@@ -180,6 +198,18 @@ pub fn validate_model_settings(
     mode: ThinkingMode,
     output_tokens: u32,
 ) -> Result<(), &'static str> {
+    if adapter_id == super::TYPESAFE_ADAPTER {
+        let pinned = model_id.strip_prefix("jev-").is_some_and(|version| {
+            let components = version.split('.').collect::<Vec<_>>();
+            components.len() == 3
+                && components
+                    .iter()
+                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        });
+        if !pinned {
+            return Err("pinned_model_required");
+        }
+    }
     let profile = provider_model_profile(adapter_id, model_id);
     if !profile.supports_reasoning(mode) {
         return Err("unsupported_reasoning_mode");
@@ -232,6 +262,35 @@ mod tests {
             "gemini-required-thinking"
         );
         assert!(!provider_model_profile(OPENAI_RESPONSES_ADAPTER, "future-model").documented);
+    }
+
+    #[test]
+    fn jev_requires_a_pinned_version_without_chat_settings() {
+        for model in ["jev-latest", "jev-preview", "jev-1.13", "jev-1.x.0"] {
+            assert_eq!(
+                validate_model_settings(
+                    super::super::TYPESAFE_ADAPTER,
+                    model,
+                    ProviderDefault,
+                    2000
+                ),
+                Err("pinned_model_required")
+            );
+        }
+        assert!(
+            validate_model_settings(
+                super::super::TYPESAFE_ADAPTER,
+                "jev-1.13.0",
+                ProviderDefault,
+                2000
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_model_settings(super::super::TYPESAFE_ADAPTER, "jev-1.13.0", High, 2000),
+            Err("unsupported_reasoning_mode")
+        );
+        assert!(!provider_model_profile(super::super::TYPESAFE_ADAPTER, "jev-99.0.0").documented);
     }
 
     #[test]

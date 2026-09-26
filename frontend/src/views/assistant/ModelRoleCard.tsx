@@ -129,6 +129,7 @@ export function ModelRoleCard({
   const connectionAdapter = adapters.find(
     (adapter) => adapter.id === connection?.adapter_id,
   );
+  const nativeDecisions = connectionAdapter?.id === "typesafe-systemone/v1";
   const profile = modelProfile(connectionAdapter, modelId.trim());
   const reasoningModes = profile?.reasoning_modes ?? ["provider_default", "enabled", "disabled"] as const;
   const thinkingSupported = supportsThinking(reasoningModes, thinkingMode);
@@ -144,7 +145,11 @@ export function ModelRoleCard({
     connection?.verification_status === "verified"
       ? connection.verified_models
       : [];
-  const selectedModelAvailable = verifiedModels.includes(modelId);
+  // Jev discovery lists aliases; pinned versions still require the real model test.
+  const selectableModels = nativeDecisions && connection?.verification_status === "verified"
+    ? [...new Set([...(connectionAdapter.model_profiles ?? []).flatMap((item) => item.model_ids), ...verifiedModels.filter((id) => /^jev-\d+\.\d+\.\d+$/.test(id))])]
+    : verifiedModels;
+  const selectedModelAvailable = selectableModels.includes(modelId);
   const requiredCapabilityLabels = role.required_capability_ids.map(
     (capabilityId) =>
       capabilities.find((capability) => capability.id === capabilityId)?.label ??
@@ -166,7 +171,7 @@ export function ModelRoleCard({
     role.configuration_available &&
     connection?.credential_saved === true &&
     connection?.verification_status === "verified" &&
-    connection.verified_models.includes(role.model_id) &&
+    selectableModels.includes(role.model_id) &&
     adapterSupportsRole;
   const canEnable =
     canTest && role.conformance_status === "passed";
@@ -337,6 +342,8 @@ export function ModelRoleCard({
             onChange={(event) => {
               const nextConnectionId = event.target.value;
               setConnectionId(nextConnectionId);
+              const nextAdapter = connections.find((item) => item.id === nextConnectionId)?.adapter_id;
+              if (nextAdapter === "typesafe-systemone/v1") setThinkingMode("provider_default");
               setModelId(
                 nextConnectionId === (role.connection_id ?? "")
                   ? role.model_id
@@ -377,18 +384,19 @@ export function ModelRoleCard({
           >
             <span>Model</span>
             {verifiedModels.length > 0 ? (
-              <small>{verifiedModels.length} verified</small>
+              <small>{nativeDecisions ? `${selectableModels.length} pinned versions` : `${verifiedModels.length} discovered`}</small>
             ) : null}
           </label>
           <ModelPicker
             id={`assistant-model-${role.role_id}`}
             value={modelId}
-            models={verifiedModels}
+            models={selectableModels}
             onChange={(nextModelId) => {
               setModelId(nextModelId);
               setEnabled(false);
             }}
           />
+          {nativeDecisions ? <p className="field-hint">Jev discovery lists moving aliases. Select a pinned version; the model test verifies that exact version. Jev evaluates the existing song evidence without receiving audio.</p> : null}
         </div>
 
 
@@ -425,7 +433,7 @@ export function ModelRoleCard({
           role="group"
           aria-label="Request settings"
         >
-          <fieldset className="assistant-thinking-mode">
+          {nativeDecisions ? <p className="field-hint">{profile?.notice}</p> : <fieldset className="assistant-thinking-mode">
             <legend>
               <span>Thinking</span>
               {thinkingRecommendation !== undefined ? (
@@ -454,7 +462,7 @@ export function ModelRoleCard({
             </div>
             <p className="field-hint">{profile?.notice ?? "Test the exact model settings before use."}</p>
             {!thinkingSupported ? <p className="assistant-provider-problem" role="alert">The saved thinking setting is not supported. Select a supported effort level before saving or testing.</p> : null}
-          </fieldset>
+          </fieldset>}
           <label className="field">
             <span className="field-label">Timeout (seconds)</span>
             <input
@@ -469,7 +477,7 @@ export function ModelRoleCard({
               }}
             />
           </label>
-          <label className="field">
+          {!nativeDecisions ? <label className="field">
             <span className="field-label">Response token limit</span>
             <input
               type="number"
@@ -483,7 +491,7 @@ export function ModelRoleCard({
               }}
             />
             <small className="field-hint">The model test uses this allowance for reasoning and the final answer. Task requests may use a smaller limit.</small>
-          </label>
+          </label> : null}
         </div>
 
 

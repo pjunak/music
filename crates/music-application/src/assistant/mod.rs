@@ -9,6 +9,7 @@ mod fuzzing;
 mod local_analysis;
 mod model_batch;
 mod model_eq;
+mod model_jev;
 mod model_jobs;
 mod model_library_cleanup;
 mod model_library_edition;
@@ -28,6 +29,7 @@ mod song_evidence;
 mod structured_harness;
 mod tagging_evaluation;
 mod tags;
+mod typed_decisions;
 mod vocabulary;
 
 #[cfg(feature = "fuzzing")]
@@ -43,6 +45,7 @@ pub use local_analysis::{
 };
 pub use model_batch::*;
 pub use model_eq::*;
+pub use model_jev::*;
 pub use model_jobs::{
     MODEL_EQ_DRAFT_JOB_KIND, MODEL_PLAYLIST_SUGGESTION_JOB_KIND, MODEL_TAG_CLEANUP_JOB_KIND,
     MODEL_TAGGING_BATCH_COLLECT_JOB_KIND, MODEL_TAGGING_JOB_KIND, model_evaluation_job_handlers,
@@ -81,6 +84,7 @@ pub use tags::{
     catalog_tag_source_signature, metadata_source_signature, normalize_manual_tag,
     normalize_manual_tags,
 };
+pub use typed_decisions::*;
 pub use vocabulary::{
     CleanupApplyOutcome, CleanupMutation, CleanupPreview, CleanupSelection, CleanupSuggestion,
     CleanupSuggestionReason, TAG_CLEANUP_APPLY_SCHEMA, TAG_CLEANUP_PREVIEW_SCHEMA,

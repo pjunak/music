@@ -236,6 +236,33 @@ beforeEach(() => {
 });
 
 describe("AssistantAiSetupView", () => {
+  it("selects pinned Jev despite alias-only discovery and keeps native settings separate", async () => {
+    const nativeConnection = { ...connection, adapter_id: "typesafe-systemone/v1", verified_models: ["jev-latest", "jev-preview"] };
+    const nativeRole: ModelRole = { ...musicTaggingRole, required_capability_ids: ["mood-decisions/v1"], model_id: "jev-1.13.0", enabled: false, effective_enabled: false, conformance_status: "never" };
+    vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({ ...frameworkStatus, adapters: [...frameworkStatus.adapters, {
+      id: "typesafe-systemone/v1", label: "TypeSafe Jev", description: "Typed mood decisions", capability_ids: ["mood-decisions/v1", "typed-decisions/v1"], model_profiles: [{
+        id: "typesafe-jev", revision: "fixture", model_ids: ["jev-1.13.0"], reasoning_modes: ["provider_default"], max_output_tokens: null, documented: true, notice: "Native typed decisions", source_url: "https://docs.typesafe.ai/models",
+      }],
+    }] });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([nativeConnection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([nativeRole, role]);
+    vi.mocked(assistantProvidersApi.updateRole).mockResolvedValue(nativeRole);
+    render(<AssistantAiSetupView />);
+    const card = (await screen.findByRole("heading", { name: "Music tagger" })).closest("article")!;
+    expect(within(card).getByRole("button", { name: "Test and make available" })).toBeEnabled();
+    expect(within(card).getByRole("button", { name: "Save task" })).toBeEnabled();
+    expect(within(card).queryByText("Response token limit")).not.toBeInTheDocument();
+    expect(within(card).queryByRole("radio")).not.toBeInTheDocument();
+    await userEvent.click(within(card).getByRole("combobox", { name: "Model" }));
+    expect(within(card).getByRole("option", { name: "jev-1.13.0" })).toBeInTheDocument();
+    expect(within(card).queryByRole("option", { name: "jev-latest" })).not.toBeInTheDocument();
+    await userEvent.click(within(card).getByRole("option", { name: "jev-1.13.0" }));
+    await userEvent.click(within(card).getByRole("button", { name: "Save task" }));
+    await waitFor(() => expect(assistantProvidersApi.updateRole).toHaveBeenCalledWith("music_tagger", expect.objectContaining({ model_id: "jev-1.13.0", thinking_mode: "provider_default" })));
+    const planner = screen.getByRole("heading", { name: "Playlist planner" }).closest("article")!;
+    expect(within(planner).getByRole("option", { name: /incompatible connection type/ })).toBeDisabled();
+  });
+
   it("blocks Astra Off and saves a supported effort without changing the model", async () => {
     const user = userEvent.setup();
     const astraConnection = { ...connection, adapter_id: "openai-responses/v1", verified_models: ["gpt-6-astra"], verified_capability_ids: [] };

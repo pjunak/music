@@ -11,6 +11,10 @@ pub type ModelTransportFuture<'a> =
 /// Outbound port for application-owned model workflows. Implementations enforce
 /// the same serialized request limits during preflight and actual execution.
 pub trait StructuredModelTransport: std::fmt::Debug + Send + Sync {
+    fn typed_decisions(&self) -> Option<&dyn super::TypedDecisionTransport> {
+        None
+    }
+
     fn validate_request(
         &self,
         target: &ProviderExecutionTarget,

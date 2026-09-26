@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     ModelTaggerBatch, ModelTaskError, StructuredModelRequest, TagQualityCase,
     TagVocabularyDocument, TagVocabularyEntry, TagVocabularyGroup, TagVocabularySnapshot,
-    default_vocabulary_snapshot, plan_model_tagger_batches, vocabulary_fingerprint,
+    default_vocabulary_snapshot, plan_tagger_engine_batches, vocabulary_fingerprint,
 };
 
 /// Fixed synthetic fixtures, never the operator's live vocabulary.
@@ -55,6 +55,7 @@ impl TagQualityVocabulary {
 
 #[derive(Debug)]
 pub struct PlannedTagQualityBatch {
+    pub native_task: Option<super::JevTaggerTask>,
     pub case_range: std::ops::Range<usize>,
     pub vocabulary: TagVocabularySnapshot,
     pub task: ModelTaggerBatch,
@@ -63,6 +64,14 @@ pub struct PlannedTagQualityBatch {
 /// Preserve scenario order and never mix different vocabularies in a request.
 pub fn plan_tag_quality_batches(
     cases: &[TagQualityCase],
+    validate: impl Fn(&StructuredModelRequest) -> Result<(), ModelTaskError>,
+) -> Result<Vec<PlannedTagQualityBatch>, ModelTaskError> {
+    plan_tag_quality_batches_for_adapter(cases, super::OPENAI_COMPATIBLE_ADAPTER, validate)
+}
+
+pub fn plan_tag_quality_batches_for_adapter(
+    cases: &[TagQualityCase],
+    adapter_id: &str,
     validate: impl Fn(&StructuredModelRequest) -> Result<(), ModelTaskError>,
 ) -> Result<Vec<PlannedTagQualityBatch>, ModelTaskError> {
     let mut result = Vec::new();
@@ -78,8 +87,9 @@ pub fn plan_tag_quality_batches(
             .iter()
             .map(|case| case.track.clone())
             .collect::<Vec<_>>();
-        for planned in plan_model_tagger_batches(&inputs, &vocabulary, &validate)? {
+        for planned in plan_tagger_engine_batches(&inputs, &vocabulary, adapter_id, &validate)? {
             result.push(PlannedTagQualityBatch {
+                native_task: planned.native_task,
                 case_range: start + planned.input_range.start..start + planned.input_range.end,
                 vocabulary: vocabulary.clone(),
                 task: planned.task,

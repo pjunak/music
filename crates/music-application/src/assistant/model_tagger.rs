@@ -44,7 +44,11 @@ pub fn model_tag_inference_fingerprint(
         "mood-inference/v1",
         MODEL_TAGGER_INPUT_CONTRACT,
         MODEL_TAGGER_OUTPUT_CONTRACT,
-        prototype,
+        if connection.adapter_id == super::TYPESAFE_ADAPTER {
+            super::jev_inference_identity()
+        } else {
+            serde_json::to_value(prototype).unwrap_or(Value::Null)
+        },
         connection.adapter_id,
         connection.base_url,
         role.model_id,
@@ -341,6 +345,7 @@ pub struct ModelTaggerBatch {
 
 #[derive(Debug)]
 pub struct PlannedTaggerBatch {
+    pub native_task: Option<super::JevTaggerTask>,
     pub input_range: std::ops::Range<usize>,
     pub task: ModelTaggerBatch,
 }
@@ -402,6 +407,28 @@ pub fn model_request_reservation(request: &StructuredModelRequest, output_limit:
 /// Plan every request before execution. The transport adapter supplies exact
 /// envelope validation; the application owns track membership and batching.
 /// Both ordinary and corrective requests must fit without dropping vocabulary.
+pub fn plan_tagger_engine_batches(
+    inputs: &[Value],
+    vocabulary: &TagVocabularySnapshot,
+    adapter_id: &str,
+    validate: impl Fn(&StructuredModelRequest) -> Result<(), ModelTaskError>,
+) -> Result<Vec<PlannedTaggerBatch>, ModelTaskError> {
+    if adapter_id != super::TYPESAFE_ADAPTER {
+        return plan_model_tagger_batches(inputs, vocabulary, validate);
+    }
+    super::plan_jev_tagging(inputs, vocabulary)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, native)| {
+            Ok(PlannedTaggerBatch {
+                input_range: index..index + 1,
+                task: ModelTaggerBatch::new(vec![inputs[index].clone()], vocabulary.clone())?,
+                native_task: Some(native),
+            })
+        })
+        .collect()
+}
+
 pub fn plan_model_tagger_batches(
     inputs: &[Value],
     vocabulary: &TagVocabularySnapshot,
@@ -430,6 +457,7 @@ pub fn plan_model_tagger_batches(
             return Err(ModelTaskError::new("request_too_large"));
         };
         planned.push(PlannedTaggerBatch {
+            native_task: None,
             input_range: start..start + length,
             task,
         });
@@ -439,6 +467,10 @@ pub fn plan_model_tagger_batches(
 }
 
 impl ModelTaggerBatch {
+    pub(crate) fn inputs(&self) -> &[Value] {
+        &self.tracks
+    }
+
     pub fn new(
         tracks: Vec<Value>,
         vocabulary: TagVocabularySnapshot,

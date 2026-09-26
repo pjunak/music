@@ -102,12 +102,18 @@ impl ProviderHandler {
 
     #[must_use]
     pub(crate) fn parse_models(self, payload: &Value, maximum: usize) -> Option<Vec<String>> {
-        let entries = payload.get("data").and_then(Value::as_array)?;
+        let native = self.adapter_id == music_application::assistant::TYPESAFE_ADAPTER;
+        let entries = payload
+            .get(if native { "models" } else { "data" })
+            .and_then(Value::as_array)?;
         let mut seen = BTreeSet::new();
         Some(
             entries
                 .iter()
-                .filter_map(|item| item.get("id").and_then(Value::as_str))
+                .filter_map(|item| {
+                    item.get(if native { "name" } else { "id" })
+                        .and_then(Value::as_str)
+                })
                 .map(|model_id| self.normalize_model_id(model_id))
                 .filter(|model_id| !model_id.is_empty() && model_id.len() <= 256)
                 .filter(|model_id| seen.insert((*model_id).to_owned()))
@@ -124,6 +130,11 @@ impl ProviderHandler {
         thinking_mode: ThinkingMode,
         request: &StructuredModelRequest,
     ) -> Result<PreparedProviderRequest, ProviderHandlerError> {
+        if self.adapter_id == music_application::assistant::TYPESAFE_ADAPTER {
+            return Err(ProviderHandlerError {
+                code: "unsupported_provider_feature",
+            });
+        }
         music_application::assistant::validate_model_settings(
             self.adapter_id,
             model_id,
@@ -376,6 +387,10 @@ pub(crate) fn provider_handler(adapter_id: &str) -> Option<ProviderHandler> {
             thinking_parameter_style: ThinkingParameterStyle::ReasoningObject,
             execution_api_style: ExecutionApiStyle::Responses,
             output_schema_dialect: OutputSchemaDialect::OpenAiStructuredOutputsSubset,
+            ..compatible
+        }),
+        music_application::assistant::TYPESAFE_ADAPTER => Some(ProviderHandler {
+            completion_path: "/systemone",
             ..compatible
         }),
         OPENAI_COMPATIBLE_ADAPTER => Some(compatible),
@@ -922,7 +937,11 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>();
-        for adapter in PROVIDER_ADAPTERS {
+        for adapter in PROVIDER_ADAPTERS.iter().filter(|adapter| {
+            adapter
+                .capability_ids
+                .contains(&music_application::assistant::STRUCTURED_TEXT_CAPABILITY)
+        }) {
             let handler = provider_handler(adapter.id).ok_or("adapter missing handler")?;
             let planned = plan_model_tagger_batches(&inputs, &vocabulary, |request| {
                 handler

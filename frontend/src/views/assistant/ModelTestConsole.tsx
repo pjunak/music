@@ -419,7 +419,9 @@ function buildLogEntries(
       id: "model-request-settings",
       time: role.last_conformance_at,
       tone: "info",
-      message: `Test settings: ${settings.model_id} · thinking ${thinkingModeLabel(settings.thinking_mode)} · ${settings.max_output_tokens} token allowance · ${settings.timeout_seconds}s timeout. Provider reported ${modelResult.reasoning_tokens ?? "unknown"} reasoning tokens.`,
+      message: settings.adapter_id === "typesafe-systemone/v1"
+        ? `Test settings: ${settings.model_id} · native typed decisions · ${settings.timeout_seconds}s timeout. No thinking or response-token setting is sent.`
+        : `Test settings: ${settings.model_id} · thinking ${thinkingModeLabel(settings.thinking_mode)} · ${settings.max_output_tokens} token allowance · ${settings.timeout_seconds}s timeout. Provider reported ${modelResult.reasoning_tokens ?? "unknown"} reasoning tokens.`,
     });
   }
 

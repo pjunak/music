@@ -7,7 +7,40 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
-## Implementation status — 25 September 2026
+## Jev implementation batch — 26 September 2026
+
+The owner requested a native Jev alternative after a rebuilt-context run proposed
+only calm. The supplied export contains 50 outcomes: 12 calm and 38 abstentions,
+from three successful Astra responses. It has no full provider-visible input snapshots,
+so it cannot establish whether the limiting factor was evidence or interpretation.
+The text prompt uses calm as its positive example, a plausible anchoring influence
+that is not a proven cause. That current engine remains selectable for comparison.
+
+**Implemented:** native System One HTTP, pinned model selection despite alias-only
+discovery, dedicated Noul/Choice conformance, complete vocabulary partitioning,
+separate support/sufficiency gates, model-selected observation citations, application
+explanations and conservative tentative proposals. The existing quality suites,
+review/storage contract, profile freshness and durable usage ledger are reused.
+Preview includes worst-case follow-ups; unknown-cost failures are never replayed.
+No SDK, service, database, generated-audio upload or automatic provider fallback was added.
+
+**Still required:** operator configuration, live Jev conformance/quality checks and
+independent listening against the same recordings. No paid provider run, deployment
+or improvement in actual mood accuracy is claimed. Use the
+[setup instructions](../ASSISTANT.md#trying-jev-for-mood-tagging). The overall estimate
+remains **approximately 80%**, because listening usefulness and production acceptance
+are still open. Jev implementation is now in the requested scope; adoption remains
+conditional on results.
+
+Local validation: all 559 Rust tests pass with FFmpeg and the pinned optional voice
+model configured; workspace check, strict workspace/fuzz Clippy, formatting,
+architecture, doc-test and generated-contract gates pass. All 362 frontend tests,
+lint, typecheck and the production build pass. Native fixtures exercise full question
+and evidence processing through durable jobs, not live Jev accuracy. Planning the
+63 synthetic cases fell from about 22 seconds to 5 seconds in the same debug test
+after removing repeated growing-request validation; this is not provider latency.
+
+## Prior implementation status — 25 September 2026
 
 - **Implemented:** selected-library inventory and saved-vocabulary exports initialize
   the grouped JSONL pilot before model calls. Frozen recording groups, four-state
@@ -98,8 +131,8 @@ required changes.
 
 Weighted completion is **78%, rounded to approximately 80% overall**. Core code being
 implemented does not make the delivery production-accepted. EffNet/Jev adoption and the
-other conditional alternatives are outside this estimate until an observed need admits
-them into scope; their experimental state remains visible in the inventory below.
+other conditional alternatives were outside this estimate. Jev entered implementation
+scope on 26 September; live qualification remains open, as recorded above.
 
 ### Local validation and release boundary
 
@@ -157,8 +190,8 @@ are also implemented.
 
 **Experimental only:** EffNet and its matching heads pass numerical qualification,
 including whole-track native comparison and original TensorFlow/ONNX pairing. They
-are not integrated into application workers, evidence, storage or review. Jev and
-other conditional alternatives have no application adapter or adoption commitment.
+are not integrated into application workers, evidence, storage or review. Jev now has
+a native application adapter; other conditional alternatives have no adoption commitment.
 
 **Still open:** owner labels and listening/session-use comparison, application/container
 resources with concurrent playback, and an operator-started full-library rebuild.
@@ -192,7 +225,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | Not used | Owner exploration; no adapter | Optional typed-decision comparison on the same evidence | Conditional: retain only for measured quality/cost value; not a chat-compatible replacement or release dependency. |
+| TypeSafe Jev | Not used | Native typed mood engine, pinned setup, full vocabulary questions, evidence gates and durable budgets | Run real conformance/quality and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |
@@ -566,46 +599,43 @@ missing-data behavior and listening comparison. Retain useful catalog/DSP change
 additional learned audio fails to improve the owner's results.
 Custom training remains conditional.
 
-## 8. Optionally compare Jev through a small typed-decision adapter
+## 8. Native Jev engine and listening comparison
 
-**Owners:** [provider inventory](../crates/music-application/src/assistant/providers.rs),
-[transport port](../crates/music-application/src/assistant/model_transport.rs),
-[HTTP transport](../crates/music-server/src/provider_transport.rs), new `typesafe` handler.
-Depends on the shared decision contract. Run this comparison if the owner continues
-the Jev investigation; it does not block the existing tagger or stages 9-10.
+Implemented on 26 September after the owner requested this alternative. Owners are
+[typed decisions](../crates/music-application/src/assistant/typed_decisions.rs),
+[Jev interpretation](../crates/music-application/src/assistant/model_jev.rs),
+[native HTTP](../crates/music-server/src/provider_transport/typesafe.rs), the existing
+provider setup and mood-tagging jobs. See the
+[architecture contract](ASSISTANT_ARCHITECTURE.md) and
+[operator workflow](../ASSISTANT.md#trying-jev-for-mood-tagging).
 
-Add `TypedDecisionTransport` and `typed-decisions/v1`. Let the music-tagger role
-select a structured-text or typed-decision engine with matching conformance tests;
-keep other roles' capability requirements intact. Jev is not an OpenAI-compatible
-chat adapter and must not claim arbitrary structured-text or audio support.
+- Direct native `POST /v1/systemone`, strict Noul/Choice responses, exact version
+  checks and `models[].name` discovery; pin `jev-1.13.0`. No chat/SDK bridge,
+  generated-text capability, thinking/output setting or automatic retry.
+- One song per state; group definitions and every runtime tag's full semantics are
+  included. Partition all **200 allowed application tags** under both context limits.
+  The separate offline pilot's larger vocabulary cap is not the runtime limit.
+- Two Noul questions per tag, separate 0.70 support/sufficiency gates, no probability
+  multiplication or preferred tag. Multiple qualifying periods abstain. Up to eight
+  candidates get budgeted support/conflict Choice questions with real observation IDs
+  and an explicit none option. This replaces the proposed forced period choice: the
+  first implementation keeps ambiguous eras unresolved without another request.
+- The app assembles explanations, retains selected contradictions and labels every
+  proposal tentative. Scores are uncalibrated. Exact request fingerprints and usage
+  are checkpointed before cost; unchanged completed profiles use existing freshness.
+  A separate response cache or inference store is unnecessary for this first pilot.
+- Existing synthetic quality, live-data disclosure v16, review/export and transactional
+  guards apply. Local fixtures cover malformed answers, full custom vocabularies,
+  HTTP 401/422/429/529, submission timeout, budget rejection and restart uncertainty.
 
-Use direct `reqwest` HTTP with the existing credential, URL, byte/time and attempt
-boundaries. Implement `POST /v1/systemone` with `{model,state,questions}` and strict
-`answers` parsing; validate exact question keys/types, finite scores and model ID.
-Discover models from `models[].name`, rather than the existing `data[].id` parser.
-Allow an explicit pinned `jev-1.13.0` even when discovery lists only aliases.
-[API](https://docs.typesafe.ai/api), [models and discovery](https://docs.typesafe.ai/models).
+The native engine is available for comparison once configured; it has not passed a
+live provider or independent listening evaluation. It consumes prepared textual evidence,
+so it cannot supply musical information missing from that evidence. Do not loosen
+safety or equate extra tags with quality to obtain a passing demonstration.
 
-- One track per shared state initially. Use Noul for each nonexclusive tag and a
-  separate evidence-sufficiency question; Choice only for period with unknown/cross-era
-  options. Put full definitions in questions, since question IDs carry no semantics.
-- Deterministically partition the entire vocabulary into bounded question groups.
-  Enforce both documented context limits with conservative reservation units and show
-  total calls/cost before running. Never silently omit custom tags or assume one call
-  handles a 1,200-tag vocabulary. Cache by exact state/questions/model identity.
-- Keep aggregation, thresholds and consistency in Rust. For proposed tags, an
-  optional, budgeted follow-up may judge support/contradiction against bounded observation
-  IDs. Render application-authored explanations from validated references;
-  distinguish considered evidence from evidence the engine actually selected.
-- Reuse pre-call checkpoints and usage accounting. Disable automatic retries initially,
-  including SDK defaults; uncertain attempts remain interrupted. Test 401/422/429/529,
-  timeouts after submission, malformed answers and cancellation. Noul's number is a
-  raw vendor probability, not demonstrated calibration on this library. Sufficiency
-  gates a decision; do not multiply correlated answers as independent probabilities.
-
-**Gate:** fixture HTTP tests, dedicated conformance, injection/missing-evidence
-checks and the same listening/workflow comparison as the current engine. Adopt Jev
-only for demonstrated quality, cost or operational benefit.
+The implementation follows the official [API](https://docs.typesafe.ai/api),
+[models](https://docs.typesafe.ai/models), [Noul](https://docs.typesafe.ai/primitives/noul)
+and [Choice](https://docs.typesafe.ai/primitives/choice) contracts reviewed this date.
 
 ## 9. Integrate through existing review and authoring
 

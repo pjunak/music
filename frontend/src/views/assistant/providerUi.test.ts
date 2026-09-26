@@ -15,6 +15,8 @@ describe("provider UI helpers", () => {
       "https://generativelanguage.googleapis.com/v1beta/openai",
     );
     expect(defaultProviderAddress("openai-compatible/v1")).toBe("");
+    expect(defaultProviderAddress("typesafe-systemone/v1")).toBe("https://api.typesafe.ai/v1");
+    expect(modelTestFailureMessage("pinned_model_required")).toContain("pinned Jev version");
     expect(defaultProviderAddress("deepseek-chat/v1")).toBe("https://api.deepseek.com");
     expect(defaultProviderAddress("deepseek-responses/v1")).toBe("https://api.deepseek.com");
   });

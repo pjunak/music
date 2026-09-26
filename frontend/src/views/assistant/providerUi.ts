@@ -6,6 +6,7 @@ import type {
 } from "@/core/assistantProvidersApi";
 
 const FIXED_PROVIDER_ADDRESSES: Record<string, string> = {
+  "typesafe-systemone/v1": "https://api.typesafe.ai/v1",
   "deepseek-chat/v1": "https://api.deepseek.com",
   "deepseek-responses/v1": "https://api.deepseek.com",
   "openai-responses/v1": "https://api.openai.com/v1",
@@ -42,6 +43,9 @@ const VERIFICATION_FAILURES: Record<string, string> = {
 };
 
 const MODEL_TEST_FAILURES: Record<string, string> = {
+  pinned_model_required: "Select a pinned Jev version, such as jev-1.13.0. Moving aliases cannot be used for reproducible tagging.",
+  invalid_typed_decisions: "Jev returned incomplete or invalid typed judgments. No result from that recording was saved.",
+  provider_model_mismatch: "The provider returned a different model version. Verify the pinned version before rerunning.",
   unsupported_reasoning_mode: "This model does not support the selected thinking setting. Choose one of its supported effort levels.",
   unsupported_output_budget: "The response-token allowance exceeds this model's supported limit.",
   provider_interrupted: "The provider interrupted generation before completing the result. Review this attempt before deliberately rerunning.",
@@ -73,7 +77,7 @@ const MODEL_TEST_FAILURES: Record<string, string> = {
     "The model exhausted its allowance for reasoning and final output before completing the JSON object. Raise the allowance or choose a lower supported effort before rerunning.",
   model_refusal: "The model declined to produce the required structured result.",
   conformance_mismatch:
-    "The model did not copy the one-time test values exactly.",
+    "The model did not pass the one-time task-contract test.",
   timeout: "The model did not respond within this task's timeout.",
   provider_timeout: "The provider stopped the model request after its own deadline.",
   tls_error: "A secure connection to the provider could not be established.",

@@ -299,7 +299,7 @@ async fn empty_tagging_pilots_stop_and_continue_without_rebilling_current_tracks
     let parameters = json!({
         "inference_fingerprint":execution.inference_fingerprint,"role_fingerprint":execution.fingerprint,
         "vocabulary_fingerprint":vocabulary.fingerprint,"role_id":"music_tagger",
-        "quality_evaluation_id":TAGGING_QUALITY_EVALUATION_ID,"disclosure_version":"assistant-model-music-tagging-disclosure/v15","consent":true,
+        "quality_evaluation_id":TAGGING_QUALITY_EVALUATION_ID,"disclosure_version":"assistant-model-music-tagging-disclosure/v16","consent":true,
         "scope":{"type":"all","path":"","recursive":false,"track_ids":[]},"context_policy":"include","force":false,
         "limits":{"max_tracks":35,"max_requests":10,"max_token_reservation":1_000_000,"stop_on_empty_batch":true}
     });

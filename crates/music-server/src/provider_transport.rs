@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 mod batch;
+mod typesafe;
 use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::io;
@@ -8,6 +9,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+pub(crate) use typesafe::validate_typesafe_request;
 
 use futures_util::StreamExt;
 use music_application::assistant::{
@@ -355,6 +357,10 @@ impl ProviderConnectionPolicy for ProviderNetworkBoundary {
 }
 
 impl music_application::assistant::StructuredModelTransport for ProviderNetworkBoundary {
+    fn typed_decisions(&self) -> Option<&dyn music_application::assistant::TypedDecisionTransport> {
+        Some(self)
+    }
+
     fn validate_request(
         &self,
         target: &ProviderExecutionTarget,
@@ -522,6 +528,9 @@ fn safe_http_error_code(
     if status == StatusCode::NOT_FOUND {
         return not_found_code;
     }
+    if status.as_u16() == 529 {
+        return "service_unavailable";
+    }
     if status == StatusCode::TOO_MANY_REQUESTS {
         return "rate_limited";
     }
@@ -626,6 +635,7 @@ fn validate_adapter_base_url(
         | music_application::assistant::DEEPSEEK_RESPONSES_ADAPTER => {
             Some("https://api.deepseek.com")
         }
+        music_application::assistant::TYPESAFE_ADAPTER => Some("https://api.typesafe.ai/v1"),
         OPENAI_RESPONSES_ADAPTER => Some(OPENAI_API_BASE_URL),
         GOOGLE_GEMINI_OPENAI_ADAPTER | GOOGLE_GEMINI_OPENAI_JSON_SCHEMA_ADAPTER => {
             Some(GOOGLE_GEMINI_OPENAI_BASE_URL)

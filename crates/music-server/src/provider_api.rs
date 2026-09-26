@@ -168,6 +168,10 @@ fn provider_digest(application_digest: &str) -> String {
             include_str!("provider_handlers.rs"),
         ),
         (
+            "music-server/provider_transport/typesafe.rs",
+            include_str!("provider_transport/typesafe.rs"),
+        ),
+        (
             "music-server/provider_transport.rs",
             include_str!("provider_transport.rs"),
         ),
@@ -595,7 +599,9 @@ impl ModelRequestSettingsResponse {
     fn from_target(target: &music_application::assistant::ProviderExecutionTarget) -> Self {
         Self {
             adapter_id: target.adapter_id.clone(),
-            endpoint_path: if matches!(
+            endpoint_path: if target.adapter_id == music_application::assistant::TYPESAFE_ADAPTER {
+                "/systemone"
+            } else if matches!(
                 target.adapter_id.as_str(),
                 music_application::assistant::OPENAI_RESPONSES_ADAPTER
                     | music_application::assistant::DEEPSEEK_RESPONSES_ADAPTER
@@ -612,7 +618,13 @@ impl ModelRequestSettingsResponse {
             )
             .into(),
             thinking_mode: target.thinking_mode.into(),
-            max_output_tokens: target.max_output_tokens,
+            max_output_tokens: if target.adapter_id
+                == music_application::assistant::TYPESAFE_ADAPTER
+            {
+                0
+            } else {
+                target.max_output_tokens
+            },
             timeout_seconds: target.timeout_seconds,
         }
     }
@@ -1430,10 +1442,21 @@ async fn test_role_model(
         .map_err(map_provider_error)?;
     let request = target.request();
     let started_at = Instant::now();
-    let result = providers
-        .network
-        .execute_structured_model_request(&target.execution, &request)
-        .await;
+    let result = if target.execution.adapter_id == music_application::assistant::TYPESAFE_ADAPTER {
+        use music_application::assistant::TypedDecisionTransport;
+        providers
+            .network
+            .execute_typed_request(
+                &target.execution,
+                &music_application::assistant::typed_conformance_request(&target.challenge),
+            )
+            .await
+    } else {
+        providers
+            .network
+            .execute_structured_model_request(&target.execution, &request)
+            .await
+    };
     let duration_ms = started_at.elapsed().as_millis();
     let reasoning_tokens = result.token_details.reasoning_output_tokens;
     let result = target.evaluate(result);
@@ -2056,7 +2079,25 @@ mod tests {
         let status = body_json(status).await?;
         assert_eq!(status["credential_storage_ready"], true);
         assert_eq!(status["credential_storage_source"], "environment");
-        assert_eq!(status["adapters"].as_array().map(Vec::len), Some(7));
+        assert_eq!(status["adapters"].as_array().map(Vec::len), Some(8));
+        let jev = status["adapters"]
+            .as_array()
+            .ok_or("missing adapters")?
+            .iter()
+            .find(|adapter| adapter["id"] == music_application::assistant::TYPESAFE_ADAPTER)
+            .ok_or("missing Jev")?;
+        assert_eq!(
+            jev["capability_ids"],
+            serde_json::json!(["typed-decisions/v1", "mood-decisions/v1"])
+        );
+        assert_eq!(
+            jev["model_profiles"][0]["model_ids"],
+            serde_json::json!(["jev-1.13.0"])
+        );
+        assert_eq!(
+            jev["model_profiles"][0]["reasoning_modes"],
+            serde_json::json!(["provider_default"])
+        );
         let openai = status["adapters"]
             .as_array()
             .ok_or("missing adapters")?

@@ -205,6 +205,9 @@ For each connection:
    model passes strict-schema conformance. These profiles accept only Google's
    documented public base URL; use the generic adapter for a deliberate proxy or
    gateway.
+   For Jev mood decisions, choose **TypeSafe Jev** (`typesafe-systemone/v1`) with
+   `https://api.typesafe.ai/v1`. This native adapter is available only for mood
+   tagging; it receives the existing bounded textual evidence, never song audio.
 2. Enter a clear local name, the provider's documented API base URL, and its API key.
 3. Leave private-network access off for public providers. Enable it only for a service
    you intentionally run on a trusted private address.
@@ -238,7 +241,8 @@ unavailable until dedicated audio adapters, bounded input, separate consent, res
 validation, and conformance/quality suites are implemented. This entry does not upload
 audio or replace the existing local track-context analysis.
 
-1. Select a verified connection and one of its reported model IDs.
+1. Select a verified connection and one of its reported model IDs. For Jev, select
+   the offered pinned `jev-1.13.0` version even when discovery lists only aliases.
 2. Keep the role disabled while saving its initial configuration.
 3. Choose a thinking setting from the model's reviewed profile. **Astra requires thinking**: use
    **Low** for less reasoning; **Off** is unavailable. DeepSeek supports Off, Low,
@@ -249,6 +253,9 @@ audio or replace the existing local track-context analysis.
    enough for both reasoning and final JSON. The conformance test uses that configured allowance;
    task requests can impose smaller limits. Model test logs include effective settings and any
    provider-reported reasoning usage.
+   Jev has no thinking or response-token controls; its questions and input reservation
+   are bounded by the application. Its conformance test checks native Noul/Choice
+   answers and the exact returned model version.
 4. Run the role's fixed conformance test. This makes one small provider request and
    checks strict structured output for that exact connection, model, timeout, and output
    limit.
@@ -298,6 +305,31 @@ Use a small, representative sample before running across the whole library.
 5. Adjust the selection, preview Authoring import, and explicitly create the playlist.
 6. Confirm a failed model request remains visibly failed and does not silently replace
    its provenance with a local result.
+
+### Trying Jev for mood tagging
+
+After deploying a build containing the native adapter:
+
+1. In **Assistant -> AI setup**, add a **TypeSafe Jev** connection, save its key
+   there, and verify the connection. Select it for **Mood tagging** and choose
+   `jev-1.13.0`. Save, use **Test and make available**, then **Run quality check**.
+   These are real provider calls; a synthetic pass is required before a library run.
+2. In **Mood library**, select a small varied pilot (for example five songs) and use
+   immediate execution. The preview reserves every assessment partition plus up to
+   eight evidence-selection follow-ups per song. Raise the request/token limits only
+   after reviewing that preview, or reduce the selection. Remote Batch is unavailable.
+3. Review disclosure v16 and run tagging. Current local context can be reused; changing
+   the interpreter makes older generated proposals stale without changing accepted tags.
+   The no-tag stop guard stops after an empty song with Jev; turn it off deliberately
+   when a fixed-cohort comparison needs all selected songs, including abstentions.
+4. Review and export the run. Jev proposals are tentative; the app writes their
+   explanations from Jev-selected evidence IDs and explicitly marks the Noul scores
+   uncalibrated. Compare with independent listening using the existing
+   [pilot workflow](docs/MOOD_PILOT.md). Do not accept extra labels solely for variety.
+
+Jev checks all configured tags, applies separate support and evidence-sufficiency
+gates, and never inserts a default mood. Missing evidence can still produce empty
+results. There are no automatic retries or silent fallbacks to another engine.
 
 ### Mood tagging
 
@@ -401,7 +433,7 @@ On upgrade, schemas 15–16 create a verified database backup and clear generate
 suggestions and proposal-bound reviews. Accepted/manual tags and playlists are preserved.
 Old active analysis jobs are superseded; paid-attempt history is preserved without replay.
 Start the whole-library audio-context job to rebuild, then rerun the tagging checks and
-review disclosure v15 before any provider work. Playback remains available during rebuild.
+review disclosure v16 before any provider work. Playback remains available during rebuild.
 
 Model input now separates recording loudness from within-track dynamics, reports coverage
 without a whole-track confidence label, and withholds the coarse local tempo estimate.

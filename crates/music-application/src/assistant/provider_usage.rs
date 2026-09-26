@@ -65,8 +65,9 @@ impl ModelRunManifest {
     ) -> Result<Self, JobHandlerError> {
         let max_attempts = u64::try_from(max_attempts)
             .map_err(|_| JobHandlerError::new("model_run_budget_overflow"))?;
+        let max_output_tokens = effective_output_allowance(role);
         let output_token_ceiling = max_attempts
-            .checked_mul(u64::from(role.execution.max_output_tokens))
+            .checked_mul(u64::from(max_output_tokens))
             .ok_or_else(|| JobHandlerError::new("model_run_budget_overflow"))?;
         Ok(Self {
             schema_version: "assistant-model-run/v1".to_owned(),
@@ -79,7 +80,7 @@ impl ModelRunManifest {
             model_id: role.execution.model_id.clone(),
             thinking_mode: role.execution.thinking_mode,
             timeout_seconds: role.execution.timeout_seconds,
-            max_output_tokens_per_request: role.execution.max_output_tokens,
+            max_output_tokens_per_request: max_output_tokens,
             max_attempts,
             output_token_ceiling,
             evaluation_id: evaluation_id.to_owned(),
@@ -90,6 +91,14 @@ impl ModelRunManifest {
             queue_wait_seconds: context.queue_wait_seconds(),
             max_token_reservation: None,
         })
+    }
+}
+
+fn effective_output_allowance(role: &ResolvedRoleExecution) -> u32 {
+    if role.execution.adapter_id == super::TYPESAFE_ADAPTER {
+        0
+    } else {
+        role.execution.max_output_tokens
     }
 }
 
@@ -230,7 +239,7 @@ impl ProviderUsageAccumulator {
             || role.execution.model_id != manifest.model_id
             || role.execution.thinking_mode != manifest.thinking_mode
             || role.execution.timeout_seconds != manifest.timeout_seconds
-            || role.execution.max_output_tokens != manifest.max_output_tokens_per_request
+            || effective_output_allowance(role) != manifest.max_output_tokens_per_request
         {
             return Err(JobHandlerError::new("role_changed"));
         }
@@ -405,6 +414,61 @@ pub async fn execute_recorded_provider_request(
     let started = Instant::now();
     let result = transport
         .execute_structured_model_request(&role.execution, request)
+        .await;
+    usage.finish(
+        &result,
+        u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    );
+    context
+        .checkpoint(usage.checkpoint())
+        .await
+        .map_err(JobHandlerError::from_execution)?;
+    Ok(result)
+}
+
+/// Native decisions share the write-ahead attempt ledger, without corrective retries.
+pub async fn execute_recorded_typed_request(
+    context: &JobExecutionContext,
+    transport: &dyn super::TypedDecisionTransport,
+    role: &ResolvedRoleExecution,
+    request: &super::TypedDecisionRequest,
+    usage: &mut ProviderUsageAccumulator,
+) -> Result<StructuredModelResult, JobHandlerError> {
+    context
+        .check_cancelled()
+        .await
+        .map_err(JobHandlerError::from_execution)?;
+    usage.begin(role, &request.accounting_request())?;
+    if let Err(error) = transport.validate_typed_request(&role.execution, request) {
+        let result = StructuredModelResult {
+            token_details: Default::default(),
+            outcome: ProviderAttemptOutcome::PreflightRejected,
+            succeeded: false,
+            error_code: Some(error.code),
+            payload: None,
+            provider_model_id: None,
+            finish_reason: None,
+            input_tokens: None,
+            output_tokens: None,
+        };
+        usage.finish(&result, 0);
+        context
+            .checkpoint(usage.checkpoint())
+            .await
+            .map_err(JobHandlerError::from_execution)?;
+        return Ok(result);
+    }
+    context
+        .checkpoint(usage.checkpoint())
+        .await
+        .map_err(JobHandlerError::from_execution)?;
+    context
+        .check_cancelled()
+        .await
+        .map_err(JobHandlerError::from_execution)?;
+    let started = Instant::now();
+    let result = transport
+        .execute_typed_request(&role.execution, request)
         .await;
     usage.finish(
         &result,

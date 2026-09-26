@@ -131,10 +131,10 @@ See [ADR-023](ADR-023-bounded-playlist-vocabulary-recall.md).
 
 Application-owned `model_jobs.rs` registers feature and evaluation handlers; its
 `model_jobs/` modules hold the established roles' execution paths; `cleanup_enrichment/ai.rs` owns catalog candidate review. `StructuredModelTransport`
-is the outbound port. The server composes the HTTP adapter and exposes routes;
+is the text-generation port; its optional `TypedDecisionTransport` handles native Jev questions. The server composes the HTTP adapter and exposes routes;
 application workflows own gates, checkpoints, retry budgets, and proposal writes.
 
-`plan_model_tagger_batches` in the application layer owns exact track partitioning.
+`plan_tagger_engine_batches` selects the engine; `plan_model_tagger_batches` owns text-engine track partitioning.
 The provider adapter validates the actual serialized envelope against the 256 KiB limit
 and reserves output capacity before choosing the number of tracks.
 Preview, start preflight, execution, and evaluation use the same planner; ordinary and
@@ -143,10 +143,37 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Mood tagging input v24 uses batch-local slots, a stable vocabulary reference prefix and
+Text-engine mood tagging input v24 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
+Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
+`music-jev-decisions/v1`. The mood role requires `mood-decisions/v1`, which
+both existing text adapters and Jev implement; other roles retain their capability
+requirements. Jev receives one song's actual observations and full group/tag meanings,
+without a track identifier. Two Noul questions per tag judge support and evidence
+sufficiency. Every entry in the 200-tag runtime vocabulary is partitioned without
+omission under conservative 32,000/64,000-byte context reservations including overhead.
+A value of at least 0.70 on each question qualifies a candidate; probabilities are
+not multiplied. At most eight candidates receive a support/conflict Choice request,
+including a no-observation option. A support selection needs probability at least
+0.50; validated conflict references are retained. Multiple qualifying period tags
+all abstain. The application authors the review explanation, all proposals remain
+tentative, and these starting gates have no library calibration claim.
+
+Discovery reads `models[].name`. The setup offers reviewed pinned `jev-1.13.0`
+without inventing a discovered model; native nonce conformance verifies the actual
+version. Moving aliases, chat fields and thinking overrides are rejected. Native
+HTTP reuses DNS pinning, encrypted credentials, deadlines, response bounds and the
+write-ahead usage ledger. Preview and execution reserve the entire worst-case request
+plan; planning rejects selections above 1,000 songs or 1,000 worst-case native calls
+before retaining an unbounded request plan. No generated-output allowance is sent or reserved. No automatic retry, text
+fallback or remote Batch is supported. A native execution failure stops further
+quality calls, including safety reruns; successful synthetic checks still do not
+establish listening quality. Decisions enter the existing output v5/storage/review
+contract under disclosure v16; changing the engine invalidates generated proposals,
+not local context or accepted tags. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
+
 The context implementation is `local-context/v3+rustfft/v2+loudness/v2`.
 Loudness capture retains the bounded end of FFmpeg stderr so long embedded notes cannot
 displace the final measurement. Decode/loudness codec and filter pools are explicitly
@@ -268,6 +295,7 @@ operator request / indexed library / local audio
 | Adapter/capability/role inventory and runtime fingerprints | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`runtime_contract.rs`](../crates/music-application/src/assistant/runtime_contract.rs) | colocated inventory and digest tests | [ADR-001](ADR-001-assistant-provider-connections.md), [ADR-002](ADR-002-assistant-model-execution.md) |
 | Reviewed model settings and provider alias revisions | [`provider_profiles.rs`](../crates/music-application/src/assistant/provider_profiles.rs) | provider-scoped settings and alias-boundary tests | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | Provider-specific model IDs, request schemas, inference parameters, and response shapes | [`provider_handlers.rs`](../crates/music-server/src/provider_handlers.rs) | transport-free production-shaped request and parser tests | [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
+| Native typed decisions and Jev mood interpretation | [`typed_decisions.rs`](../crates/music-application/src/assistant/typed_decisions.rs), [`model_jev.rs`](../crates/music-application/src/assistant/model_jev.rs), [native HTTP](../crates/music-server/src/provider_transport/typesafe.rs) | primitive/question/evidence fixtures, HTTP error/timeout tests and SQLite attempt fault tests | [implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md#8-native-jev-engine-and-listening-comparison) |
 | Bounded request execution | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs), task types under [`assistant/`](../crates/music-application/src/assistant) | local fixture-server, strict parsing, and bounds tests | [ADR-002](ADR-002-assistant-model-execution.md), [ADR-007](ADR-007-algorithm-first-structured-model-harness.md), [ADR-011](ADR-011-in-process-provider-adapter-handlers.md) |
 | URL validation, SSRF boundary, redirect refusal, byte/time limits | [`provider_transport.rs`](../crates/music-server/src/provider_transport.rs) | pinned-DNS, special-range, redirect, timeout, and response-limit tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
 | Credential encryption, initialization, reset, and offline rotation | [`crypto.rs`](../crates/music-storage/src/crypto.rs), [`provider_credentials.rs`](../crates/music-server/src/provider_credentials.rs), [`providers.rs`](../crates/music-storage/src/providers.rs) | Python-compatibility fixture plus reset/rotation transaction tests | [ADR-001](ADR-001-assistant-provider-connections.md) |
@@ -317,7 +345,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v5+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v4` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v24+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v15` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v24+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v16` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 | Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1` | `assistant-library-cleanup-disclosure/v2` | `model-catalog-adjudication/v2` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |

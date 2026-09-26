@@ -1781,7 +1781,7 @@ async fn start_model_tagging(
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
     authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
-    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v15"
+    if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v16"
         || !payload.consent
     {
         return Err(ApiError::validation());
@@ -1947,33 +1947,65 @@ async fn model_tagging_availability(
     let run_tracks = inputs.len();
     let mut token_reservation = 0;
     let estimated_provider_requests = if let Some(execution) = role.execution.as_ref() {
-        match music_application::assistant::plan_model_tagger_batches(
+        match music_application::assistant::plan_tagger_engine_batches(
             &inputs,
             &vocabulary,
+            &execution.execution.adapter_id,
             |request| {
                 crate::provider_handlers::validate_structured_request(&execution.execution, request)
             },
         ) {
             Ok(batches) => {
+                let native = execution.execution.adapter_id
+                    == music_application::assistant::TYPESAFE_ADAPTER;
+                let request_count = batches
+                    .iter()
+                    .map(|batch| {
+                        batch
+                            .native_task
+                            .as_ref()
+                            .map_or(1, |task| task.max_requests)
+                    })
+                    .sum::<usize>();
+                for task in batches
+                    .iter()
+                    .filter_map(|batch| batch.native_task.as_ref())
+                {
+                    for request in task.assessment_requests() {
+                        if let Err(error) = crate::provider_transport::validate_typesafe_request(
+                            &execution.execution,
+                            request,
+                        ) {
+                            role.reason_code = Some(error.code);
+                        }
+                    }
+                }
                 let reservations = batches
                     .iter()
                     .map(|batch| {
+                        if let Some(task) = &batch.native_task {
+                            return task.token_reservation;
+                        }
                         music_application::assistant::model_request_reservation(
                             &batch.task.request(true),
                             execution.execution.max_output_tokens,
                         )
                     })
                     .collect::<Vec<_>>();
-                let retries =
-                    usize::from(if execution_mode == ModelTaggingExecutionModeWire::Batch {
+                let retries = usize::from(
+                    if native || execution_mode == ModelTaggingExecutionModeWire::Batch {
                         0
                     } else {
                         MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT
-                    })
-                    .min(limits.max_requests.saturating_sub(batches.len()));
+                    },
+                )
+                .min(limits.max_requests.saturating_sub(request_count));
                 token_reservation = reservations.iter().sum::<u64>()
                     + reservations.iter().max().copied().unwrap_or(0) * retries as u64;
-                if execution_mode == ModelTaggingExecutionModeWire::Batch && !batches.is_empty() {
+                if execution_mode == ModelTaggingExecutionModeWire::Batch
+                    && !native
+                    && !batches.is_empty()
+                {
                     use music_application::assistant::ModelBatchTransport;
                     let requests = batches
                         .iter()
@@ -1987,7 +2019,7 @@ async fn model_tagging_availability(
                         role.reason_code = Some(error.code);
                     }
                 }
-                if batches.len() > limits.max_requests
+                if request_count > limits.max_requests
                     || token_reservation > limits.max_token_reservation
                 {
                     role.reason_code = Some("tagging_budget_too_small".to_owned());
@@ -1998,7 +2030,7 @@ async fn model_tagging_availability(
                 {
                     role.reason_code = Some("batch_pilot_required".to_owned());
                 }
-                batches.len()
+                request_count
             }
             Err(error) => {
                 role.reason_code = Some(error.code);
@@ -2032,20 +2064,28 @@ async fn model_tagging_availability(
         current_profiles,
         tracks_needing_tags,
         estimated_provider_requests,
-        disclosure: model_tagging_disclosure(&vocabulary),
+        disclosure: model_tagging_disclosure(
+            &vocabulary,
+            role.execution.as_ref().is_some_and(|execution| {
+                execution.execution.adapter_id == music_application::assistant::TYPESAFE_ADAPTER
+            }),
+        ),
     })
 }
 
-fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingDisclosureResponse {
+fn model_tagging_disclosure(
+    vocabulary: &TagVocabularySnapshot,
+    native: bool,
+) -> ModelTaggingDisclosureResponse {
     ModelTaggingDisclosureResponse {
-        version: "assistant-model-music-tagging-disclosure/v15",
+        version: "assistant-model-music-tagging-disclosure/v16",
         shared_with_provider: vec![
             "Indexed artist, album, origin, and genre metadata",
             "Track durations and BPM values when available",
             "Current bounded local track context when available: relative signal level, loudness, rhythmic drive, brightness, density and spectral-change trajectories; major acoustic sections and transitions; structural repetition; decoded duration/scope and per-measurement reliability; and optional local voice/instrumental classifier score and coverage (or explicit unknown/unavailable status). The coarse local tempo estimate is withheld.",
             "Current enabled catalog observations: MusicBrainz recording genres, composer credits and first-release date; up to twelve original Last.fm community labels/counts, explicitly weak claims; source, recording ID and retrieval time accompany the claims",
-            "A batch-local numeric slot used only to match the response; database track IDs are not sent",
-            "The full operator-managed canonical tag ID, name, group, definition, exact-alias, and bounded semantic context cue index; the model may return only IDs from this index",
+            "For text engines, a batch-local numeric slot used only to match the response; Jev receives one recording per state without a track identifier. Database track IDs are not sent",
+            "The full operator-managed tag names, groups, definitions, exact aliases and bounded semantic context cues. Text engines return canonical IDs; Jev answers bounded questions for every tag and selects supporting/conflicting observation IDs. Jev review explanations are assembled by the application and its probabilities are uncalibrated.",
             "In Batch mode, this same evidence is uploaded as a provider file: input expires after seven days and output after up to thirty days; the app deletes known files after collecting results. Completion may take twenty-four hours and completed requests remain chargeable after cancellation.",
         ],
         never_shared: vec![
@@ -2061,8 +2101,12 @@ fn model_tagging_disclosure(vocabulary: &TagVocabularySnapshot) -> ModelTaggingD
             .iter()
             .flat_map(|group| group.tags.iter().map(|tag| tag.name.clone()))
             .collect(),
-        tracks_per_request: MODEL_TAG_BATCH_SIZE,
-        invalid_response_retry_limit: MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT,
+        tracks_per_request: if native { 1 } else { MODEL_TAG_BATCH_SIZE },
+        invalid_response_retry_limit: if native {
+            0
+        } else {
+            MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT
+        },
         may_incur_cost: true,
     }
 }
@@ -3502,7 +3546,7 @@ fn model_tag_cleanup_request_count_schema() -> RefOr<Schema> {
         .into()
 }
 fn model_tagging_disclosure_version_schema() -> RefOr<Schema> {
-    const_string_schema("assistant-model-music-tagging-disclosure/v15")
+    const_string_schema("assistant-model-music-tagging-disclosure/v16")
 }
 fn model_tagging_role_schema() -> RefOr<Schema> {
     const_string_schema("music_tagger")

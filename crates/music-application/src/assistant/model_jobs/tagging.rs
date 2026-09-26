@@ -94,14 +94,30 @@ impl ModelEvaluationJobHandler {
                 .filter(|case| !safety_only || case.gate == TagQualityGate::Safety)
                 .cloned()
                 .collect::<Vec<_>>();
-            planned_requests += crate::assistant::plan_tag_quality_batches(&cases, |request| {
-                self.transport
-                    .validate_request(&execution.role.execution, request)
-            })
+            planned_requests += crate::assistant::plan_tag_quality_batches_for_adapter(
+                &cases,
+                &execution.role.execution.adapter_id,
+                |request| {
+                    self.transport
+                        .validate_request(&execution.role.execution, request)
+                },
+            )
             .map_err(model_task_failure)?
-            .len();
+            .iter()
+            .map(|batch| {
+                batch
+                    .native_task
+                    .as_ref()
+                    .map_or(1, |task| task.max_requests)
+            })
+            .sum::<usize>();
         }
-        let max_attempts = tagging_attempt_budget(planned_requests);
+        let max_attempts =
+            if execution.role.execution.adapter_id == crate::assistant::TYPESAFE_ADAPTER {
+                planned_requests
+            } else {
+                tagging_attempt_budget(planned_requests)
+            };
         let mut usage =
             start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
         let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
@@ -184,9 +200,11 @@ impl ModelEvaluationJobHandler {
         deterministic_execution_failure: &mut Option<ModelTaskError>,
     ) -> Result<Vec<TagQualityCaseResult>, JobHandlerError> {
         let mut results = Vec::with_capacity(cases.len());
-        let batches = crate::assistant::plan_tag_quality_batches(cases, |request| {
-            self.transport.validate_request(&role.execution, request)
-        })
+        let batches = crate::assistant::plan_tag_quality_batches_for_adapter(
+            cases,
+            &role.execution.adapter_id,
+            |request| self.transport.validate_request(&role.execution, request),
+        )
         .map_err(model_task_failure)?;
         for planned in batches {
             let chunk = &cases[planned.case_range];
@@ -194,6 +212,12 @@ impl ModelEvaluationJobHandler {
             let batch = planned.task;
             let profiles = if let Some(error) = deterministic_execution_failure.clone() {
                 Err(error)
+            } else if let Some(native) = planned.native_task {
+                let transport = self
+                    .transport
+                    .typed_decisions()
+                    .ok_or_else(|| JobHandlerError::new("unsupported_provider_feature"))?;
+                native.execute(context, role, transport, usage).await?
             } else {
                 let mut correction = false;
                 loop {
@@ -211,7 +235,8 @@ impl ModelEvaluationJobHandler {
                 }
             };
             if let Err(error) = &profiles
-                && deterministic_tagger_execution_failure(error)
+                && (role.execution.adapter_id == crate::assistant::TYPESAFE_ADAPTER
+                    || deterministic_tagger_execution_failure(error))
             {
                 *deterministic_execution_failure = Some(error.clone());
             }
@@ -262,7 +287,7 @@ impl ModelFeatureJobHandler {
             &parameters.quality_evaluation_id,
             TAGGING_QUALITY_EVALUATION_ID,
             &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v15",
+            "assistant-model-music-tagging-disclosure/v16",
             parameters.consent,
             &parameters.role_fingerprint,
         )?;
@@ -358,11 +383,46 @@ impl ModelFeatureJobHandler {
                 )
             })
             .collect::<Vec<_>>();
-        let batches =
-            crate::assistant::plan_model_tagger_batches(&inputs, &vocabulary, |request| {
-                self.transport.validate_request(&role.execution, request)
-            })
-            .map_err(model_task_failure)?;
+        let batches = crate::assistant::plan_tagger_engine_batches(
+            &inputs,
+            &vocabulary,
+            &role.execution.adapter_id,
+            |request| self.transport.validate_request(&role.execution, request),
+        )
+        .map_err(model_task_failure)?;
+        let native = role.execution.adapter_id == crate::assistant::TYPESAFE_ADAPTER;
+        let max_attempts = if native {
+            batches
+                .iter()
+                .map(|batch| {
+                    batch
+                        .native_task
+                        .as_ref()
+                        .map_or(0, |task| task.max_requests)
+                })
+                .sum::<usize>()
+        } else {
+            tagging_attempt_budget(batches.len())
+        };
+        if native
+            && (max_attempts > parameters.limits.max_requests
+                || batches
+                    .iter()
+                    .map(|batch| {
+                        batch
+                            .native_task
+                            .as_ref()
+                            .map_or(0, |task| task.token_reservation)
+                    })
+                    .sum::<u64>()
+                    > parameters.limits.max_token_reservation)
+        {
+            return Err(JobHandlerError::new("tagging_budget_too_small"));
+        }
+        if native && parameters.execution_mode == crate::assistant::ModelTaggingExecutionMode::Batch
+        {
+            return Err(JobHandlerError::new("batch_unsupported_adapter"));
+        }
         if parameters.execution_mode == crate::assistant::ModelTaggingExecutionMode::Batch
             && !work.is_empty()
         {
@@ -422,7 +482,7 @@ impl ModelFeatureJobHandler {
                 .iter()
                 .map(|(id, signature)| (id.get(), signature))
                 .collect::<Vec<_>>(),
-            tagging_attempt_budget(batches.len()).min(parameters.limits.max_requests),
+            max_attempts.min(parameters.limits.max_requests),
             ModelReviewDestination::TrackTagReview,
         )
         .await?;
@@ -458,22 +518,33 @@ impl ModelFeatureJobHandler {
             )
             .await?;
             let mut correction = false;
-            let profiles = loop {
-                let result = execute_provider_request(
-                    context,
-                    self.transport.as_ref(),
-                    &role,
-                    &task.request(correction),
-                    &mut provider_usage,
-                )
-                .await?;
-                match task.finish(result) {
-                    Ok(profiles) => break profiles,
-                    Err(error) if retryable_tagger_error(&error) && retry_budget > 0 => {
-                        retry_budget = retry_budget.saturating_sub(1);
-                        correction = true;
+            let profiles = if let Some(native) = planned.native_task {
+                let transport = self
+                    .transport
+                    .typed_decisions()
+                    .ok_or_else(|| JobHandlerError::new("unsupported_provider_feature"))?;
+                native
+                    .execute(context, &role, transport, &mut provider_usage)
+                    .await?
+                    .map_err(model_task_failure)?
+            } else {
+                loop {
+                    let result = execute_provider_request(
+                        context,
+                        self.transport.as_ref(),
+                        &role,
+                        &task.request(correction),
+                        &mut provider_usage,
+                    )
+                    .await?;
+                    match task.finish(result) {
+                        Ok(profiles) => break profiles,
+                        Err(error) if retryable_tagger_error(&error) && retry_budget > 0 => {
+                            retry_budget = retry_budget.saturating_sub(1);
+                            correction = true;
+                        }
+                        Err(error) => return Err(model_task_failure(error)),
                     }
-                    Err(error) => return Err(model_task_failure(error)),
                 }
             };
             ensure_feature_role_unchanged(

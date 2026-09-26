@@ -16,8 +16,8 @@
     "reason": "Catalog credential removal is an authenticated extension added after the frozen v1 reference."
   },
   "GET /api/assistant/library-tags/model-status#responses": {
-    "sha256": "e8e804b4de365de92ebc4429269e4ae54492af39104458e1a9787709bd4e8a2d",
-    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
+    "sha256": "2fc471101ea5c2d80145d5af189c06237da67b09cfb700e5426727bbad3ea0b2",
+    "reason": "Disclosure v16 describes native Jev mood decisions, one song per state, complete vocabulary partitions and bounded evidence-selection follow-ups. Native calls have no corrective retries or remote Batch. Input v24, output v5 and analyzer v8 remain current; existing text providers remain selectable. Consent is renewed, and current web guards change with the server. Suggestions still require explicit review; no playback or Baton contract changes."
   },
   "GET /api/assistant/library-tags#parameters": {
     "sha256": "f3a5f738cec551f529854906b9f3e89b9fd86a4ebafe1c79248f10d1aacb6e87",
@@ -40,12 +40,12 @@
     "reason": "Readiness separates dependency readiness from liveness for the Rust runtime."
   },
   "POST /api/assistant/library-tags/model-jobs#request_body": {
-    "sha256": "5bf31c2f6558beffddc37c194d10ea6fc86b1e2eaa7a766a0e9aef89f8e44785",
-    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
+    "sha256": "af4d8998c2379f8296c922c893cd77bcdf240eefcb13082d6c71989084bbd726",
+    "reason": "Disclosure v16 describes native Jev mood decisions, one song per state, complete vocabulary partitions and bounded evidence-selection follow-ups. Native calls have no corrective retries or remote Batch. Input v24, output v5 and analyzer v8 remain current; existing text providers remain selectable. Consent is renewed, and current web guards change with the server. Suggestions still require explicit review; no playback or Baton contract changes."
   },
   "POST /api/assistant/library-tags/model-plan#responses": {
-    "sha256": "a2225b1f160bb29e172a4bfff27eeae1a3f74ca31d51e1337bb31b8e6e739a58",
-    "reason": "The current-only tagger uses input v24, output v5, analyzer v8 and disclosure v15. Each tag has supported/tentative support, reasons and valid supporting/conflicting observation IDs; empty output requires abstention. Whole-track model confidence and legacy heuristic fields are removed. Authored tags remain review-controlled and current web clients reject old analysis responses."
+    "sha256": "299a699cdfd8b1035289679009926ad42e1ea01044350ebeeb3e52728ff28e4a",
+    "reason": "Disclosure v16 describes native Jev mood decisions, one song per state, complete vocabulary partitions and bounded evidence-selection follow-ups. Native calls have no corrective retries or remote Batch. Input v24, output v5 and analyzer v8 remain current; existing text providers remain selectable. Consent is renewed, and current web guards change with the server. Suggestions still require explicit review; no playback or Baton contract changes."
   },
   "POST /api/library/cleanup/enrichment-jobs#operation": {
     "sha256": "282a7902b9e1df5cce5254bbe2ac5abf2b86f70a809af2fbfe2add4bf0bb7ab9",
