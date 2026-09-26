@@ -7,7 +7,32 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
-## Jev implementation batch — 26 September 2026
+## Jev group-aware decisions — 27 September 2026
+
+Implemented the owner's Choice/Noul refinement in `music-jev-decisions/v2`.
+Period uses one complete Choice with an explicit no-supported-period option;
+mood, scene, setting and custom groups retain independent Nouls. A period winner
+still needs separate support/sufficiency judgments and selected evidence, sharing
+one follow-up request. No new settings, service or storage were added.
+
+Choice probabilities and Noul scores are not comparable: at most one of the eight
+candidate slots is reserved for period, with the rest available to multiple tags.
+Budgets reserve only one possible period follow-up, and oversized full period
+questions fail before cost. The current contract replaces v1 with no compatibility
+path; provider/quality freshness changes, while current context and accepted tags
+remain usable. The operator guide now includes account/key setup and exact UI steps.
+Independent listening and live Jev acceptance remain open; the overall estimate
+remains approximately 80%.
+
+Validation: all 562 Rust workspace tests pass, including the real FFmpeg and pinned
+voice-model checks. Twelve focused Jev tests cover mixed question types, categorical
+abstention, independently grounded period winners, full vocabulary and budget bounds,
+and durable mixed period/multi-label execution. Workspace check, strict workspace/fuzz
+Clippy, formatting, architecture, doc-test, generated-contract and local-link checks
+pass. Frontend and wire shapes are unchanged; no paid Jev call or listening result is
+claimed.
+
+## Prior Jev implementation batch — 26 September 2026
 
 The owner requested a native Jev alternative after a rebuilt-context run proposed
 only calm. The supplied export contains 50 outcomes: 12 calm and 38 abstentions,
@@ -225,7 +250,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | Not used | Native typed mood engine, pinned setup, full vocabulary questions, evidence gates and durable budgets | Run real conformance/quality and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
+| TypeSafe Jev | Not used | Native mood engine: categorical period Choice, multi-label Nouls, pinned setup, selected evidence and durable budgets | Run real conformance/quality and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |
@@ -615,11 +640,15 @@ provider setup and mood-tagging jobs. See the
 - One song per state; group definitions and every runtime tag's full semantics are
   included. Partition all **200 allowed application tags** under both context limits.
   The separate offline pilot's larger vocabulary cap is not the runtime limit.
-- Two Noul questions per tag, separate 0.70 support/sufficiency gates, no probability
-  multiplication or preferred tag. Multiple qualifying periods abstain. Up to eight
-  candidates get budgeted support/conflict Choice questions with real observation IDs
-  and an explicit none option. This replaces the proposed forced period choice: the
-  first implementation keeps ambiguous eras unresolved without another request.
+- Since 27 September, period uses one Choice over its full definitions and an
+  explicit no-supported-period option. A winner needs probability at least 0.70;
+  its evidence follow-up also asks support/sufficiency Nouls, each requiring 0.70.
+  Distribution-derived Choice confidence is not a second evidence judgment.
+- Other groups retain per-tag support/sufficiency Nouls, each requiring 0.70, with
+  no probability multiplication or preferred tag. Up to eight candidates, including
+  at most one period, receive budgeted support/conflict Choice questions over real
+  observation IDs and an explicit none option. Oversized period lists fail without
+  truncation; all decisions remain reviewable rather than forced classifications.
 - The app assembles explanations, retains selected contradictions and labels every
   proposal tentative. Scores are uncalibrated. Exact request fingerprints and usage
   are checkpointed before cost; unchanged completed profiles use existing freshness.

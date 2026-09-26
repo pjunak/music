@@ -569,9 +569,11 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let answers=request.questions.iter().map(|(key,question)| {
                 let value=match question {
-                    music_application::assistant::TypedQuestion::Noul{instructions,..}=>json!({"type":"noul","noul":if instructions["tag"]["name"]=="combat"{0.95}else{0.05}}),
+                    music_application::assistant::TypedQuestion::Noul{instructions,..}=>json!({"type":"noul","noul":if ["combat", "medieval"].iter().any(|name| instructions["tag"]["name"] == *name){0.95}else{0.05}}),
                     music_application::assistant::TypedQuestion::Choice{criteria,..}=>{
-                        let choice=if key=="support"{"metadata.genre"}else{"no_observation"};
+                        let choice = if key == "period" {
+                            criteria.iter().find(|(_, meaning)| meaning["name"] == "medieval").map_or("no_supported_period", |(id, _)| id.as_str())
+                        } else if key == "support" { "metadata.genre" } else { "no_observation" };
                         json!({"type":"choice","choice":choice,"probabilities":criteria.keys().map(|id|(id.clone(),if id==choice{1.0}else{0.0})).collect::<BTreeMap<_,_>>(),"confidence":1.0})
                     }
                 };
@@ -705,7 +707,10 @@ async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_rec
             .ok_or("tracks")?;
         assert_eq!(tracks.len(), if fail_second { 1 } else { 2 });
         assert_eq!(tracks[0]["track_id"], 41);
-        assert_eq!(tracks[0]["tags"], json!(["combat"]));
+        let tags = tracks[0]["tags"].as_array().ok_or("tag array")?;
+        assert_eq!(tags.len(), 2);
+        assert!(tags.contains(&json!("combat")));
+        assert!(tags.contains(&json!("medieval")));
         assert_eq!(
             tracks[0]["decisions"][0]["evidence_ids"],
             json!(["metadata.genre"])

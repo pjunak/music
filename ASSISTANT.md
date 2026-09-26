@@ -308,11 +308,17 @@ Use a small, representative sample before running across the whole library.
 
 ### Trying Jev for mood tagging
 
-After deploying a build containing the native adapter:
+After the application's deployment finishes successfully, refresh the page. If
+**TypeSafe Jev** is missing from the connection types, the deployed build does not
+contain the native adapter yet. The group-aware Choice/Noul strategy requires the
+current Jev engine; updating it makes old model/quality checks stale.
 
-1. In **Assistant -> AI setup**, add a **TypeSafe Jev** connection, save its key
-   there, and verify the connection. Select it for **Mood tagging** and choose
-   `jev-1.13.0`. Save, use **Test and make available**, then **Run quality check**.
+1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following
+   its [quick start](https://docs.typesafe.ai/introduction/quickstart). No SDK or local
+   Jev installation is needed. In **Assistant -> AI setup**, add a **TypeSafe Jev**
+   connection. Use the supplied `https://api.typesafe.ai/v1` base URL, leave private
+   network access off, save the key there, and click **Verify connection**. Select it
+   for **Mood tagging** and choose `jev-1.13.0`. Save, use **Test and make available**, then **Run quality check**.
    These are real provider calls; a synthetic pass is required before a library run.
 2. In **Mood library**, select a small varied pilot (for example five songs) and use
    immediate execution. The preview reserves every assessment partition plus up to
@@ -327,9 +333,19 @@ After deploying a build containing the native adapter:
    uncalibrated. Compare with independent listening using the existing
    [pilot workflow](docs/MOOD_PILOT.md). Do not accept extra labels solely for variety.
 
-Jev checks all configured tags, applies separate support and evidence-sufficiency
-gates, and never inserts a default mood. Missing evidence can still produce empty
-results. There are no automatic retries or silent fallbacks to another engine.
+The application chooses the Jev primitive automatically:
+
+- **Period:** one Choice compares every configured era plus a no-supported-period
+  option. A clear winner still needs independent support and evidence-sufficiency
+  Noul checks in its evidence request. Unknown is not timeless; cross era is a
+  standalone choice for an explicitly supported blend.
+- **Mood, scene, setting and custom groups:** independent support/sufficiency Nouls
+  allow several suitable tags. These groups are not forced into a single winner.
+
+At most eight candidates are examined, including at most one period. Choice
+probabilities are not ranked against Noul scores. All proposed tags still need
+selected supporting observations and human review. Missing evidence can produce
+empty results; there is no default mood, automatic retry or silent engine fallback.
 
 ### Mood tagging
 

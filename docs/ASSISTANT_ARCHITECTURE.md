@@ -148,18 +148,31 @@ per-measurement context reliability. Full membership is validated before resolvi
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v1`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v2`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. Jev receives one song's actual observations and full group/tag meanings,
-without a track identifier. Two Noul questions per tag judge support and evidence
-sufficiency. Every entry in the 200-tag runtime vocabulary is partitioned without
-omission under conservative 32,000/64,000-byte context reservations including overhead.
-A value of at least 0.70 on each question qualifies a candidate; probabilities are
-not multiplied. At most eight candidates receive a support/conflict Choice request,
-including a no-observation option. A support selection needs probability at least
-0.50; validated conflict references are retained. Multiple qualifying period tags
-all abstain. The application authors the review explanation, all proposals remain
-tentative, and these starting gates have no library calibration claim.
+without a track identifier. Period is categorical: one Choice contains every
+configured period's complete meaning plus `no_supported_period`. Its selected option
+needs probability at least 0.70; a tie, weak winner or none option abstains. The
+selected period then receives independent support/sufficiency Noul checks in its
+existing evidence follow-up, each requiring at least 0.70. A relative Choice winner
+alone does not establish support. The provider's distribution-derived confidence
+is not an independent sufficiency measurement and is not multiplied into a score.
+All other groups use two Noul questions per tag with separate 0.70 support and
+sufficiency gates. All configured entries (up to 200 total) retain their full meanings.
+Requests are partitioned under conservative 32,000/64,000-byte context reservations
+including overhead; the period Choice is indivisible, and an oversized full list is
+rejected before cost rather than silently shortlisted.
+
+At most eight candidates receive a support/conflict Choice request with an explicit
+no-observation option. A qualifying period reserves one slot; the remaining seven
+(or eight without a period candidate) use descending Noul support with canonical-ID
+tie breaking. Choice probabilities are never ranked against Noul support scores.
+A support observation selection needs probability at least 0.50; validated conflict
+references are retained. The period winner's two Noul checks share that same request,
+so they add no round trip. Preview reserves at most one period follow-up and the
+worst-case token total with or without it. The application authors the explanation,
+all proposals remain tentative, and these starting gates are not library-calibrated.
 
 Discovery reads `models[].name`. The setup offers reviewed pinned `jev-1.13.0`
 without inventing a discovered model; native nonce conformance verifies the actual
