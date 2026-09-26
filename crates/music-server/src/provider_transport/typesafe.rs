@@ -102,7 +102,7 @@ mod tests {
         routing::{get, post},
     };
     use music_application::assistant::{
-        ProviderSecret, ThinkingMode, typed_conformance_passed, typed_conformance_request,
+        ProviderSecret, ThinkingMode, typed_conformance_request, validate_typed_conformance,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Mutex;
@@ -145,7 +145,7 @@ mod tests {
                 *capture.lock().await=Some((headers,body));
                 Json(serde_json::json!({"model":"jev-1.13.0","answers":{
                     "yes_nonce":{"type":"noul","noul":0.99},"no_nonce":{"type":"noul","noul":0.01},
-                    "choice_nonce":{"type":"choice","choice":"nonce","probabilities":{"nonce":0.99,"not-the-reference":0.01},"confidence":0.9}},
+                    "choice_nonce":{"type":"choice","choice":"solo_singing","probabilities":{"solo_singing":0.98,"instrumental_music":0.01,"silence":0.01},"confidence":0.9}},
                     "usage":{"input_tokens":222,"output_tokens":25}}))
             }}));
         let (address, server) = server(app).await?;
@@ -166,11 +166,7 @@ mod tests {
         let request = typed_conformance_request("nonce");
         let result = boundary.execute_typed_request(&target, &request).await;
         server.abort();
-        assert!(
-            typed_conformance_passed("nonce", &result),
-            "{:?}",
-            result.error_code
-        );
+        validate_typed_conformance("nonce", &result)?;
         assert_eq!(result.input_tokens, Some(222));
         let (headers, body) = captured.lock().await.take().ok_or("no request")?;
         assert_eq!(headers[AUTHORIZATION], "Bearer fixture-only");

@@ -1644,6 +1644,27 @@ mod tests {
         );
         assert!(runtime.role.last_conformance_at_unix_seconds.is_some());
 
+        let failure = ProviderConformanceWrite {
+            passed: false,
+            error_code: Some("typed_conformance_choice_failed".to_owned()),
+            ..conformance.clone()
+        };
+        assert!(matches!(
+            storage.finish_role_conformance(&failure).await?,
+            ProviderConformanceWriteOutcome::Applied(_)
+        ));
+        let reloaded = storage
+            .model_roles()
+            .await?
+            .into_iter()
+            .find(|saved| saved.role_id == role.role_id)
+            .ok_or("missing saved role")?;
+        assert_eq!(reloaded.conformance_status, "failed");
+        assert_eq!(
+            reloaded.conformance_error_code.as_deref(),
+            Some("typed_conformance_choice_failed")
+        );
+
         let mut changed_role = runtime.role.clone();
         changed_role.model_id = "changed-model".to_owned();
         assert_eq!(

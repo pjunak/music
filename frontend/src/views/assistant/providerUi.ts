@@ -76,6 +76,12 @@ const MODEL_TEST_FAILURES: Record<string, string> = {
   incomplete_structured_output:
     "The model exhausted its allowance for reasoning and final output before completing the JSON object. Raise the allowance or choose a lower supported effort before rerunning.",
   model_refusal: "The model declined to produce the required structured result.",
+  typed_conformance_positive_failed:
+    "Jev did not recognize the explicitly described singing: the positive Noul check requires a score of at least 0.90.",
+  typed_conformance_negative_failed:
+    "Jev assigned too much support to absent percussion: the negative Noul check requires a score of at most 0.10.",
+  typed_conformance_choice_failed:
+    "Jev did not select solo singing with at least 0.90 probability in the Choice check.",
   conformance_mismatch:
     "The model did not pass the one-time task-contract test.",
   timeout: "The model did not respond within this task's timeout.",

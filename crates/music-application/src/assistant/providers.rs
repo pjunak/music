@@ -825,27 +825,32 @@ impl ProviderConformanceTarget {
 
     #[must_use]
     pub fn evaluate(&self, result: StructuredModelResult) -> ProviderConformanceResult {
-        let passed = if self.execution.adapter_id == TYPESAFE_ADAPTER {
-            super::typed_conformance_passed(&self.challenge, &result)
+        let error_code = if !result.succeeded {
+            Some(
+                result
+                    .error_code
+                    .clone()
+                    .unwrap_or_else(|| "conformance_failed".to_owned()),
+            )
+        } else if self.execution.adapter_id == TYPESAFE_ADAPTER {
+            super::validate_typed_conformance(&self.challenge, &result)
+                .err()
+                .map(|error| error.code)
+        } else if result.payload.as_ref()
+            == Some(&json!({
+                "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
+                "challenge": self.challenge,
+                "checks": ["schema", "identity"],
+                "accepted": true,
+            }))
+        {
+            None
         } else {
-            result.succeeded
-                && result.payload.as_ref()
-                    == Some(&json!({
-                        "contract": PROVIDER_CONFORMANCE_CHALLENGE_CONTRACT,
-                        "challenge": self.challenge,
-                        "checks": ["schema", "identity"],
-                        "accepted": true,
-                    }))
+            Some("conformance_mismatch".to_owned())
         };
         ProviderConformanceResult {
-            passed,
-            error_code: if passed {
-                None
-            } else if result.succeeded {
-                Some("conformance_mismatch".to_owned())
-            } else {
-                result.error_code
-            },
+            passed: error_code.is_none(),
+            error_code,
             provider_model_id: result.provider_model_id,
             finish_reason: result.finish_reason,
             input_tokens: result.input_tokens,

@@ -263,6 +263,31 @@ describe("AssistantAiSetupView", () => {
     expect(within(planner).getByRole("option", { name: /incompatible connection type/ })).toBeDisabled();
   });
 
+  it("shows and exports the saved Jev failure after a reload without repeating a paid test", async () => {
+    const user = userEvent.setup();
+    const nativeConnection = { ...connection, adapter_id: "typesafe-systemone/v1", verified_models: ["jev-latest", "jev-preview"] };
+    vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({ ...frameworkStatus, adapters: [{
+      id: "typesafe-systemone/v1", label: "TypeSafe Jev", description: "Typed mood decisions", capability_ids: ["mood-decisions/v1", "typed-decisions/v1"], model_profiles: [{
+        id: "typesafe-jev", revision: "fixture", model_ids: ["jev-1.13.0"], reasoning_modes: ["provider_default"], max_output_tokens: null, documented: true, notice: "Native typed decisions", source_url: "https://docs.typesafe.ai/models",
+      }],
+    }] });
+    vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([nativeConnection]);
+    vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([{
+      ...musicTaggingRole, required_capability_ids: ["mood-decisions/v1"], model_id: "jev-1.13.0", enabled: false, effective_enabled: false,
+      conformance_status: "failed", conformance_error_code: "typed_conformance_choice_failed", last_conformance_at: "2026-09-27T10:00:00Z",
+    }]);
+    render(<AssistantAiSetupView />);
+    const card = (await screen.findByRole("heading", { name: "Music tagger" })).closest("article")!;
+    expect(within(card).getByText("Jev did not select solo singing with at least 0.90 probability in the Choice check.")).toBeVisible();
+    expect(within(card).getByLabelText("Make this model available to its task")).toBeDisabled();
+    await user.click(within(card).getByText("Model test").closest("a")!);
+    const diagnostics = screen.getByLabelText("Selected model task diagnostics JSON");
+    expect(diagnostics).toHaveTextContent('"conformance_error_code": "typed_conformance_choice_failed"');
+    expect(diagnostics).toHaveTextContent('"latest_response": null');
+    expect(assistantProvidersApi.testRole).not.toHaveBeenCalled();
+    expect(assistantProvidersApi.updateRole).not.toHaveBeenCalled();
+  });
+
   it("blocks Astra Off and saves a supported effort without changing the model", async () => {
     const user = userEvent.setup();
     const astraConnection = { ...connection, adapter_id: "openai-responses/v1", verified_models: ["gpt-6-astra"], verified_capability_ids: [] };

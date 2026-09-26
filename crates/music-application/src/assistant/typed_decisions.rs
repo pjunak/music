@@ -224,39 +224,56 @@ pub fn parse_typesafe_response(
     })
 }
 
-/// The nonce occurs in the question IDs and in a closed choice, so an old response cannot pass.
+/// Test direct semantic judgments; the nonce only correlates answers locally.
+/// Jev does not receive question IDs, so it never has to compare random strings.
 #[must_use]
 pub fn typed_conformance_request(challenge: &str) -> TypedDecisionRequest {
     TypedDecisionRequest {
-        state: json!({"reference":challenge,"supplied":challenge,"different":"not-the-reference"}),
+        state: json!({"recording_description":
+            "A solo singer performs a melody using only the human voice. No musical instruments are played. There are no drums or percussion sounds."}),
         questions: BTreeMap::from([
             (
                 format!("yes_{challenge}"),
                 TypedQuestion::Noul {
-                    instructions: json!("Does supplied exactly match reference?"),
+                    instructions: json!("Does the described recording contain human singing?"),
                     criteria: BTreeMap::from([
-                        ("true".to_owned(), json!("They match exactly.")),
-                        ("false".to_owned(), json!("They differ.")),
+                        ("true".to_owned(), json!("A human voice sings a melody.")),
+                        ("false".to_owned(), json!("No human singing is present.")),
                     ]),
                 },
             ),
             (
                 format!("no_{challenge}"),
                 TypedQuestion::Noul {
-                    instructions: json!("Does different exactly match reference?"),
+                    instructions: json!(
+                        "Does the described recording contain drums or percussion?"
+                    ),
                     criteria: BTreeMap::from([
-                        ("true".to_owned(), json!("They match exactly.")),
-                        ("false".to_owned(), json!("They differ.")),
+                        (
+                            "true".to_owned(),
+                            json!("Drums or percussion instruments are audible."),
+                        ),
+                        (
+                            "false".to_owned(),
+                            json!("No drums or percussion instruments are audible."),
+                        ),
                     ]),
                 },
             ),
             (
                 format!("choice_{challenge}"),
                 TypedQuestion::Choice {
-                    instructions: json!("Select the option identical to the state's reference."),
+                    instructions: json!("Which description best matches the recording?"),
                     criteria: BTreeMap::from([
-                        (challenge.to_owned(), Value::Null),
-                        ("not-the-reference".to_owned(), Value::Null),
+                        (
+                            "solo_singing".to_owned(),
+                            json!("A human voice sings without instrumental accompaniment."),
+                        ),
+                        (
+                            "instrumental_music".to_owned(),
+                            json!("Musical instruments play without any human singing."),
+                        ),
+                        ("silence".to_owned(), json!("There is no audible sound.")),
                     ]),
                 },
             ),
@@ -264,30 +281,58 @@ pub fn typed_conformance_request(challenge: &str) -> TypedDecisionRequest {
     }
 }
 
-pub fn typed_conformance_passed(challenge: &str, result: &StructuredModelResult) -> bool {
-    let request = typed_conformance_request(challenge);
+pub fn validate_typed_conformance(
+    challenge: &str,
+    result: &StructuredModelResult,
+) -> Result<(), ModelTaskError> {
     if !result.succeeded {
-        return false;
+        return Err(ModelTaskError::new(
+            result.error_code.as_deref().unwrap_or("invalid_response"),
+        ));
     }
-    let Some(payload) = result.payload.clone() else {
-        return false;
-    };
-    let Ok(answers) = typed_answers(&request, payload) else {
-        return false;
-    };
-    matches!(answers.get(&format!("yes_{challenge}")),Some(TypedAnswer::Noul { noul }) if *noul >= 0.9)
-        && matches!(answers.get(&format!("no_{challenge}")),Some(TypedAnswer::Noul { noul }) if *noul <= 0.1)
-        && matches!(answers.get(&format!("choice_{challenge}")),Some(TypedAnswer::Choice { choice, probabilities, .. }) if choice == challenge && probabilities[choice] >= 0.9)
+    let request = typed_conformance_request(challenge);
+    let payload = result
+        .payload
+        .clone()
+        .ok_or_else(|| ModelTaskError::new("invalid_typed_decisions"))?;
+    let answers = typed_answers(&request, payload)?;
+    if !matches!(answers.get(&format!("yes_{challenge}")), Some(TypedAnswer::Noul { noul }) if *noul >= 0.9)
+    {
+        return Err(ModelTaskError::new("typed_conformance_positive_failed"));
+    }
+    if !matches!(answers.get(&format!("no_{challenge}")), Some(TypedAnswer::Noul { noul }) if *noul <= 0.1)
+    {
+        return Err(ModelTaskError::new("typed_conformance_negative_failed"));
+    }
+    if !matches!(answers.get(&format!("choice_{challenge}")), Some(TypedAnswer::Choice { choice, probabilities, .. }) if choice == "solo_singing" && probabilities[choice] >= 0.9)
+    {
+        return Err(ModelTaskError::new("typed_conformance_choice_failed"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typed_conformance_keeps_random_identifiers_out_of_semantic_input()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let challenge = "R7nYj8-Hd_4fK2spQ6wxZg";
+        let request = typed_conformance_request(challenge);
+        request.validate()?;
+        assert!(!request.state.to_string().contains(challenge));
+        for (id, question) in &request.questions {
+            assert!(id.ends_with(challenge));
+            assert!(!serde_json::to_string(question)?.contains(challenge));
+        }
+        Ok(())
+    }
+
     fn response(challenge: &str) -> Value {
         json!({"model":"jev-1.13.0","answers":{
             format!("yes_{challenge}"):{"type":"noul","noul":0.98},
             format!("no_{challenge}"):{"type":"noul","noul":0.02},
-            format!("choice_{challenge}"):{"type":"choice","choice":challenge,"probabilities":{challenge:0.98,"not-the-reference":0.02},"confidence":0.9}},
+            format!("choice_{challenge}"):{"type":"choice","choice":"solo_singing","probabilities":{"solo_singing":0.98,"instrumental_music":0.01,"silence":0.01},"confidence":0.9}},
             "usage":{"input_tokens":330,"output_tokens":20}})
     }
     #[test]
@@ -296,8 +341,8 @@ mod tests {
         let request = typed_conformance_request("nonce-one");
         request.validate()?;
         let result = parse_typesafe_response("jev-1.13.0", &request, response("nonce-one"))?;
-        assert!(typed_conformance_passed("nonce-one", &result));
-        assert!(!typed_conformance_passed("nonce-two", &result));
+        validate_typed_conformance("nonce-one", &result)?;
+        assert!(validate_typed_conformance("nonce-two", &result).is_err());
         assert_eq!(result.input_tokens, Some(330));
         assert_eq!(
             parse_typesafe_response("jev-1.12.0", &request, response("nonce-one"))
@@ -308,12 +353,97 @@ mod tests {
         );
         let mut inverted = response("nonce-one");
         inverted["answers"]["no_nonce-one"]["noul"] = json!(0.99);
-        assert!(!typed_conformance_passed(
-            "nonce-one",
-            &parse_typesafe_response("jev-1.13.0", &request, inverted)?
-        ));
+        assert_eq!(
+            validate_typed_conformance(
+                "nonce-one",
+                &parse_typesafe_response("jev-1.13.0", &request, inverted)?
+            )
+            .err()
+            .ok_or("expected negative check failure")?
+            .code,
+            "typed_conformance_negative_failed"
+        );
         Ok(())
     }
+    #[test]
+    fn typed_conformance_enforces_each_threshold_and_reports_the_failed_check()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let challenge = "R7nYj8-Hd_4fK2spQ6wxZg";
+        let request = typed_conformance_request(challenge);
+        let target = super::super::ProviderConformanceTarget {
+            role_id: "music_tagger".to_owned(),
+            execution: super::super::ProviderExecutionTarget {
+                adapter_id: super::super::TYPESAFE_ADAPTER.to_owned(),
+                base_url: "https://api.typesafe.ai/v1".to_owned(),
+                api_key: super::super::ProviderSecret::new("fixture-only"),
+                allow_private_network: false,
+                model_id: "jev-1.13.0".to_owned(),
+                thinking_mode: super::super::ThinkingMode::ProviderDefault,
+                timeout_seconds: 60,
+                max_output_tokens: 2_000,
+            },
+            challenge: challenge.to_owned(),
+            runtime_fingerprint: "a".repeat(64),
+            role_configuration_fingerprint: "b".repeat(64),
+            connection_fingerprint: "c".repeat(64),
+        };
+        let mut boundary = response(challenge);
+        boundary["answers"][format!("yes_{challenge}")]["noul"] = json!(0.9);
+        boundary["answers"][format!("no_{challenge}")]["noul"] = json!(0.1);
+        boundary["answers"][format!("choice_{challenge}")]["probabilities"] =
+            json!({"solo_singing":0.9,"instrumental_music":0.05,"silence":0.05});
+        let result = parse_typesafe_response("jev-1.13.0", &request, boundary.clone())?;
+        assert!(target.evaluate(result).passed);
+        for (suffix, value, expected_error) in [
+            (
+                format!("yes_{challenge}/noul"),
+                json!(0.8999),
+                "typed_conformance_positive_failed",
+            ),
+            (
+                format!("no_{challenge}/noul"),
+                json!(0.1001),
+                "typed_conformance_negative_failed",
+            ),
+            (
+                format!("choice_{challenge}/probabilities"),
+                json!({"solo_singing":0.8999,"instrumental_music":0.0501,"silence":0.05}),
+                "typed_conformance_choice_failed",
+            ),
+            (
+                format!("choice_{challenge}"),
+                json!({"type":"choice","choice":"instrumental_music","probabilities":{"solo_singing":0.01,"instrumental_music":0.98,"silence":0.01},"confidence":0.9}),
+                "typed_conformance_choice_failed",
+            ),
+        ] {
+            let mut rejected = boundary.clone();
+            *rejected
+                .pointer_mut(&format!("/answers/{suffix}"))
+                .ok_or("answer path")? = value;
+            let result =
+                target.evaluate(parse_typesafe_response("jev-1.13.0", &request, rejected)?);
+            assert!(!result.passed);
+            assert_eq!(result.error_code.as_deref(), Some(expected_error));
+            assert_eq!(result.provider_model_id.as_deref(), Some("jev-1.13.0"));
+            assert_eq!(result.input_tokens, Some(330));
+        }
+        let mut failed = parse_typesafe_response("jev-1.13.0", &request, boundary)?;
+        failed.succeeded = false;
+        failed.error_code = Some("timeout".to_owned());
+        assert_eq!(
+            validate_typed_conformance(challenge, &failed)
+                .err()
+                .ok_or("expected failure")?
+                .code,
+            "timeout"
+        );
+        assert_eq!(
+            target.evaluate(failed).error_code.as_deref(),
+            Some("timeout")
+        );
+        Ok(())
+    }
+
     #[test]
     fn typed_answers_reject_missing_extra_wrong_types_and_invalid_distributions()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -327,14 +457,14 @@ mod tests {
             ("/yes_nonce/type", json!("score")),
             ("/choice_nonce/confidence", json!(1.1)),
             ("/choice_nonce/choice", json!("missing")),
-            ("/choice_nonce/choice", json!("not-the-reference")),
+            ("/choice_nonce/choice", json!("instrumental_music")),
             (
                 "/choice_nonce/probabilities",
-                json!({"nonce":0.8,"not-the-reference":0.1}),
+                json!({"solo_singing":0.8,"instrumental_music":0.1,"silence":0.0}),
             ),
             (
                 "/choice_nonce/probabilities",
-                json!({"nonce":0.8,"injected":0.2}),
+                json!({"solo_singing":0.8,"injected":0.1,"silence":0.1}),
             ),
         ] {
             let mut invalid = valid.clone();

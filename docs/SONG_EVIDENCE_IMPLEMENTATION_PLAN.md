@@ -7,6 +7,35 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev model-test repair — 27 September 2026
+
+The owner's diagnostic export records `conformance_mismatch`, which the server
+produces only after successfully parsing a response from the pinned Jev model.
+It has no retained answer details, so which judgment failed cannot be recovered.
+Its previous quality job belongs to Astra; no Jev quality result is present.
+
+The old test asked Jev to compare random identifier strings, an unsuitable mechanical
+probe for its documented semantic strengths. Conformance now asks direct questions
+about an explicit synthetic solo-singing description. The nonce remains in question
+IDs for local response correlation; model-side random-string comparison is removed.
+Positive/negative Noul and Choice gates stay at >=0.90, <=0.10 and >=0.90 respectively.
+Specific failures persist in the existing role error field and remain visible after
+reload. No new database, service, settings or automatic provider retry is added.
+
+Live Jev conformance, the full unchanged quality suite and independent listening
+remain required. Deploy the fix, refresh AI setup and rerun **Test and make available**
+with the existing pinned model and verified connection, then run its quality check.
+Current audio context and accepted tags do not need a rebuild for this repair.
+The overall estimate remains approximately **80%** until live/listening acceptance.
+
+Local validation: 564 Rust workspace tests pass with no skips, including real FFmpeg
+and the pinned optional voice model; all 366 frontend tests and the production build
+pass. Focused regressions cover identifier isolation, each strict threshold, incorrect
+Choice winners, replay/model/schema rejection, persisted errors and the reloaded setup
+UI without automatic paid calls. Workspace check, strict workspace/fuzz Clippy,
+formatting, architecture, doc tests, generated contracts, frontend lint/typecheck and
+local documentation links pass. No paid Jev call or live quality result is claimed.
+
 ## Jev group-aware decisions — 27 September 2026
 
 Implemented the owner's Choice/Noul refinement in `music-jev-decisions/v2`.

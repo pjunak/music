@@ -38,6 +38,15 @@ describe("provider UI helpers", () => {
     ).toBe("https://gateway.example/v1");
   });
 
+  it.each([
+    ["typed_conformance_positive_failed", "positive Noul", "at least 0.90"],
+    ["typed_conformance_negative_failed", "negative Noul", "at most 0.10"],
+    ["typed_conformance_choice_failed", "Choice", "at least 0.90"],
+  ])("explains the specific Jev conformance failure %s", (code, check, threshold) => {
+    expect(modelTestFailureMessage(code)).toContain(check);
+    expect(modelTestFailureMessage(code)).toContain(threshold);
+  });
+
   it("explains provider-specific failures without exposing upstream details", () => {
     expect(modelTestFailureMessage("parameter_unknown")).toContain(
       "does not support",

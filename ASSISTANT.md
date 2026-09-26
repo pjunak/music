@@ -255,7 +255,12 @@ audio or replace the existing local track-context analysis.
    provider-reported reasoning usage.
    Jev has no thinking or response-token controls; its questions and input reservation
    are bounded by the application. Its conformance test checks native Noul/Choice
-   answers and the exact returned model version.
+   answers about an explicit synthetic recording description and the exact returned
+   model version. Singing must receive at least 0.90 support, absent percussion at
+   most 0.10, and solo singing must win the Choice with at least 0.90 probability.
+   A failure identifies the specific check on the task card and in exported test
+   details, including after a page reload. This checks basic provider behavior;
+   the separate quality suite and listening pilot still determine tagging usefulness.
 4. Run the role's fixed conformance test. This makes one small provider request and
    checks strict structured output for that exact connection, model, timeout, and output
    limit.

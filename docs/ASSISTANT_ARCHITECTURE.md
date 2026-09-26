@@ -175,8 +175,17 @@ worst-case token total with or without it. The application authors the explanati
 all proposals remain tentative, and these starting gates are not library-calibrated.
 
 Discovery reads `models[].name`. The setup offers reviewed pinned `jev-1.13.0`
-without inventing a discovered model; native nonce conformance verifies the actual
-version. Moving aliases, chat fields and thinking overrides are rejected. Native
+without inventing a discovered model; native conformance verifies the actual
+version. Its synthetic solo-singing description tests a positive Noul (>=0.90),
+a negative Noul (<=0.10), and the correct descriptive Choice (>=0.90). Random
+challenges occur only in question IDs and are checked locally to reject mismatched
+answers; Jev is never asked to compare random strings. This follows its documented
+[semantic-versus-mechanical limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
+Strict parsing still rejects missing/extra answers, invalid distributions and model
+mismatches. Distinct positive, negative and Choice failure codes persist through the
+existing role record and appear on the task card, console and export after reload;
+no raw provider response or new store is added. Quality thresholds remain separate.
+Moving aliases, chat fields and thinking overrides are rejected. Native
 HTTP reuses DNS pinning, encrypted credentials, deadlines, response bounds and the
 write-ahead usage ledger. Preview and execution reserve the entire worst-case request
 plan; planning rejects selections above 1,000 songs or 1,000 worst-case native calls
