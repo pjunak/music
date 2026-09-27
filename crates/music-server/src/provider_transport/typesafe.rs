@@ -145,7 +145,7 @@ mod tests {
                 *capture.lock().await=Some((headers,body));
                 Json(serde_json::json!({"model":"jev-1.13.0","answers":{
                     "yes_nonce":{"type":"noul","noul":0.99},"no_nonce":{"type":"noul","noul":0.01},
-                    "choice_nonce":{"type":"choice","choice":"solo_singing","probabilities":{"solo_singing":0.98,"instrumental_music":0.01,"silence":0.01},"confidence":0.9}},
+                    "choice_nonce":{"type":"choice","choice":"solo_singing","probabilities":{"solo_singing":0.98,"instrumental_music":0.01,"silence":0.02},"confidence":0.9}},
                     "usage":{"input_tokens":222,"output_tokens":25}}))
             }}));
         let (address, server) = server(app).await?;

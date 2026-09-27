@@ -1,89 +1,101 @@
 # ADR-026: Native Jev applicability and evidence judgments
 
-Reviewed 27 September 2026 against the owner's Jev quality export and the current native engine.
+Reviewed 27 September 2026 against the owner's latest Jev quality export and the official API/SDK contracts.
 
-## What the run establishes
+## What the latest run establishes
 
-The connection and native conformance passed for pinned jev-1.13.0. The quality job
-received 52 responses, reporting 691,154 input and 65,116 output tokens. Twelve
-primary cases completed: eleven produced no tags and one produced only march.
-A typed response was rejected during forest-hunt. The remaining 50 primary cases
-and all 13 safety repeats were not executed after that failure. The resulting
-0/63 is a failed certification, not 63 independent completed classification failures.
+Pinned jev-1.13.0 passed native conformance. Engine v3 received 90 responses,
+reporting 1,036,505 input and 57,544 output tokens. Nineteen primary cases completed;
+case 20, infernal-dark-ritual, failed with
+`model_execution_typed_choice_distribution_invalid`. The remaining 43 primary cases
+and all 13 safety repeats were not run. The resulting 3/63 certification is not 63
+independent completed classification failures. None of the completed cases returned
+a forbidden tag, but many missed required tags, so fixing transport alone cannot
+establish adequate classification quality.
 
-The export contains final proposals but no rejected Noul scores or raw invalid
-response. It cannot identify which early gate discarded a candidate or which
-response invariant failed. Do not infer that Jev cannot classify the vocabulary,
-normalize an unknown malformed response, or lower the quality gate from this run.
+That error uniquely identifies our Choice unit-sum check (absolute tolerance
+0.0001). The official SDK says the values sum to approximately one and publishes
+no rounding bound. The export does not retain the raw distribution, so its exact
+sum and the size of its deviation are unknown. Treat the stricter application
+invariant as an integration defect; do not claim the model returned a specific sum.
+
+There were separate semantic inconsistencies: the applicability question asked
+whether the music matched a tag while its negative criterion rejected “only a name,”
+despite explicitly allowing descriptive album phrases elsewhere. Some fixtures
+also required an emotional mood without supplying evidence for it. A castle
+procession is not by itself courageous music; Arctic geography is not by itself
+an emotionally detached musical impression. The effect of revised questions on
+live model scores remains unmeasured.
 
 ## Design decisions
 
 1. Keep a dedicated native engine behind the existing tagger interface. Share
    consent, budgets, durable attempts, vocabulary validation and human review.
    Jev receives text facts and never receives audio or generates explanations.
-2. Put each complete tag meaning, its group meaning and its literal question
-   together. Remove references such as tag_group_definitions[group]. Describe
-   the musical character or tabletop suitability directly instead of asking
-   whether evidence is sufficient to justify proposing a hypothetical tag.
-3. Use one independent applicability Noul per non-period tag. Several tags may
-   qualify, or none. Keep one full-vocabulary period Choice with an explicit
-   no-supported-period option, followed by an absolute applicability Noul for
-   its winner. Never rank Choice and Noul scores together.
-4. Ground candidates with independent support and contradiction Nouls for each
-   actual observation. Inline the observation's content and meaning. Supporting
-   sources must not compete for a single probability mass: three valid sources
-   are three possible citations. Remove the redundant abstract sufficiency
-   question; concrete grounding supplies the independent check instead.
-5. If an observation receives both support and contradiction judgments, treat
-   it as conflicting rather than use it as positive evidence. Require another
-   unambiguous supporting observation or abstain. Such semantic uncertainty is
-   not a malformed provider response and must not abort later recordings.
-6. Render numerical observations descriptively in code, retaining original
-   values, coverage, reliability and the ending. Coarse low/medium/high bands
-   describe a normalized physical proxy only; they never assign moods. Missing
-   values remain missing. Artist names, release dates and community tags retain
-   their evidence limitations.
-7. Batch independent questions for the same recording across candidates within
-   existing byte and question limits, retaining identical individual questions. Preserve every vocabulary entry, the eight-candidate bound,
-   conservative worst-case reservations and the no-automatic-retry rule. Defer
-   concurrency, caching services and trained calibration until measured need.
-8. Report match versus grounding abstention, bounded top match scores, exact
-   response-validation failures and cases not run after an abort. Use existing
-   review/export fields rather than introduce another storage or diagnostics UI.
+2. Put each complete tag and group meaning beside a literal evidence question.
+   Mood concerns a musical impression; setting/scene concern reasons for tabletop
+   use. Descriptive metadata can support a tentative tag without proving how the
+   recording sounds. Isolated artist/company names and embedded commands cannot.
+3. Use independent applicability Nouls for non-period tags. Several tags may qualify,
+   or none. Keep one full-vocabulary period Choice with an explicit none option,
+   followed by an absolute applicability Noul for its winner. Never rank Choice
+   against Noul scores. Validate finite 0..1 scores, exact options and a positive
+   maximal winner, but do not enforce an undocumented sum tolerance or normalize
+   a score across an acceptance threshold. The independent Noul and grounding
+   remain necessary even when a Choice passes parsing.
+4. Ground candidates with independent support and contradiction Nouls per actual
+   observation. Inline its content and meaning. Several sources can support a tag;
+   they do not compete for probability. No abstract sufficiency question remains.
+5. If an observation is judged both supporting and contradictory, retain it as a
+   conflict. Require another unambiguous supporting observation or abstain.
+   Semantic uncertainty must not become a malformed-response error.
+6. Render numerical observations descriptively in code, retaining original values,
+   reliability, missingness and the ending. Low/medium/high bands describe physical
+   proxies only; they never assign moods. Artist names, release dates and community
+   tags retain their evidence limitations.
+7. Batch independent questions for a recording within the existing context limits.
+   Preserve every vocabulary entry, eight-candidate bounds, worst-case reservations
+   and the no-automatic-retry rule. No SDK, service, cache or compatibility branch
+   is introduced.
+8. Keep one shared quality benchmark for providers. Suite v27 gives seven ambiguous
+   positive cases explicit musical/theme evidence without removing required tags.
+   Add paired safety cases rejecting geography-to-emotion and procession-to-heroism
+   guesses. All 65 cases, 15 safety repeats, full/custom/200-tag vocabularies and
+   the separate nine-case context-only gate remain required. Native transport
+   tests cover approximate scores separately from semantic quality.
 
-Applicability and concrete support use separate, provisional 0.70 Noul gates;
-period selection retains its separate 0.70 Choice gate. These are uncalibrated
-starting operating points, not interchangeable probabilities or a claim of mood
-accuracy. The unchanged 90% quality gate and safety repeats remain mandatory.
+Applicability and grounding retain separate provisional 0.70 Noul gates; period
+selection keeps its 0.70 Choice gate. Conformance's 0.90/0.10/0.90 thresholds,
+90% quality requirements and blocking safety rules are unchanged. These scores
+are uncalibrated operating points, not measured music-tagging accuracy.
 
 ## Validation and adoption
 
-Implemented as `music-jev-decisions/v3`, replacing v2 without a compatibility path.
-Local validation passes all 567 Rust and 374 frontend tests, production frontend
-build, workspace/fuzz Clippy, formatting, architecture and generated-contract checks.
-Native regressions cover full/custom/200-tag vocabularies, independent citations,
-conflicts, categorical abstention, retained endings/missingness, strict typed parsing,
-durable failure recovery and reservation bounds. A separate regression confirms
-candidate batching preserves all questions while reducing requests and input bytes.
-Provider errors stay distinct from not-run cases. These are implementation tests,
-not a live provider quality score or independent listening result.
+Engine `music-jev-decisions/v4` replaces v3 without a compatibility path. Local
+regressions cover rounded Choice totals on both sides of one, ties, malformed
+scores/options/winners, threshold preservation, HTTP handling and durable multi-song
+execution. Existing full-vocabulary, evidence, abstention, numerical-context and
+budget regressions remain. These are implementation checks, not a paid provider
+quality result. The [implementation log](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
+records completed validation for this batch.
 
-After deployment, run the complete unchanged synthetic suite with the exact pinned
-model. Inspect stage diagnostics before adjusting wording; change thresholds only
-with a separate judged development cohort, not to fit these acceptance cases.
-Then compare the same original recordings using independent listening judgments.
-Synthetic metadata cases cannot establish real music accuracy. Jev cannot recover
-emotional meaning absent from its text evidence; only an observed semantic gap would
-justify additional audio models. Existing audio context and accepted tags stay usable.
+After deployment, refresh AI setup, rerun **Test and make available**, then run the
+complete new quality suite with pinned jev-1.13.0. An old or partial report cannot
+certify this engine/suite. If completed cases still miss supported tags, inspect
+those outcomes before further prompt changes. Adjust thresholds only with a separate
+judged development cohort, not to fit this acceptance suite. Independent listening
+on the same original recordings remains necessary; synthetic metadata cannot
+establish musical accuracy. Current local audio context and accepted tags stay usable.
 
 ## Primary references
 
+- [SDK answer contract](https://docs.typesafe.ai/sdk/python/api/types/responses): approximate Choice probabilities and per-field semantics.
 - [Noul](https://docs.typesafe.ai/primitives/noul): independent binary propositions and code-owned thresholds.
-- [Choice](https://docs.typesafe.ai/primitives/choice): categorical alternatives, full distributions and explicit none options.
-- [Jev 1.13 limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13): literal questions, fewer references, numerical work in code and relevant context.
+- [Choice](https://docs.typesafe.ai/primitives/choice): categorical alternatives and explicit none options.
+- [Jev 1.13 limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13): literal questions, consistent criteria, numerical work in code and relevant context.
 - [State](https://docs.typesafe.ai/concepts/state): shared facts and independent questions; text-only input.
-- [Parallel questions](https://docs.typesafe.ai/patterns/fan-out): combine independent questions and let code route their results.
-- [Batching comparison](https://docs.typesafe.ai/cookbooks/parallel_questions): shared state is charged once per request; the published example is not a music benchmark.
+- [Parallel questions](https://docs.typesafe.ai/patterns/fan-out): independent questions with code-owned routing.
+- [Batching comparison](https://docs.typesafe.ai/cookbooks/parallel_questions): shared state is charged once per request; this is not a music benchmark.
 
-The architecture above is this project's inference from those contracts, not a
-TypeSafe benchmark of music tagging or a promise that the next live run will pass.
+This architecture is the project's inference from those contracts, not a TypeSafe
+benchmark of music tagging or a promise that the next live run will pass.

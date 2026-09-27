@@ -7,6 +7,39 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev quality abort and evidence-contract repair — 27 September 2026
+
+The latest owner export reached 19 primary cases before our exact-sum Choice parser
+rejected case 20. It then skipped 43 primary cases and all 13 safety repeats.
+The TypeSafe SDK documents approximate sums without a rounding bound. Engine v4
+removes that invented restriction while preserving raw scores, finite/range checks,
+exact options and a positive maximal winner. No normalization, lowered Noul gates
+or automatic retries are introduced.
+
+Applicability questions now consistently ask for positive evidence for a tentative
+musical impression or tabletop use. Descriptive metadata can contribute without
+proving the sound; isolated identity words and commands cannot. Shared suite v27
+supplies missing evidence in seven ambiguous positives and adds two safety pairs:
+Arctic geography cannot establish cold emotion, and a castle march cannot establish
+heroism. All original required tags, the 90% requirements, nine context-only cases,
+custom/200-tag coverage and strict safety repeats remain. There are now 65 scenarios
+and 15 repeats. No provider-specific easier certification is introduced.
+
+See [the updated decision record](ADR-026-native-jev-evidence-judgments.md) for the
+confirmed failure, revised evidence contract and official references. Existing
+analysis and accepted tags remain usable. Deployment must be followed by fresh
+conformance and the complete quality suite. Live Jev quality and independent
+listening are still unverified; overall progress remains approximately **80%**.
+
+Validation: all 570 Rust workspace tests pass with no skips, including the real
+FFmpeg and pinned optional voice-model fixtures. The 31 focused regressions cover
+rounded Choice totals through parsing, native HTTP and durable jobs; threshold
+preservation; strict invalid-answer checks; complete vocabulary and budget bounds;
+and blocking failures for the two new safety pairs. Workspace check, strict
+workspace/fuzz Clippy, formatting, architecture, doc tests, generated contracts and
+local documentation links pass. Frontend and wire shapes are unchanged. No paid
+provider calls, push or deployment were performed; live quality is not certified.
+
 ## Dedicated Jev evidence judgments — 27 September 2026
 
 The next owner export confirms conformance passed for pinned Jev 1.13.0, but quality
@@ -310,7 +343,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | Not used | Native v3: direct applicability Nouls, categorical period Choice, independent observation grounding and durable budgets | Rerun full quality on v3 and complete independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
+| TypeSafe Jev | Native v3 rejected approximate Choice totals; ambiguous applicability wording | Native v4: raw approximate Choice scores, direct evidence Nouls and independent grounding | Run full suite v27 and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |
@@ -700,7 +733,7 @@ provider setup and mood-tagging jobs. See the
 - One song per state; group definitions and every runtime tag's full semantics are
   included. Partition all **200 allowed application tags** under both context limits.
   The separate offline pilot's larger vocabulary cap is not the runtime limit.
-- Engine v3 uses a full period Choice plus an independent applicability Noul for its
+- Engine v4 uses a full period Choice plus an independent applicability Noul for its
   winner; other groups have one applicability Noul per tag. Complete definitions are
   inlined with each question. Choice probabilities and Nouls are not combined.
 - Up to eight candidates receive independent support/contradiction Nouls for each
@@ -717,8 +750,8 @@ provider setup and mood-tagging jobs. See the
   HTTP 401/422/429/529, submission timeout, budget rejection and restart uncertainty.
 
 The native engine is available for comparison once configured; conformance passed on the owner's
-deployed build, while live quality failed. Engine v3 and independent listening
-acceptance remain unverified. It consumes prepared textual evidence,
+deployed build, while live v3 quality failed. Engine v4 quality and independent
+listening acceptance remain unverified. It consumes prepared textual evidence,
 so it cannot supply musical information missing from that evidence. Do not loosen
 safety or equate extra tags with quality to obtain a passing demonstration.
 

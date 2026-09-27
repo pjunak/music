@@ -579,7 +579,7 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
                         let choice = if key == "period" {
                             criteria.iter().find(|(_, meaning)| meaning["name"] == "medieval").map_or("no_supported_period", |(id, _)| id.as_str())
                         } else { "no_supported_period" };
-                        json!({"type":"choice","choice":choice,"probabilities":criteria.keys().map(|id|(id.clone(),if id==choice{1.0}else{0.0})).collect::<BTreeMap<_,_>>(),"confidence":1.0})
+                        json!({"type":"choice","choice":choice,"probabilities":criteria.keys().map(|id|(id.clone(),if id==choice{0.98}else{0.004})).collect::<BTreeMap<_,_>>(),"confidence":1.0})
                     }
                 };
                 (key.clone(),value)

@@ -148,11 +148,14 @@ per-measurement context reliability. Full membership is validated before resolvi
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v3`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v4`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. Jev receives one song's actual observation cards without a track ID.
-Each question includes the complete group/tag meanings and direct literal judgment;
-there are no model-side lookups through a shared policy or vocabulary table.
+Each question includes the complete group/tag meanings and asks directly about positive
+evidence for a tentative tag. Mood asks about musical impression; setting/scene ask
+about a specific reason for tabletop use. Descriptive metadata can support a tag
+without proving how the recording sounds; isolated identity words cannot.
+There are no model-side lookups through a shared policy or vocabulary table.
 Cards retain original facts, reliability, missingness and the ending. Code adds
 low/medium/high thirds for normalized physical proxies, never inferred mood labels.
 
@@ -192,9 +195,13 @@ a negative Noul (<=0.10), and the correct descriptive Choice (>=0.90). Random
 challenges occur only in question IDs and are checked locally to reject mismatched
 answers; Jev is never asked to compare random strings. This follows its documented
 [semantic-versus-mechanical limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
-Strict parsing still rejects missing/extra answers, invalid distributions and model
-mismatches. Response errors distinguish malformed envelopes/answers, answer membership,
-wrong types, out-of-range probabilities, Choice membership, sum and winner failures. Distinct positive, negative and Choice failure codes persist through the
+Strict parsing rejects missing/extra answers, invalid scores and model mismatches.
+Choice validates every score in 0..1, exact option membership and a positive maximal
+winner. TypeSafe documents approximate probability sums without a rounding bound;
+we neither enforce an invented unit-sum tolerance nor normalize scores across a gate.
+An independent applicability Noul and grounded observation still qualify the period.
+Response errors distinguish malformed envelopes/answers, answer membership, wrong
+types, out-of-range probabilities and Choice membership/winner failures. Distinct positive, negative and Choice failure codes persist through the
 existing role record and appear on the task card, console and export after reload;
 no raw provider response or new store is added. Quality thresholds remain separate.
 Moving aliases, chat fields and thinking overrides are rejected. Native
@@ -205,7 +212,7 @@ before retaining an unbounded request plan. No generated-output allowance is sen
 fallback or remote Batch is supported. A native execution failure stops further
 quality calls, including safety reruns. Subsequent cases report not-run with the original
 error, retain their failed certification outcome and are counted separately in progress.
-The quality report identifies the native v3 engine; successful synthetic checks still do not
+The quality report identifies the native v4 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
 not local context or accepted tags. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
@@ -709,18 +716,21 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v26` uses 57 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v27` uses 59 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
 Each vocabulary group and the context-only subset (no descriptive metadata) must independently
 meet the existing 90% threshold; all blocking failures remain blocking. Seven added acoustic
 cases cover supported calm/urgent/chaotic impressions, gain invariance, conflicting endings,
-weak tempo and missing measurements. These fixtures do not establish listening accuracy. The thirteen safety scenarios are repeated once.
-Progress and the completed score both count 63 distinct scenarios; safety scenarios finish
-only after their rerun. Detailed progress reports the 76 individual checks separately from
+weak tempo and missing measurements. These fixtures do not establish listening accuracy. The fifteen safety scenarios are repeated once.
+Progress and the completed score both count 65 distinct scenarios; safety scenarios finish
+only after their rerun. Detailed progress reports the 80 individual checks separately from
 provider requests. Diagnostic retests label their selected subset explicitly.
-Suite v26 preserves the expected tags and quality gates while removing obsolete
-intensity/confidence input fields and requiring per-tag support and observation references.
+Suite v27 supplies explicit descriptive evidence for seven previously ambiguous
+positive cases while preserving their required tags. Two additional safety cases
+reject cold emotion inferred only from Arctic geography and heroism inferred only
+from a castle march. This shared benchmark is provider-neutral; native Jev transport
+regressions separately cover approximate Choice scores without easing semantic gates.
 Dedicated regressions check gain-invariant relative dynamics, later climaxes, withheld
 coarse tempo, source-bound catalog projection, missing/cross-track references and explicit
 abstention. The evaluation report is v9. These changes require fresh matching conformance

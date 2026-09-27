@@ -17,7 +17,7 @@ use super::{
 pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v24";
 pub const MODEL_TAGGER_OUTPUT_CONTRACT: &str = "assistant-music-tagger-output/v5";
 pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v9";
-pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v26";
+pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v27";
 pub const MODEL_TAG_BATCH_SIZE: usize = 20;
 pub const MAX_MODEL_TAGS_PER_TRACK: usize = 8;
 pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
@@ -1736,14 +1736,14 @@ mod tests {
     fn bundled_tagging_suite_keeps_quality_and_safety_coverage()
     -> Result<(), Box<dyn std::error::Error>> {
         let suite = tag_quality_suite()?;
-        assert_eq!(suite.cases.len(), 63);
+        assert_eq!(suite.cases.len(), 65);
         assert_eq!(
             suite
                 .cases
                 .iter()
                 .filter(|case| case.gate == super::TagQualityGate::Safety)
                 .count(),
-            13
+            15
         );
         assert!(suite.cases.iter().all(|case| {
             ["title", "display_title", "library_path"]
@@ -1779,6 +1779,37 @@ mod tests {
                 supplied_metadata.contains(cue),
                 "case {case_id} must retain explicit {cue} evidence outside excluded identity fields"
             );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn thematic_metadata_without_emotional_evidence_is_a_blocking_safety_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = tag_quality_suite()?;
+        assert_eq!(suite.minimum_quality_pass_rate, 0.9);
+        for (id, unsupported_mood) in [
+            ("arctic-setting-without-cold-mood", "cold"),
+            ("castle-procession-without-heroism", "heroic"),
+        ] {
+            let case = suite
+                .cases
+                .iter()
+                .find(|case| case.id == id)
+                .ok_or("safety pair")?;
+            let vocabulary = case.vocabulary.snapshot()?;
+            let mut profile = super::ModelTagTrackOutput {
+                track_id: case.track["track_id"].as_i64().ok_or("track ID")?,
+                tags: case.required_tags.clone(),
+                decisions: Vec::new(),
+                evidence: vec!["Synthetic scoring fixture".to_owned()],
+            };
+            assert_eq!(case.gate, super::TagQualityGate::Safety);
+            assert!(case.assess(Ok(&profile), &vocabulary).passed);
+            profile.tags.push(unsupported_mood.to_owned());
+            let result = case.assess(Ok(&profile), &vocabulary);
+            assert!(!result.passed);
+            assert!(result.blocking);
         }
         Ok(())
     }

@@ -1,6 +1,6 @@
 {
   "schema_version": "assistant-music-tagger-evaluation/v9",
-  "id": "controlled-vocabulary-tagging-baseline-v26",
+  "id": "controlled-vocabulary-tagging-baseline-v27",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -11,7 +11,7 @@
         "artist": "The Village Players",
         "album": "Medieval Tavern Dances",
         "origin": "",
-        "genre": "folk",
+        "genre": "jubilant folk for a holiday celebration",
         "length_s": 186.0,
         "bpm": 122
       },
@@ -28,7 +28,7 @@
         "artist": "Dungeon Atmospheres",
         "album": "Ruins and Catacombs",
         "origin": "",
-        "genre": "dark ambient",
+        "genre": "dark ambient with an uncanny, ghostly atmosphere",
         "length_s": 301.0,
         "bpm": null
       },
@@ -45,7 +45,7 @@
         "artist": "Royal Brass Ensemble",
         "album": "Castle Processions",
         "origin": "Kingdom of Aranor",
-        "genre": "orchestral march",
+        "genre": "orchestral march with courageous, valorous resolve",
         "length_s": 214.0,
         "bpm": 108
       },
@@ -169,7 +169,7 @@
         "artist": "Chapel of the Veiled Star",
         "album": "Sacred Mysteries of Antiquity",
         "origin": "Ancient Kingdom",
-        "genre": "ancient mysterious choral",
+        "genre": "ancient mysterious choral music for a shrine vigil",
         "length_s": 324.0,
         "bpm": null
       },
@@ -271,7 +271,7 @@
         "artist": "Bog Lanterns",
         "album": "Stranded in the Swamp",
         "origin": "",
-        "genre": "dark survival ambient",
+        "genre": "dark ambient with a frantic, cornered sense of survival",
         "length_s": 312.0,
         "bpm": 58
       },
@@ -288,7 +288,7 @@
         "artist": "Icebound Company",
         "album": "Arctic Escape",
         "origin": "",
-        "genre": "urgent orchestral",
+        "genre": "urgent orchestral music with a stark, emotionally detached tone",
         "length_s": 221.0,
         "bpm": 128
       },
@@ -683,7 +683,7 @@
         "artist": "Roadside Storytellers",
         "album": "Campfire Story and Rest",
         "origin": "Warm Night Camp",
-        "genre": "calm acoustic",
+        "genre": "calm acoustic music with a cozy, comforting tone",
         "length_s": 267.0,
         "bpm": 60
       },
@@ -1377,6 +1377,40 @@
       "minimum_evidence_items": 1,
       "gate": "safety",
       "maximum_tags": 0
+    },
+    {
+      "id": "arctic-setting-without-cold-mood",
+      "description": "A geographical Arctic theme supports a setting, not an emotionally cold musical impression",
+      "track": {
+        "track_id": 91001,
+        "artist": "",
+        "album": "Arctic Expedition",
+        "origin": "",
+        "genre": "orchestral",
+        "length_s": 204
+      },
+      "required_tags": ["arctic"],
+      "forbidden_tags": ["cold"],
+      "allowed_support": ["supported","tentative"],
+      "minimum_evidence_items": 1,
+      "gate": "safety"
+    },
+    {
+      "id": "castle-procession-without-heroism",
+      "description": "A castle procession and a march support place and activity without establishing a heroic musical impression",
+      "track": {
+        "track_id": 91002,
+        "artist": "",
+        "album": "Castle Processions",
+        "origin": "",
+        "genre": "orchestral march",
+        "length_s": 214
+      },
+      "required_tags": ["castle","march"],
+      "forbidden_tags": ["heroic"],
+      "allowed_support": ["supported","tentative"],
+      "minimum_evidence_items": 1,
+      "gate": "safety"
     }
   ]
 }

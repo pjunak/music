@@ -316,7 +316,7 @@ Use a small, representative sample before running across the whole library.
 After the application's deployment finishes successfully, refresh the page. If
 **TypeSafe Jev** is missing from the connection types, the deployed build does not
 contain the native adapter yet. The dedicated applicability/grounding strategy requires
-Jev engine v3; updating it makes old model/quality checks stale.
+Jev engine v4; updating it makes old model/quality checks stale.
 
 1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following
    its [quick start](https://docs.typesafe.ai/introduction/quickstart). No SDK or local
@@ -350,11 +350,22 @@ The application chooses the Jev primitive automatically:
   a candidate. Several sources can support the same tag. An observation judged both
   ways counts as a conflict; another supporting source is needed to retain the tag.
 
+Descriptive album, origin and genre observations can support tentative tags. Jev is
+asked about that evidence, with separate meanings for musical mood and session use.
+Artist names and unrelated facts cannot supply a missing musical impression.
+
 At most eight candidates are examined, including at most one period. Choice
 probabilities are not ranked against Noul scores. Tag match, concrete support and
 period Choice each have their own provisional 0.70 gate. All proposals require
 human review. Missing evidence can produce empty results; there is no default mood,
-automatic retry or silent engine fallback.
+automatic retry or silent engine fallback. Approximate Choice probabilities are used
+as reported, without a unit-sum rejection or normalization; the separate applicability
+and grounding gates still apply.
+
+The current quality suite has 65 scenarios and 15 safety repeats. It tests evidence
+interpretation and abstention; it does not test listening accuracy. Rerun the complete
+quality check after this update; an older report or selected-case retest cannot
+certify the new engine/suite. No audio reanalysis or API-key replacement is needed.
 
 An empty result now reports whether candidates reached grounding and includes bounded
 match scores. An invalid native response names the failed validation check. Quality

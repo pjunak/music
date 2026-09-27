@@ -158,6 +158,9 @@ pub fn typed_answers(
     if answers.keys().ne(request.questions.keys()) {
         return Err(ModelTaskError::new("typed_answer_set_mismatch"));
     }
+    // TypeSafe documents approximate Choice probabilities, without a rounding bound.
+    // Keep the reported scores: an invented sum tolerance or renormalization can
+    // reject a usable answer or promote a candidate across its application gate.
     for (key, question) in &request.questions {
         let error = match (question, &answers[key]) {
             (TypedQuestion::Noul { .. }, TypedAnswer::Noul { noul }) => {
@@ -177,12 +180,9 @@ pub fn typed_answers(
                     Some("typed_probability_invalid")
                 } else if criteria.keys().ne(probabilities.keys()) {
                     Some("typed_choice_options_mismatch")
-                } else if (probabilities.values().sum::<f64>() - 1.0).abs() > 0.0001 {
-                    Some("typed_choice_distribution_invalid")
-                } else if !probabilities
-                    .get(choice)
-                    .is_some_and(|selected| probabilities.values().all(|value| value <= selected))
-                {
+                } else if !probabilities.get(choice).is_some_and(|selected| {
+                    *selected > 0.0 && probabilities.values().all(|value| value <= selected)
+                }) {
                     Some("typed_choice_selection_invalid")
                 } else {
                     None
@@ -456,7 +456,33 @@ mod tests {
     }
 
     #[test]
-    fn typed_answers_reject_missing_extra_wrong_types_and_invalid_distributions()
+    fn typed_choice_accepts_approximate_probabilities_without_normalizing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = typed_conformance_request("nonce");
+        for scores in [
+            json!({"solo_singing":0.98,"instrumental_music":0.01,"silence":0.0}),
+            json!({"solo_singing":0.98,"instrumental_music":0.02,"silence":0.01}),
+            json!({"solo_singing":0.33,"instrumental_music":0.33,"silence":0.33}),
+            json!({"solo_singing":0.899,"instrumental_music":0.05,"silence":0.05}),
+        ] {
+            let mut raw = response("nonce");
+            raw["answers"]["choice_nonce"]["probabilities"] = scores.clone();
+            let result = parse_typesafe_response("jev-1.13.0", &request, raw)?;
+            assert_eq!(
+                result.payload.as_ref().ok_or("answers")?["choice_nonce"]["probabilities"],
+                scores
+            );
+            // Rounding acceptance must not lower conformance's semantic threshold.
+            assert_eq!(
+                validate_typed_conformance("nonce", &result).is_ok(),
+                scores["solo_singing"].as_f64().ok_or("score")? >= 0.9
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn typed_answers_reject_missing_extra_wrong_types_and_invalid_scores()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = typed_conformance_request("nonce");
         let valid = response("nonce")["answers"].clone();
@@ -501,8 +527,8 @@ mod tests {
             ),
             (
                 "/choice_nonce/probabilities",
-                json!({"solo_singing":0.8,"instrumental_music":0.1,"silence":0.0}),
-                "typed_choice_distribution_invalid",
+                json!({"solo_singing":0.0,"instrumental_music":0.0,"silence":0.0}),
+                "typed_choice_selection_invalid",
             ),
             (
                 "/choice_nonce/probabilities",
