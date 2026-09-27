@@ -56,7 +56,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 ts-rs = { version = "12.0.1", default-features = false, features = ["serde-compat"] }
 utoipa = { version = "5.5.0", default-features = false, features = ["macros"] }
-utoipa-axum = "0.2.0"
+utoipa-axum = "0.3.0"
 unicode-normalization = "0.1.25"
 unicode-casefold = "0.2.0"
 unicode-general-category = "1.1.0"
