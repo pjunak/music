@@ -34,7 +34,7 @@
     "@vitest/ui": "^4.1.11",
     "acorn": "^8.18.0",
     "jsdom": "^30.0.1",
-    "oxlint": "^1.82.0",
+    "oxlint": "^1.85.0",
     "oxlint-tsgolint": "^7.0.2003",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
