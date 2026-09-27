@@ -27,6 +27,20 @@ procession is not by itself courageous music; Arctic geography is not by itself
 an emotionally detached musical impression. The effect of revised questions on
 live model scores remains unmeasured.
 
+## Response compatibility follow-up
+
+A local audit against the current SDK contract found two further parser mismatches:
+nullable/omitted token counts and ignored extension fields. Both were reproduced as
+`typed_response_shape_invalid` before correction. They are separate from the unit-sum
+abort seen in the owner's export; no new live Jev failure is claimed.
+
+The adapter now accepts optional counts inside the required usage object and preserves
+unknowns. The existing ledger retains reservations, records which counts were reported,
+and marks incomplete totals in the UI. Additional envelope, usage and answer fields are
+discarded; only validated typed decisions are returned. Known required fields, exact
+question/option membership, the pinned model, score validity and semantic gates remain
+mandatory. This follows the current response contract, without a legacy fallback.
+
 ## Design decisions
 
 1. Keep a dedicated native engine behind the existing tagger interface. Share
@@ -74,7 +88,9 @@ are uncalibrated operating points, not measured music-tagging accuracy.
 Engine `music-jev-decisions/v4` replaces v3 without a compatibility path. Local
 regressions cover rounded Choice totals on both sides of one, ties, malformed
 scores/options/winners, threshold preservation, HTTP handling and durable multi-song
-execution. Existing full-vocabulary, evidence, abstention, numerical-context and
+execution. Additional regressions cover optional usage, discarded extensions, malformed
+known fields and durable accounting with unreported counts. Existing full-vocabulary,
+evidence, abstention, numerical-context and
 budget regressions remain. These are implementation checks, not a paid provider
 quality result. The [implementation log](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
 records completed validation for this batch.

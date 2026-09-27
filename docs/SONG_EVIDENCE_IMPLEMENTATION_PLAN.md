@@ -7,6 +7,29 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev response compatibility — 27 September 2026
+
+Continued the native API audit after the v4 repair. The documented SDK allows
+omitted/null token counts and ignores additional response fields; our parser
+rejected both as `typed_response_shape_invalid`. Dedicated regressions reproduced
+both failures before the fix. Counts now remain optional, and extra fields are
+discarded when validated answers are reconstructed. Missing question IDs, required
+fields, invalid scores, malformed reported counts and model mismatches still fail.
+
+Durable accounting retains the full reservation and explicitly marks missing usage,
+including on partially failed runs. The existing usage panel reports incomplete
+totals. There is no new UI, store, provider SDK, legacy path or automatic retry.
+Engine v4, suite v27, all prompts and all quality thresholds remain unchanged; the
+runtime fingerprint requires fresh acceptance after this adapter change.
+
+Validation: both new parser regressions failed before the fix; all 31 focused
+native tests and all 573 Rust workspace tests now pass, with no skips in the full
+suite. Real FFmpeg and the pinned optional voice model were enabled. Workspace
+check, strict workspace/fuzz Clippy, formatting, architecture, doc tests, generated
+contracts and 215 local documentation links pass. No new live provider result is
+available in this batch. Overall progress remains approximately **80%**; full Jev
+quality and independent listening remain the outstanding acceptance gates.
+
 ## Jev quality abort and evidence-contract repair — 27 September 2026
 
 The latest owner export reached 19 primary cases before our exact-sum Choice parser
@@ -343,7 +366,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | Native v3 rejected approximate Choice totals; ambiguous applicability wording | Native v4: raw approximate Choice scores, direct evidence Nouls and independent grounding | Run full suite v27 and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
+| TypeSafe Jev | Native v3 rejected approximate Choice totals; ambiguous applicability wording | Native v4: direct evidence Nouls, independent grounding, approximate Choice scores and optional usage; response extensions discarded | Run full suite v27 and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

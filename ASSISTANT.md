@@ -360,7 +360,9 @@ period Choice each have their own provisional 0.70 gate. All proposals require
 human review. Missing evidence can produce empty results; there is no default mood,
 automatic retry or silent engine fallback. Approximate Choice probabilities are used
 as reported, without a unit-sum rejection or normalization; the separate applicability
-and grounding gates still apply.
+and grounding gates still apply. A response can also omit token counts; valid tagging
+continues, and the usage panel marks totals as incomplete. Additional response fields
+are discarded rather than used as tag evidence.
 
 The current quality suite has 65 scenarios and 15 safety repeats. It tests evidence
 interpretation and abstention; it does not test listening accuracy. Rerun the complete

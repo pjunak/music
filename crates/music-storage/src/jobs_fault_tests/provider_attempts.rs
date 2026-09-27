@@ -550,6 +550,7 @@ async fn jev_checkpoint_failure_and_token_budget_prevent_network_work() -> TestR
 #[derive(Debug)]
 struct JevFixture {
     fail_second: bool,
+    omit_usage: bool,
     calls: AtomicUsize,
 }
 impl music_application::assistant::TypedDecisionTransport for JevFixture {
@@ -598,8 +599,8 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
                 payload: Some(if invalid { json!({}) } else { json!(answers) }),
                 provider_model_id: Some("jev-1.13.0".to_owned()),
                 finish_reason: None,
-                input_tokens: Some(40),
-                output_tokens: Some(5),
+                input_tokens: (!self.omit_usage).then_some(40),
+                output_tokens: (!self.omit_usage).then_some(5),
             }
         })
     }
@@ -679,7 +680,7 @@ impl JobHandler for JevHandler {
 #[tokio::test]
 async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_recordings()
 -> TestResult {
-    for fail_second in [false, true] {
+    for (fail_second, omit_usage) in [(false, false), (true, false), (false, true), (true, true)] {
         let directory = tempdir()?;
         let storage = Arc::new(
             SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("db"))).await?,
@@ -687,6 +688,7 @@ async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_rec
         let handler = Arc::new(JevHandler {
             transport: Arc::new(JevFixture {
                 fail_second,
+                omit_usage,
                 calls: AtomicUsize::new(0),
             }),
         });
@@ -727,7 +729,20 @@ async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_rec
             usage(&job)?["attempted_requests"],
             handler.transport.calls.load(Ordering::SeqCst)
         );
+        let calls = handler.transport.calls.load(Ordering::SeqCst);
+        let reported = if omit_usage { 0 } else { calls };
         assert_eq!(usage(&job)?["uncertain_requests"], 0);
+        assert_eq!(usage(&job)?["response_received_requests"], calls);
+        assert_eq!(usage(&job)?["responses_missing_usage"], calls - reported);
+        assert_eq!(usage(&job)?["input_tokens_reported_requests"], reported);
+        assert_eq!(usage(&job)?["output_tokens_reported_requests"], reported);
+        assert_eq!(usage(&job)?["input_tokens"], reported * 40);
+        assert_eq!(usage(&job)?["output_tokens"], reported * 5);
+        assert!(
+            usage(&job)?["reserved_tokens"]
+                .as_u64()
+                .is_some_and(|value| value > 0)
+        );
         if fail_second {
             assert_eq!(job.error.as_deref(), Some("typed_answer_set_mismatch"));
         }

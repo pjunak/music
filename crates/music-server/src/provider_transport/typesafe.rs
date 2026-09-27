@@ -199,6 +199,50 @@ mod tests {
         Ok(())
     }
     #[tokio::test]
+    async fn jev_partial_usage_and_extensions_do_not_reject_valid_decisions() -> TestResult {
+        for (usage, output) in [
+            (serde_json::json!({}), None),
+            (
+                serde_json::json!({"input_tokens":null,"output_tokens":9,"billing_extension":true}),
+                Some(9),
+            ),
+        ] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let count = calls.clone();
+            let app = Router::new().route("/v1/systemone", post(move || {
+                let usage = usage.clone();
+                let count = count.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Json(serde_json::json!({"model":"jev-1.13.0","response_metadata":"untrusted extension","answers":{
+                        "yes_nonce":{"type":"noul","noul":0.99,"explanation":"untrusted extension"},
+                        "no_nonce":{"type":"noul","noul":0.01},
+                        "choice_nonce":{"type":"choice","choice":"solo_singing","probabilities":{"solo_singing":0.98,"instrumental_music":0.01,"silence":0.02},"confidence":0.9,"provider_extension":true}
+                    },"usage":usage}))
+                }
+            }));
+            let (address, server) = server(app).await?;
+            let result = ProviderNetworkBoundary::new()
+                .execute_typed_request(&target(address), &typed_conformance_request("nonce"))
+                .await;
+            server.abort();
+            validate_typed_conformance("nonce", &result)?;
+            assert_eq!(result.outcome, ProviderAttemptOutcome::ResponseReceived);
+            assert_eq!(result.input_tokens, None);
+            assert_eq!(result.output_tokens, output);
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            let payload = result.payload.ok_or("answers")?;
+            assert_eq!(
+                payload["yes_nonce"],
+                serde_json::json!({"type":"noul","noul":0.99})
+            );
+            assert!(payload["choice_nonce"].get("provider_extension").is_none());
+            assert!(!payload.to_string().contains("untrusted extension"));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn jev_errors_are_not_retried_and_malformed_paid_answers_keep_usage() -> TestResult {
         for (status, code) in [
             (401, "unauthorized"),

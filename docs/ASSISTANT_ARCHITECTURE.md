@@ -200,6 +200,12 @@ Choice validates every score in 0..1, exact option membership and a positive max
 winner. TypeSafe documents approximate probability sums without a rounding bound;
 we neither enforce an invented unit-sum tolerance nor normalize scores across a gate.
 An independent applicability Noul and grounded observation still qualify the period.
+The envelope still requires model, answers and a usage object, but individual token
+counts may be omitted or null. Unreported counts remain unknown in the existing
+usage ledger; reservations are retained and missing-usage counters drive the UI.
+Additional envelope, usage and answer fields are ignored and discarded when answers
+are reconstructed from validated typed values. Unknown question IDs, missing answers,
+wrong primitives, invalid known fields and model mismatches still fail.
 Response errors distinguish malformed envelopes/answers, answer membership, wrong
 types, out-of-range probabilities and Choice membership/winner failures. Distinct positive, negative and Choice failure codes persist through the
 existing role record and appear on the task card, console and export after reload;

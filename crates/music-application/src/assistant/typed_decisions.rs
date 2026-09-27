@@ -128,8 +128,8 @@ impl TypedDecisionRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum TypedAnswer {
     Noul {
         noul: f64,
@@ -197,18 +197,18 @@ pub fn typed_answers(
     Ok(answers)
 }
 
+// The provider SDK ignores extension fields. Validate the fields we consume and
+// reconstruct answers below so ignored provider text never leaves this boundary.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TypeSafeResponse {
     model: String,
     answers: Value,
     usage: TypeSafeUsage,
 }
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct TypeSafeUsage {
-    input_tokens: u64,
-    output_tokens: u64,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
 }
 
 pub fn parse_typesafe_response(
@@ -221,17 +221,19 @@ pub fn parse_typesafe_response(
     if response.model != model {
         return Err(ModelTaskError::new("provider_model_mismatch"));
     }
-    typed_answers(request, response.answers.clone())?;
+    let answers = typed_answers(request, response.answers)?;
+    let payload = serde_json::to_value(answers)
+        .map_err(|_| ModelTaskError::new("typed_answer_shape_invalid"))?;
     Ok(StructuredModelResult {
         token_details: Default::default(),
         outcome: super::ProviderAttemptOutcome::ResponseReceived,
         succeeded: true,
         error_code: None,
-        payload: Some(response.answers),
+        payload: Some(payload),
         provider_model_id: Some(response.model),
         finish_reason: None,
-        input_tokens: Some(response.usage.input_tokens),
-        output_tokens: Some(response.usage.output_tokens),
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
     })
 }
 
@@ -456,6 +458,62 @@ mod tests {
     }
 
     #[test]
+    fn typed_response_preserves_optional_usage_without_failing_conformance()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = typed_conformance_request("nonce");
+        for (usage, input, output) in [
+            (json!({}), None, None),
+            (
+                json!({"input_tokens":null,"output_tokens":null}),
+                None,
+                None,
+            ),
+            (json!({"input_tokens":330}), Some(330), None),
+            (json!({"output_tokens":20}), None, Some(20)),
+            (
+                json!({"input_tokens":0,"output_tokens":0}),
+                Some(0),
+                Some(0),
+            ),
+        ] {
+            let mut raw = response("nonce");
+            raw["usage"] = usage;
+            let result = parse_typesafe_response("jev-1.13.0", &request, raw)?;
+            validate_typed_conformance("nonce", &result)?;
+            assert_eq!(result.input_tokens, input);
+            assert_eq!(result.output_tokens, output);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn typed_response_discards_extensions_without_changing_decisions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = typed_conformance_request("nonce");
+        let mut raw = response("nonce");
+        let expected = raw["answers"].clone();
+        raw["response_metadata"] = json!({"note":"untrusted extension"});
+        raw["usage"]["billing_extension"] = json!(123);
+        raw["answers"]["yes_nonce"]["explanation"] = json!("untrusted explanation");
+        raw["answers"]["choice_nonce"]["provider_extension"] = json!({"choice":"silence"});
+        let result = parse_typesafe_response("jev-1.13.0", &request, raw.clone())?;
+        validate_typed_conformance("nonce", &result)?;
+        assert_eq!(result.payload, Some(expected));
+        assert_eq!(result.input_tokens, Some(330));
+        assert_eq!(result.output_tokens, Some(20));
+        // Extensions never override or excuse a malformed field that we consume.
+        raw["answers"]["yes_nonce"]["noul"] = json!(2.0);
+        assert_eq!(
+            parse_typesafe_response("jev-1.13.0", &request, raw)
+                .err()
+                .ok_or("invalid score")?
+                .code,
+            "typed_probability_invalid"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn typed_choice_accepts_approximate_probabilities_without_normalizing()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = typed_conformance_request("nonce");
@@ -565,12 +623,39 @@ mod tests {
                 .code,
             "typed_answer_set_mismatch"
         );
+        for field in ["model", "answers", "usage"] {
+            let mut invalid_envelope = response("nonce");
+            invalid_envelope
+                .as_object_mut()
+                .ok_or("envelope")?
+                .remove(field);
+            assert_eq!(
+                parse_typesafe_response("jev-1.13.0", &request, invalid_envelope)
+                    .err()
+                    .ok_or("missing required field")?
+                    .code,
+                "typed_response_shape_invalid"
+            );
+        }
+        for field in ["input_tokens", "output_tokens"] {
+            for invalid in [json!(-1), json!(1.5), json!("20"), json!(true), json!([])] {
+                let mut invalid_envelope = response("nonce");
+                invalid_envelope["usage"][field] = invalid;
+                assert_eq!(
+                    parse_typesafe_response("jev-1.13.0", &request, invalid_envelope)
+                        .err()
+                        .ok_or("invalid token count")?
+                        .code,
+                    "typed_response_shape_invalid"
+                );
+            }
+        }
         let mut invalid_envelope = response("nonce");
-        invalid_envelope["injected"] = json!("unexpected");
+        invalid_envelope["usage"] = Value::Null;
         assert_eq!(
             parse_typesafe_response("jev-1.13.0", &request, invalid_envelope)
                 .err()
-                .ok_or("invalid envelope")?
+                .ok_or("usage must be an object")?
                 .code,
             "typed_response_shape_invalid"
         );
