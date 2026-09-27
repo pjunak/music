@@ -2,7 +2,7 @@
 
 Reviewed 27 September 2026 against the owner's latest Jev quality export and the official API/SDK contracts.
 
-## What the latest run establishes
+## Initial v3 failure
 
 Pinned jev-1.13.0 passed native conformance. Engine v3 received 90 responses,
 reporting 1,036,505 input and 57,544 output tokens. Nineteen primary cases completed;
@@ -80,10 +80,65 @@ inputs and expected tag remain unchanged. These handcrafted acoustic positives
 still require independent listening qualification; no measurements or owner labels
 were invented to make them pass.
 
-No additional model, database, legacy reader, automatic retry or paid comparison
-runner is introduced. Existing listening-pilot comparisons remain the route to
-measure real usefulness. The next live run must use v5 and the full v28 suite;
-prior v4 outcomes do not certify it.
+V5 introduced no additional model, database, legacy reader or automatic retry.
+Existing listening-pilot comparisons remain the route to measure real usefulness.
+The following paid investigation uses v5/v28 as its baseline; prior v4 outcomes
+do not certify either later engine.
+
+### Controlled framing repair: engine v6
+
+The owner's completed v5/v28 export passed 15/66 scenarios and returned only
+6/70 required mood assignments. All 269 requests completed, and all 16 safety
+checks passed. Of 100 missing required assignments, 94 failed initial matching,
+three failed period applicability and three failed grounding.
+
+A separately authorized 30-request experiment used six fixed synthetic cases,
+two selected initial Noul questions each and five framing variants. The model,
+definitions, underlying evidence and 0.70 gate stayed fixed. Scores below are
+single observations, not calibrated probabilities of a recording's mood:
+
+| Question/case | V5 baseline | Names only | Literal question | Neutral cards | Literal + neutral |
+|---|---:|---:|---:|---:|---:|
+| Festive / jubilant holiday folk | .57 | .59 | .87 | .84 | .96 |
+| Heroic / courageous, valorous resolve | .65 | .63 | .94 | .87 | .97 |
+| Castle / castle procession | .67 | .69 | .77 | .76 | .80 |
+| Heroic / same non-heroic procession | .45 | .49 | .38 | .59 | .39 |
+| Quiet focus / lamplit study | .70 | .69 | .94 | .62 | .92 |
+| Custom dark / reassuring low light | .79 | .80 | .96 | .86 | .96 |
+| Calm / settled acoustic proxies | .65 | .68 | .64 | .65 | .68 |
+
+The result supports a framing defect: the old question mixed whether supplied
+content expressed a definition with whether it independently established a
+recording's character. “Unverified” metadata-card wording contributed to that
+conservatism. Restoring display names alone did not resolve it. This small
+comparison did not test full-vocabulary interactions or grounding and does not
+show that every remaining miss has the same cause.
+
+V6 asks directly whether supplied descriptions or measurements express the
+definition, states that this is semantic matching rather than independent
+verification, and labels album/genre cards as supplied descriptions. It adopts
+the exact measured combined variant, including the criteria. Group scopes,
+definition/synonym meanings, excluded provenance, numerical facts, period Choice,
+candidate limits, all gates and observation grounding remain. Suggestions still
+carry tentative support and attributable evidence.
+
+Fresh conformance and the full unchanged v28 suite then completed: **44/66**
+scenarios, **16/16** safety, **60/70** required mood assignments, **4/5** custom
+and **6/9** context-only scenarios. Thirty scenarios improved; the redefined-label
+case regressed by adding an unsupported second custom tag. The model remains
+uncertified. See the [acceptance record](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27)
+for complete usage, remaining fixture contradictions and semantic failures.
+
+The developer-only `jev-compare` example creates offline, hash-bound plans and
+uses synthetic fixtures without application configuration or library access.
+Paid runs are explicit, bounded, checkpointed before I/O and never retried.
+Full evaluation reuses the native executor, durable SQLite jobs and shared scorer;
+it never publishes application acceptance. Initial-match variants identical to
+the current engine are omitted instead of spending requests on adopted changes.
+The v5 experiment's exact requests remain in its original local journal; there
+is no legacy production engine or replay of old generated analysis.
+
+### Shared inference rules
 
 1. Keep a dedicated native engine behind the existing tagger interface. Share
    consent, budgets, durable attempts, vocabulary validation and human review.
@@ -113,10 +168,10 @@ prior v4 outcomes do not certify it.
    Preserve every vocabulary entry, eight-candidate bounds, worst-case reservations
    and the no-automatic-retry rule. No SDK, service, cache or compatibility branch
    is introduced.
-8. Keep one shared quality benchmark for providers. Suite v27 gives seven ambiguous
+8. Keep one shared quality benchmark for providers. Suite v27 gave seven ambiguous
    positive cases explicit musical/theme evidence without removing required tags.
    Add paired safety cases rejecting geography-to-emotion and procession-to-heroism
-   guesses. All 65 cases, 15 safety repeats, full/custom/200-tag vocabularies and
+   guesses. V28 retains 66 cases, 16 safety repeats, full/custom/200-tag vocabularies and
    the separate nine-case context-only gate remain required. Native transport
    tests cover approximate scores separately from semantic quality.
 
@@ -127,20 +182,22 @@ are uncalibrated operating points, not measured music-tagging accuracy.
 
 ## Validation and adoption
 
-Engine `music-jev-decisions/v5` replaces v4 without a compatibility path. Local
+Engine `music-jev-decisions/v6` replaces v5 without a compatibility path. Local
 regressions cover rounded Choice totals on both sides of one, ties, malformed
 scores/options/winners, threshold preservation, HTTP handling and durable multi-song
 execution. Additional regressions cover optional usage, discarded extensions, malformed
 known fields and durable accounting with unreported counts. Existing full-vocabulary,
 evidence, abstention, numerical-context and
-budget regressions remain. These are implementation checks, not a paid provider
-quality result. The [implementation log](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
-records completed validation for this batch.
+budget regressions remain. The developer example also checks reviewed-plan identity,
+cost bounds, durable checkpoints and non-replay. The [implementation log](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
+records local validation; the separately identified paid result above still fails
+the unchanged quality gate.
 
-After deployment, refresh AI setup, rerun **Test and make available**, then run the
-complete v28 quality suite with pinned jev-1.13.0. An old or partial report cannot
-certify this engine/suite. If completed cases still miss supported tags, inspect
-those outcomes before further prompt changes. Adjust thresholds only with a separate
+After a subsequent measured repair and deployment, refresh AI setup, rerun
+**Test and make available**, then run the complete current quality suite with
+pinned jev-1.13.0. V6/v28 is known to fail; repeating it unchanged is not a repair.
+An old or partial report cannot certify a new engine/suite. Inspect the recorded
+outcomes before further prompt changes. Adjust thresholds only with a separate
 judged development cohort, not to fit this acceptance suite. Independent listening
 on the same original recordings remains necessary; synthetic metadata cannot
 establish musical accuracy. Current local audio context and accepted tags stay usable.

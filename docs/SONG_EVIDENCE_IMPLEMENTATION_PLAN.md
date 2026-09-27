@@ -1,11 +1,66 @@
 # Song evidence and mood tagging implementation plan
 
 Prepared 23 September 2026; clean-cutover scope reviewed against `music` commit `046f67e`.
-Status: core implementation complete; independent listening and production acceptance remain open. No model is certified.
+Status: core pipeline implemented; Jev quality repair, independent listening and production acceptance remain open. No model is certified.
 This turns the [research](SONG_EVIDENCE_RESEARCH.md) into dependency-ordered work.
 Public model specifications and current source were inspected; native compatibility,
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
+
+## Measured Jev framing repair — 27 September 2026
+
+The latest supplied v5/v28 export contains 15/66 passing scenarios, not 16. All
+269 requests completed and all 16 safety checks passed. It returned 59/159 required
+assignments, including only 6/70 moods. Ninety-four misses failed initial matching,
+three failed later period applicability and three failed grounding.
+
+Completed the authorized 30-request synthetic comparison, then implemented its
+measured literal-question/neutral-card combination as engine v6. Metadata meaning
+is judged separately from independent recording verification. Source attribution,
+tentative support, observation grounding, eight-candidate limits and all 0.70 gates
+remain. No old-engine fallback, automatic tag assignment or additional audio model
+was added. The console now separates passed scenarios from progress and totals
+missing required assignments by stage, including the period follow-up.
+
+The separately authorized fresh conformance and unchanged full v28 suite completed:
+**44/66 scenarios, 16/16 safety, 135/159 required assignments and 60/70 moods**.
+Custom vocabulary remains 4/5 and context-only remains 6/9. Thirty scenarios improved;
+one custom case regressed by returning an extra tag. The quality gate still fails.
+The full run used 289 requests and 3,258,025 reported input tokens, within the
+818-request/20-million conservative-unit cap, with no retry or uncertain request.
+The [acceptance record](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27)
+and [ADR](ADR-026-native-jev-evidence-judgments.md#controlled-framing-repair-engine-v6)
+preserve the results and distinguish confirmed defects from remaining hypotheses.
+
+The bounded developer example generates reviewable offline plans; paid runs use
+explicit hash/budget arguments and fresh journals. Full checks reuse the production
+planner/executor, durable attempts and scorer in an isolated local database, with
+no application acceptance writes. Adopted duplicate variants are omitted. This is
+development tooling, not a new production service, runtime or dataset platform.
+
+Next, in programming order:
+
+1. Correct four positive fixtures whose setting exists only in provenance, retaining
+   the same required tags and separate provenance-only negatives. Record a new suite
+   version; never retroactively rescore this unchanged v28 run as passing.
+2. Compare narrowly defined observation-support questions on development cases,
+   including explicit descriptors, contradictory evidence, complete custom criteria
+   and negative controls. Nine current required assignments pass matching but fail
+   grounding; another eight initial misses concern use/mood semantics. Further paid
+   tests need a separately reviewed plan.
+3. Qualify the three audio-only positive misses with independent listening and
+   useful upstream evidence. Do not force proxy-to-emotion rules or fabricate stronger
+   measurements to pass the suite.
+4. Re-run fresh conformance and the complete fixed suite after a measured repair,
+   then validate the real-music pilot and production resource/playback behavior.
+
+Validation: 579 Rust tests pass without skips, with real FFmpeg and the pinned
+optional voice model enabled; 380 frontend tests pass. Workspace check, strict
+workspace/fuzz Clippy, formatting, architecture, doc tests, generated contracts,
+frontend lint/typecheck/build and developer-example checks pass. No push or deployment
+occurred. Overall accepted-delivery progress remains approximately **80%**: the
+measured improvement is substantial, but synthetic quality and independent listening
+are still open gates.
 
 ## Jev evidence views and rejection diagnostics — 27 September 2026
 
@@ -414,7 +469,8 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | v4 completed 55/65; cues conflicted with safety expectations and partial results hid rejected scores | v5: definition-based questions, scoped evidence, gain-invariant musical requests and full quality traces | Fresh conformance, full v28 and independent listening comparison | Requested high priority: clearer evidence and diagnosable misses; live quality benefit and token savings remain unmeasured. |
+| TypeSafe Jev | v5 regressed to 15/66; 6/70 required moods returned | Measured v6 framing: 44/66, all 16 safety checks, 60/70 required moods; gate still fails | Repair fixture/grounding issues, revalidate, then independent listening | Requested high priority: semantic matching improved without lowering gates; audio-only recall and custom over-tagging still need work. |
+| Bounded Jev developer comparison/quality runner | Manual exported logs; no controlled framing experiment | Offline hash-bound plans, synthetic-only calls, durable attempts, shared scorer and rejection-stage totals | Keep for controlled investigations; no automatic paid runs | High debugging value: isolate one change, retain negative controls and stop uncertain cost; no production service or new dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

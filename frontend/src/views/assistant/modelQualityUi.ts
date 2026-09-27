@@ -63,6 +63,12 @@ const jevStages: Record<string, string> = {
   accepted: "accepted",
 };
 
+function jevStageLabel(tag: Record<string, unknown>): string | undefined {
+  if (typeof tag.status !== "string" || !Object.hasOwn(jevStages, tag.status)) return undefined;
+  return tag.status === "below_fit_threshold" && tag.group === "period"
+    ? "below period applicability threshold" : jevStages[tag.status];
+}
+
 function jevDiagnosticSummary(scenario: Record<string, unknown>, repeat: boolean): string | null {
   const trace = repeat ? scenario.safety_repeat_diagnostics : scenario.diagnostics;
   if (!isRecord(trace) || trace.schema_version !== "jev-tagging-diagnostics/v1" ||
@@ -86,15 +92,47 @@ function jevDiagnosticSummary(scenario: Record<string, unknown>, repeat: boolean
           scores.push(`conflict ${Math.max(...values.map((item) => item.conflict as number)).toFixed(3)}`);
         }
       }
-      return [`${tag.tag.slice(0, 64)}: ${jevStages[tag.status]}${scores.length ? ` (${scores.join(", ")})` : ""}`];
+      return [`${tag.tag.slice(0, 64)}: ${jevStageLabel(tag)}${scores.length ? ` (${scores.join(", ")})` : ""}`];
     });
   return details.length > 0 ? details.join("; ") : null;
+}
+
+export function jevRequiredTagSummary(evaluation: unknown): string | null {
+  if (!isRecord(evaluation) || typeof evaluation.engine_id !== "string" ||
+      !evaluation.engine_id.startsWith("music-jev-decisions/") || !Array.isArray(evaluation.cases)) return null;
+  let total = 0;
+  let returned = 0;
+  const stages = new Map<string, number>();
+  for (const scenario of evaluation.cases.slice(0, 100)) {
+    if (!isRecord(scenario) || !Array.isArray(scenario.required_tags) || !Array.isArray(scenario.tags)) continue;
+    const trace = scenario.diagnostics;
+    const traced = isRecord(trace) && trace.schema_version === "jev-tagging-diagnostics/v1" &&
+      Array.isArray(trace.tags) ? trace.tags.slice(0, 200) : [];
+    const required = new Set(scenario.required_tags.filter((tag): tag is string => typeof tag === "string").slice(0, 8));
+    for (const name of required) {
+      total++;
+      if (scenario.tags.includes(name)) { returned++; continue; }
+      const matches = traced.filter((tag) => isRecord(tag) && tag.tag === name);
+      const tag = matches.length === 1 ? matches[0] : undefined;
+      const stage = isRecord(tag)
+        ? tag.status === "accepted" ? "not returned after acceptance" : jevStageLabel(tag) ?? "diagnostic unavailable"
+        : "diagnostic unavailable";
+      stages.set(stage, (stages.get(stage) ?? 0) + 1);
+    }
+  }
+  if (total === 0) return null;
+  const missing = total - returned;
+  const breakdown = [...stages].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([stage, count]) => `${count} ${stage}`).join("; ");
+  return `Primary Jev results: ${returned}/${total} required tag assignments returned; ${missing} missing.${breakdown ? ` Missing assignments: ${breakdown}.` : ""} These are tag counts, separate from scenario scores and safety reruns.`;
 }
 
 export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvidenceNote[] {
   const evaluation = job?.result?.evaluation;
   if (!isRecord(evaluation)) return [];
   const notes: QualityEvidenceNote[] = [];
+  const jevSummary = jevRequiredTagSummary(evaluation);
+  if (jevSummary) notes.push({ id: "jev-required-tag-summary", tone: "info", message: jevSummary });
   const context = evaluation.context_only_results;
   if (isRecord(context) && typeof context.passed === "boolean" &&
       isCount(context.passed_cases) && isCount(context.total_cases) &&

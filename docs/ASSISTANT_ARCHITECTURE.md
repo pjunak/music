@@ -148,11 +148,14 @@ per-measurement context reliability. Full membership is validated before resolvi
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v5`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v6`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. Jev receives one song's actual observation cards without a track ID.
-Each question includes group meaning, the tag definition and its synonyms and asks directly about positive
-evidence for a tentative tag. Mood asks about musical impression; setting/scene ask
+Each question includes group meaning, the tag definition and its synonyms. Initial
+matching asks what the supplied descriptions or measurements express, separately
+from independent verification of the recording. Metadata cards identify supplied
+descriptions without treating unverified provenance as semantic absence. Grounding
+and tentative support remain separate. Mood asks about musical impression; setting/scene ask
 about a specific reason for tabletop use. Descriptive metadata can support a tag
 without proving how the recording sounds; isolated identity words cannot.
 Display labels stay in the application; changing a label does not change its semantic
@@ -203,7 +206,9 @@ states, every tag's raw fit or period score, candidate selection, per-observatio
 support/conflict scores and an application-owned decision stage. Pending stages
 distinguish incomplete execution from rejection. Primary and safety-repeat traces
 stay separate. Required tags are attached by the evaluator after execution and never
-enter provider input. The console summarizes required/candidate tags for failed cases;
+enter provider input. The console totals returned/missing required assignments by
+stage separately from scenario and safety scores, distinguishes later period
+applicability from initial multi-label matches, and summarizes required/candidate tags for failed cases;
 the JSON export retains every trace. Live song jobs do not store these quality traces.
 
 Discovery reads `models[].name`. The setup offers reviewed pinned `jev-1.13.0`
@@ -236,10 +241,11 @@ before retaining an unbounded request plan. No generated-output allowance is sen
 fallback or remote Batch is supported. A native execution failure stops further
 quality calls, including safety reruns. Subsequent cases report not-run with the original
 error, retain their failed certification outcome and are counted separately in progress.
-The quality report identifies the native v5 engine; successful synthetic checks still do not
+The quality report identifies the native v6 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
-not local context or accepted tags. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
+not local context or accepted tags. The [dated live validation](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27)
+improves recall but still fails the quality gate. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
 
 The context implementation is `local-context/v3+rustfft/v2+loudness/v2`.
 Loudness capture retains the bounded end of FFmpeg stderr so long embedded notes cannot

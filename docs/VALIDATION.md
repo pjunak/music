@@ -10,6 +10,7 @@ Read the relevant rows before choosing checks. CI/release coverage is unchanged.
 | Frontend behavior | Frontend lint, typecheck, tests and build; inspect affected visible flows. Rust gates apply when a server/wire contract also changes. |
 | Development audio references | `node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
 | Offline mood pilot | `node --test tools/mood-pilot.test.mjs`; affected frontend gates for exported files and controls. Exercise changed CLI operations, including prediction-free readiness and export handling. Private listening judgments remain separate acceptance evidence. |
+| Jev experiment tooling | `cargo test --locked -p music-server --example jev-compare`; inspect offline plans. Paid runs require an explicit reviewed plan and budget, never an automatic test or retry. |
 | HTTP/WS, schema, persistence, auth or shared playback | Affected Rust/frontend gates plus relevant client serialization, reconnect, failure and compatibility tests; coordinate Baton when its wire behavior changes. |
 | Dependencies, licenses or toolchains | Affected runtime gates plus deny/audit/machete for each changed dependency graph; preserve separate fuzz lockfile coverage. |
 | Fuzz sources/configuration | Fuzz formatting, Clippy and applicable dependency checks below. |
@@ -100,6 +101,32 @@ resampler parity. The optional graph/worker tests require the separately supplie
 licensed model in `MUSIC_TEST_VOICE_MODEL` and, for the worker, `MUSIC_TEST_FFMPEG`.
 The [dated reference notes](../crates/music-analysis/tests/fixtures/README.md#voice-decoding-and-ending-acceptance-25-september-2026)
 record which tests actually exercised those tools and their remaining acceptance limits.
+
+## Offline Jev investigation plans
+
+The developer-only [example](../crates/music-server/examples/jev-compare.rs) uses
+built-in synthetic cases and never loads application configuration or library data:
+
+```powershell
+cargo run --locked -p music-server --example jev-compare -- plan target/jev-framing-plan.json
+cargo run --locked -p music-server --example jev-compare -- quality-plan target/jev-quality-plan.json
+```
+
+Both commands are offline and refuse to overwrite their output. Initial-match
+plans omit variants identical to the current contract; the original 30-call v5
+comparison is a dated result, not the current plan. Full plans include conformance,
+the entire current quality suite, safety repeats, inference identity, scoring
+expectations and conservative total request/input bounds.
+
+After separate paid-run authorization, `run` or `quality-run` requires
+`--key-file` (a temporary secret outside source control), `--plan-sha256`,
+`--max-requests` and `--max-input-units`, plus a new `--output` journal or
+`--output-directory`. Use `--help` for the exact arguments. The full runner uses
+an isolated SQLite job database and the production planner/executor/scorer. A
+successfully completed job can still have `evaluation.passed: false`; neither
+command writes application acceptance. Stop after any uncertain request and
+inspect the saved journal; existing runs are never resumed or retried. See the
+[dated live results](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27).
 
 ## Frontend
 

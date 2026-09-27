@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BackgroundJob } from "@/core/api";
 import type { ModelQualityEvaluation } from "@/core/assistantProvidersApi";
-import { modelQualityView, qualityEvidenceNotes, qualityStatusLabel } from "./modelQualityUi";
+import { jevRequiredTagSummary, modelQualityView, qualityEvidenceNotes, qualityStatusLabel } from "./modelQualityUi";
 
 function job(evaluation: Record<string, unknown>): BackgroundJob {
   return {
@@ -15,6 +15,56 @@ function job(evaluation: Record<string, unknown>): BackgroundJob {
 }
 
 describe("quality evidence diagnostics", () => {
+  it("counts missing required assignments separately from scenarios and safety repeats", () => {
+    const evaluation = { engine_id: "music-jev-decisions/v5", cases: [{
+      id: "one", required_tags: ["calm", "rest", "rest"], tags: ["rest"],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "calm", status: "below_fit_threshold" }, { tag: "rest", status: "accepted" },
+      ] },
+      safety_repeat_tags: [], safety_repeat_diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [] },
+    }, {
+      id: "two", required_tags: ["warm"], tags: [],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [{ tag: "warm", status: "no_unambiguous_support" }] },
+    }] };
+    const summary = jevRequiredTagSummary(evaluation);
+    expect(summary).toContain("1/3 required tag assignments returned; 2 missing");
+    expect(summary).toContain("1 below tag-match threshold");
+    expect(summary).toContain("1 no unambiguous supporting observation");
+    expect(qualityEvidenceNotes(job(evaluation))[0]?.id).toBe("jev-required-tag-summary");
+  });
+
+  it("does not turn unfinished or ambiguous traces into semantic rejections", () => {
+    const summary = jevRequiredTagSummary({ engine_id: "music-jev-decisions/v5", cases: [{
+      required_tags: ["a", "b", "c", "d"], tags: [],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "a", status: "not_evaluated" },
+        { tag: "b", status: "invented" },
+        { tag: "c", status: "accepted" },
+        { tag: "d", status: "accepted" }, { tag: "d", status: "below_fit_threshold" },
+      ] },
+    }] });
+    expect(summary).toContain("0/4 required tag assignments returned; 4 missing");
+    expect(summary).toContain("1 not evaluated");
+    expect(summary).toContain("2 diagnostic unavailable");
+    expect(summary).toContain("1 not returned after acceptance");
+    expect(summary).not.toMatch(/invented|below tag-match/);
+    expect(jevRequiredTagSummary({ engine_id: "text-model", cases: [] })).toBeNull();
+  });
+
+  it("separates the period follow-up from the initial multi-label match", () => {
+    const evaluation = { engine_id: "music-jev-decisions/v5", cases: [{
+      id: "period", description: "Explicit modern music", required_tags: ["modern"],
+      tags: [], failures: ["Missing required tags: modern"],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "modern", group: "period", fit: 0.6, period_probability: 0.9,
+          candidate: true, status: "below_fit_threshold", grounding: [] },
+      ] },
+    }] };
+    expect(jevRequiredTagSummary(evaluation)).toContain("1 below period applicability threshold");
+    expect(qualityEvidenceNotes(job(evaluation))[1]?.message)
+      .toContain("modern: below period applicability threshold");
+  });
+
   it("explains a rejected required tag even when another tag was accepted", () => {
     const notes = qualityEvidenceNotes(job({ cases: [{
       id: "custom", description: "Redefined label", passed: false,

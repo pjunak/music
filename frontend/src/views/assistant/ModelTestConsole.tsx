@@ -341,7 +341,7 @@ function buildLogEntries(
           ? `Quality certification failed because the suite could not execute model requests. ${qualityExecutionFailureMessage(executionFailure)}`
           : gateSummary === null
           ? `Task quality passed ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios. Review the failures below.`
-          : `Quality gate failed after ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios: ${gateSummary.safetyPassedCases} of ${gateSummary.safetyTotalCases} safety checks and ${gateSummary.qualityPassedCases} of ${gateSummary.qualityTotalCases} scored checks (minimum ${Math.round(gateSummary.minimumQualityPassRate * 100)}%).`,
+          : `Quality gate failed: ${evaluation.passed_cases} of ${evaluation.total_cases} scenarios passed. Safety checks: ${gateSummary.safetyPassedCases} of ${gateSummary.safetyTotalCases}; scored checks: ${gateSummary.qualityPassedCases} of ${gateSummary.qualityTotalCases} (minimum ${Math.round(gateSummary.minimumQualityPassRate * 100)}%).`,
     });
   } else if (
     evaluation.status === "stale" ||

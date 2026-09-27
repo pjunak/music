@@ -1641,6 +1641,11 @@ describe("AssistantAiSetupView", () => {
       progress_current: 5,
       result: {
         evaluation: {
+          safety_passed_cases: 1,
+          safety_total_cases: 1,
+          quality_passed_cases: 3,
+          quality_total_cases: 5,
+          minimum_quality_pass_rate: 0.9,
           cases: [
             {
               id: "tavern-dance",
@@ -1684,8 +1689,9 @@ describe("AssistantAiSetupView", () => {
     render(<AssistantAiSetupView />);
 
     expect(
-      await screen.findByText(/Task quality passed 3 of 5 scenarios/),
+      await screen.findByText(/Quality gate failed: 3 of 5 scenarios passed/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/failed after 3 of 5/)).not.toBeInTheDocument();
     expect(
       screen.queryByText("Tavern dancing: recall_at_k below threshold"),
     ).not.toBeInTheDocument();

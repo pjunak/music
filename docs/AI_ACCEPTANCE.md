@@ -19,6 +19,76 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev controlled comparison and full validation: 2026-09-27
+
+Pinned `jev-1.13.0` was tested with explicitly authorized synthetic inputs only.
+The supplied completed v5/v28 export contains **15/66** passing scenarios (not
+16); all 269 requests received responses. Its 100 missing required assignments
+comprise 94 initial match rejections, three period applicability rejections and
+three grounding rejections. This was a semantic regression, not a transport failure.
+
+A 30-request comparison held six cases and two questions per case fixed while
+changing names, question wording and metadata-card framing separately. It reported
+35,259 input and 1,245 output tokens. Literal semantic questions plus neutral
+descriptive cards improved explicit descriptor matching; names alone did not.
+Engine v6 adopts that measured combination. The [ADR](ADR-026-native-jev-evidence-judgments.md#controlled-framing-repair-engine-v6)
+records the per-variant observations and their limits.
+
+Fresh conformance and the **unchanged** v28 suite then completed, including all
+66 scenarios and 16 safety repeats. This used the production native planner,
+executor, durable usage ledger and shared scorer in a new isolated SQLite database.
+The run made 289 requests, all with responses, using 13,892,745 conservative
+reserved input units. Jev reported 3,258,025 input and 216,283 output tokens.
+There were no retries, uncertain requests, missing usage or private-library inputs.
+The authorized caps were 818 requests and 20,000,000 conservative input units.
+
+| Result | Supplied v5 | Measured v6 |
+|---|---:|---:|
+| Passed scenarios | 15/66 (22.7%) | 44/66 (66.7%) |
+| Safety checks, including repeats | 16/16 | 16/16 |
+| Required tag assignments returned | 59/159 | 135/159 |
+| Required mood assignments returned | 6/70 | 60/70 |
+| Custom-vocabulary scenarios | 4/5 | 4/5 |
+| Context-only scenarios | 6/9 | 6/9 |
+| Full quality gate | Failed | Failed |
+
+Thirty scenarios improved and one regressed: the redefined custom `dark` case
+correctly returns that label but also returns `quiet focus`, exceeding its one-tag
+limit. Custom vocabulary has four passes in both runs, but the failing case changed.
+The 24 remaining missing assignments are 15 initial-match and nine grounding
+rejections; none is a period-follow-up or candidate-limit rejection.
+
+The remaining work has distinct causes:
+
+- Four positive setting expectations depend on `Origin`, which the current contract
+  treats as provenance: tavern in `metadata-prompt-injection`, ruins in
+  `melancholy-ruins-expedition`, village in `humorous-village-fair`, and temple in
+  `modern-temple-service`. Audit the fixtures and supply explicit descriptive
+  evidence in the positive cases, retaining separate provenance-only negatives.
+  Do not restore identity-to-setting guesses. These cases remain failed in this report.
+- Nine required assignments pass matching but fail grounding. For example, `calm`
+  in “Calm Wilderness Travel” matches at 0.82, but its two support scores are 0.62
+  and 0.67. The grounding question still mixes observation meaning with recording
+  context. A further controlled comparison is needed before claiming a repair.
+- Eight other initial-match misses concern use or mood semantics, including
+  `city` at 0.21 despite “Royal City Secrets and Conspiracies.” Audit definition
+  specificity and complete custom requirements alongside grounding; do not lower
+  thresholds or accept mere compatibility to improve recall.
+- The three audio-only misses remain both settled-texture variants (`calm`, 0.66)
+  and sustained drive (`urgent`, 0.31). The volatile-development positive passes.
+  These are handcrafted proxy fixtures, not independently labelled recordings.
+  Qualify their expected moods through the listening pilot and compare useful
+  upstream features before treating them as evidence of acoustic accuracy.
+
+The 90% quality thresholds, all safety rules, vocabulary cases and nine-case
+context gate were unchanged. No application certification was written. The results
+establish a substantial harness improvement, not a production-ready Jev model or
+listening accuracy. Original records remain locally under
+`target/jev-framing-results-20260927.jsonl` and
+`target/jev-quality-v6-20260927/result.json`; credentials and generated results are
+not tracked. Repeating or extending either paid experiment requires a new reviewed
+plan and authorization.
+
 ## Library cleanup checkpoint: 2026-09-14
 
 The supplied v1 exports used Thinking disabled. DeepSeek (`deepseek-flash`,

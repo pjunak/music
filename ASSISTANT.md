@@ -316,7 +316,10 @@ Use a small, representative sample before running across the whole library.
 After the application's deployment finishes successfully, refresh the page. If
 **TypeSafe Jev** is missing from the connection types, the deployed build does not
 contain the native adapter yet. The dedicated applicability/grounding strategy requires
-Jev engine v5; updating it makes old model/quality checks stale.
+Jev engine v6; updating it makes old model/quality checks stale. Its latest
+synthetic validation improves to 44/66 but still fails the quality gate. See the
+[dated result and remaining work](docs/AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27)
+before paying to repeat the unchanged configuration.
 
 1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following
    its [quick start](https://docs.typesafe.ai/introduction/quickstart). No SDK or local
@@ -352,7 +355,9 @@ The application chooses the Jev primitive automatically:
 
 Descriptive album and genre observations can support tentative tags. Origin names
 the source game, film or album; provenance alone does not describe the music.
-Jev judges definitions and synonyms, with separate criteria for musical mood and
+Jev first judges what those supplied descriptions mean, separately from whether
+they independently verify the recording. Grounding and human review still qualify
+the tentative suggestions. Jev judges definitions and synonyms, with separate criteria for musical mood and
 session use. Display labels and playlist-search cues stay out of its tag meanings.
 Absolute recording level and other non-supporting technical facts are omitted from
 musical questions. Custom groups retain factual inputs when their definitions need them.
@@ -372,11 +377,14 @@ interpretation and abstention; it does not test listening accuracy. Rerun the co
 quality check after this update; an older report or selected-case retest cannot
 certify the new engine/suite. No audio reanalysis or API-key replacement is needed.
 
-The quality log explains required tags' match, shortlist and evidence-check stages,
+The quality log totals required tag assignments returned and missing, with missing
+counts grouped by rejection stage. These counts are separate from passed scenarios
+and safety repeats. The log also explains required tags' match, shortlist and evidence-check stages,
 including tags missing from partially successful answers. **Copy JSON** includes every
 tag's scores, supporting/conflicting observation scores and the bounded evidence sent
 to Jev; primary and safety-repeat traces remain separate. Unfinished stages are marked
-explicitly. These diagnostics are recorded for synthetic tests, not stored for every song.
+explicitly; a period's later applicability rejection is distinct from the initial
+multi-label match. These diagnostics are recorded for synthetic tests, not stored for every song.
 An empty result also reports whether candidates reached grounding and includes bounded
 match scores. An invalid native response names the failed validation check. Quality
 cases skipped after it are marked **not run**, rather than presented as independent

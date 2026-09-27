@@ -571,7 +571,8 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
             let answers=request.questions.iter().map(|(key,question)| {
                 let value=match question {
                     music_application::assistant::TypedQuestion::Noul{instructions,..}=>{
-                        let matching_tag = ["Active battle, confrontation, attack, or martial conflict.", "Pre-modern European courtly, folk, or feudal atmosphere."].iter().any(|definition| instructions["tag"]["definition"] == *definition);
+                        let meaning = instructions.get("definition").unwrap_or(&instructions["tag"]);
+                        let matching_tag = ["Active battle, confrontation, attack, or martial conflict.", "Pre-modern European courtly, folk, or feudal atmosphere."].iter().any(|definition| meaning["definition"] == *definition);
                         let support = !key.starts_with("conflict_") && matching_tag
                             && (!key.starts_with("support_") || instructions["observation"]["id"] == "metadata.genre");
                         json!({"type":"noul","noul":if support {0.95}else{0.05}})
