@@ -316,7 +316,7 @@ Use a small, representative sample before running across the whole library.
 After the application's deployment finishes successfully, refresh the page. If
 **TypeSafe Jev** is missing from the connection types, the deployed build does not
 contain the native adapter yet. The dedicated applicability/grounding strategy requires
-Jev engine v4; updating it makes old model/quality checks stale.
+Jev engine v5; updating it makes old model/quality checks stale.
 
 1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following
    its [quick start](https://docs.typesafe.ai/introduction/quickstart). No SDK or local
@@ -350,9 +350,12 @@ The application chooses the Jev primitive automatically:
   a candidate. Several sources can support the same tag. An observation judged both
   ways counts as a conflict; another supporting source is needed to retain the tag.
 
-Descriptive album, origin and genre observations can support tentative tags. Jev is
-asked about that evidence, with separate meanings for musical mood and session use.
-Artist names and unrelated facts cannot supply a missing musical impression.
+Descriptive album and genre observations can support tentative tags. Origin names
+the source game, film or album; provenance alone does not describe the music.
+Jev judges definitions and synonyms, with separate criteria for musical mood and
+session use. Display labels and playlist-search cues stay out of its tag meanings.
+Absolute recording level and other non-supporting technical facts are omitted from
+musical questions. Custom groups retain factual inputs when their definitions need them.
 
 At most eight candidates are examined, including at most one period. Choice
 probabilities are not ranked against Noul scores. Tag match, concrete support and
@@ -364,12 +367,17 @@ and grounding gates still apply. A response can also omit token counts; valid ta
 continues, and the usage panel marks totals as incomplete. Additional response fields
 are discarded rather than used as tag evidence.
 
-The current quality suite has 65 scenarios and 15 safety repeats. It tests evidence
+The current quality suite has 66 scenarios and 16 safety repeats. It tests evidence
 interpretation and abstention; it does not test listening accuracy. Rerun the complete
 quality check after this update; an older report or selected-case retest cannot
 certify the new engine/suite. No audio reanalysis or API-key replacement is needed.
 
-An empty result now reports whether candidates reached grounding and includes bounded
+The quality log explains required tags' match, shortlist and evidence-check stages,
+including tags missing from partially successful answers. **Copy JSON** includes every
+tag's scores, supporting/conflicting observation scores and the bounded evidence sent
+to Jev; primary and safety-repeat traces remain separate. Unfinished stages are marked
+explicitly. These diagnostics are recorded for synthetic tests, not stored for every song.
+An empty result also reports whether candidates reached grounding and includes bounded
 match scores. An invalid native response names the failed validation check. Quality
 cases skipped after it are marked **not run**, rather than presented as independent
 model judgments; they still prevent certification. Export a failed run for diagnosis

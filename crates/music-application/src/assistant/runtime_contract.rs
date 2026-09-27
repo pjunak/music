@@ -115,6 +115,10 @@ const ASSISTANT_RUNTIME_ARTIFACTS: &[(&str, &str)] = &[
     ("assistant/model_tagger.rs", include_str!("model_tagger.rs")),
     ("assistant/model_jev.rs", include_str!("model_jev.rs")),
     (
+        "assistant/model_jev/diagnostics.rs",
+        include_str!("model_jev/diagnostics.rs"),
+    ),
+    (
         "assistant/typed_decisions.rs",
         include_str!("typed_decisions.rs"),
     ),
@@ -234,6 +238,7 @@ fn artifact_affects_role(name: &str, role: &str) -> bool {
         | "assistant/evaluation_suites/playlist-local-v1.json"
         | "assistant/evaluation_suites/playlist-model-v1.json" => role == "playlist_planner",
         "assistant/model_jev.rs"
+        | "assistant/model_jev/diagnostics.rs"
         | "assistant/typed_decisions.rs"
         | "assistant/song_evidence.rs"
         | "assistant/model_tagger.rs"

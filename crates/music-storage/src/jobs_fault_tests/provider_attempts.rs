@@ -571,14 +571,14 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
             let answers=request.questions.iter().map(|(key,question)| {
                 let value=match question {
                     music_application::assistant::TypedQuestion::Noul{instructions,..}=>{
-                        let matching_tag = ["combat", "medieval"].iter().any(|name| instructions["tag"]["name"] == *name);
+                        let matching_tag = ["Active battle, confrontation, attack, or martial conflict.", "Pre-modern European courtly, folk, or feudal atmosphere."].iter().any(|definition| instructions["tag"]["definition"] == *definition);
                         let support = !key.starts_with("conflict_") && matching_tag
                             && (!key.starts_with("support_") || instructions["observation"]["id"] == "metadata.genre");
                         json!({"type":"noul","noul":if support {0.95}else{0.05}})
                     },
                     music_application::assistant::TypedQuestion::Choice{criteria,..}=>{
                         let choice = if key == "period" {
-                            criteria.iter().find(|(_, meaning)| meaning["name"] == "medieval").map_or("no_supported_period", |(id, _)| id.as_str())
+                            criteria.iter().find(|(_, meaning)| meaning["definition"] == "Pre-modern European courtly, folk, or feudal atmosphere.").map_or("no_supported_period", |(id, _)| id.as_str())
                         } else { "no_supported_period" };
                         json!({"type":"choice","choice":choice,"probabilities":criteria.keys().map(|id|(id.clone(),if id==choice{0.98}else{0.004})).collect::<BTreeMap<_,_>>(),"confidence":1.0})
                     }
@@ -658,13 +658,27 @@ impl JobHandler for JevHandler {
             usage.limit_token_reservation(tasks.iter().map(|task| task.token_reservation).sum());
             let mut completed = Vec::new();
             for task in tasks {
-                let results = task
-                    .execute(context, &role, self.transport.as_ref(), &mut usage)
-                    .await?
-                    .map_err(|error| JobHandlerError::new(error.code))?;
+                let mut diagnostics = task.diagnostics();
+                let outcome = task
+                    .execute(
+                        context,
+                        &role,
+                        self.transport.as_ref(),
+                        &mut usage,
+                        Some(&mut diagnostics),
+                    )
+                    .await?;
+                let trace = serde_json::to_value(&diagnostics)
+                    .map_err(|_| JobHandlerError::new("trace"))?;
+                if outcome.is_err() {
+                    assert!(trace["tags"].as_array().is_some_and(|tags| tags.iter().any(
+                        |tag| tag["candidate"] == true && tag["status"] == "grounding_pending"
+                    )));
+                }
+                let results = outcome.map_err(|error| JobHandlerError::new(error.code))?;
                 for (id, result) in results {
                     completed.push(
-                        json!({"track_id":id,"tags":result.tags,"decisions":result.decisions}),
+                        json!({"track_id":id,"tags":result.tags,"decisions":result.decisions,"diagnostics":trace}),
                     );
                 }
                 usage.set_feature_progress(json!({"track_results":completed}));
@@ -721,6 +735,17 @@ async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_rec
         assert_eq!(tags.len(), 2);
         assert!(tags.contains(&json!("combat")));
         assert!(tags.contains(&json!("medieval")));
+        let diagnostics = tracks[0]["diagnostics"]["tags"]
+            .as_array()
+            .ok_or("tag diagnostics")?;
+        assert!(diagnostics.iter().any(|tag| tag["tag"] == "combat"
+            && tag["status"] == "accepted"
+            && tag["fit"] == 0.95));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|tag| tag["status"] == "below_fit_threshold")
+        );
         assert_eq!(
             tracks[0]["decisions"][0]["evidence_ids"],
             json!(["metadata.genre"])

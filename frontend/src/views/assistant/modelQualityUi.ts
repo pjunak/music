@@ -46,6 +46,51 @@ function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
+function probability(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+const jevStages: Record<string, string> = {
+  no_eligible_evidence: "no eligible evidence",
+  not_evaluated: "not evaluated",
+  assessment_pending: "assessment incomplete",
+  below_fit_threshold: "below tag-match threshold",
+  candidate_limit: "outside candidate limit",
+  period_not_selected: "another period or none selected",
+  below_period_threshold: "below period threshold",
+  grounding_pending: "evidence check incomplete",
+  no_unambiguous_support: "no unambiguous supporting observation",
+  accepted: "accepted",
+};
+
+function jevDiagnosticSummary(scenario: Record<string, unknown>, repeat: boolean): string | null {
+  const trace = repeat ? scenario.safety_repeat_diagnostics : scenario.diagnostics;
+  if (!isRecord(trace) || trace.schema_version !== "jev-tagging-diagnostics/v1" ||
+      !Array.isArray(trace.tags)) return null;
+  const required = new Set(Array.isArray(scenario.required_tags)
+    ? scenario.required_tags.filter((tag): tag is string => typeof tag === "string").slice(0, 8)
+    : []);
+  const details = trace.tags.slice(0, 200).filter((tag) =>
+    isRecord(tag) && (required.has(String(tag.tag)) || tag.candidate === true))
+    .slice(0, 16).flatMap((tag) => {
+      if (!isRecord(tag) || typeof tag.tag !== "string" || typeof tag.status !== "string" ||
+          !Object.hasOwn(jevStages, tag.status)) return [];
+      const scores: string[] = [];
+      if (probability(tag.fit)) scores.push(`match ${tag.fit.toFixed(3)}`);
+      if (probability(tag.period_probability)) scores.push(`period ${tag.period_probability.toFixed(3)}`);
+      if (Array.isArray(tag.grounding) && tag.grounding.length > 0) {
+        const values = tag.grounding.slice(0, 512).filter((item) =>
+          isRecord(item) && probability(item.support) && probability(item.conflict));
+        if (values.length > 0) {
+          scores.push(`support ${Math.max(...values.map((item) => item.support as number)).toFixed(3)}`);
+          scores.push(`conflict ${Math.max(...values.map((item) => item.conflict as number)).toFixed(3)}`);
+        }
+      }
+      return [`${tag.tag.slice(0, 64)}: ${jevStages[tag.status]}${scores.length ? ` (${scores.join(", ")})` : ""}`];
+    });
+  return details.length > 0 ? details.join("; ") : null;
+}
+
 export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvidenceNote[] {
   const evaluation = job?.result?.evaluation;
   if (!isRecord(evaluation)) return [];
@@ -84,7 +129,14 @@ export function qualityEvidenceNotes(job: BackgroundJob | undefined): QualityEvi
       for (const repeat of [false, true]) {
         const failures = repeat ? scenario.safety_repeat_failures : scenario.failures;
         const evidence = repeat ? scenario.safety_repeat_evidence : scenario.evidence;
-        if (!Array.isArray(failures) || failures.length === 0 || !Array.isArray(evidence)) continue;
+        if (!Array.isArray(failures) || failures.length === 0) continue;
+        const diagnostic = jevDiagnosticSummary(scenario, repeat);
+        if (diagnostic) notes.push({
+          id: `jev-diagnostics-${scenario.id}${repeat ? "-repeat" : ""}`,
+          tone: "info",
+          message: `${scenario.description}${repeat ? " (safety rerun)" : ""}. Jev decision stages: ${diagnostic}. Scores are uncalibrated; full evidence and all tag decisions are in the JSON export.`,
+        });
+        if (!Array.isArray(evidence)) continue;
         const reasons = evidence.filter((item): item is string => typeof item === "string")
           .slice(0, 4).map((item) => item.slice(0, 512));
         if (reasons.length === 0) continue;

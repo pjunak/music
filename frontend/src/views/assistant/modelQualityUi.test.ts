@@ -15,6 +15,54 @@ function job(evaluation: Record<string, unknown>): BackgroundJob {
 }
 
 describe("quality evidence diagnostics", () => {
+  it("explains a rejected required tag even when another tag was accepted", () => {
+    const notes = qualityEvidenceNotes(job({ cases: [{
+      id: "custom", description: "Redefined label", passed: false,
+      required_tags: ["dark"], tags: ["quiet focus"], failures: ["Missing required tags: dark"],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "dark", candidate: false, fit: 0.65, status: "below_fit_threshold", grounding: [] },
+        { tag: "quiet focus", candidate: true, fit: 0.73, status: "accepted", grounding: [{ support: 0.85, conflict: 0.01 }] },
+        { tag: "irrelevant", candidate: false, fit: 0.1, status: "below_fit_threshold", grounding: [] },
+      ] },
+    }] }));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.message).toContain("dark: below tag-match threshold (match 0.650)");
+    expect(notes[0]?.message).toContain("quiet focus: accepted (match 0.730, support 0.850, conflict 0.010)");
+    expect(notes[0]?.message).not.toContain("irrelevant");
+    expect(notes[0]?.message).toContain("uncalibrated");
+  });
+
+  it("keeps safety-repeat traces separate and explains shortlist and grounding failures", () => {
+    const notes = qualityEvidenceNotes(job({ cases: [{
+      id: "safety", description: "Safety", required_tags: ["calm", "rest"],
+      failures: ["Missing required tags"], safety_repeat_failures: ["Missing required tags"],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "calm", candidate: false, fit: 0.72, status: "candidate_limit", grounding: [] },
+      ] },
+      safety_repeat_diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "rest", candidate: true, fit: 0.8, status: "no_unambiguous_support", grounding: [{ support: 0.9, conflict: 0.91 }] },
+      ] },
+    }] }));
+    expect(notes).toHaveLength(2);
+    expect(notes[0]?.message).toContain("calm: outside candidate limit");
+    expect(notes[1]?.message).toContain("(safety rerun)");
+    expect(notes[1]?.message).toContain("no unambiguous supporting observation");
+    expect(notes[1]?.message).toContain("conflict 0.910");
+  });
+
+  it("ignores malformed diagnostic stages and out-of-range probabilities", () => {
+    const notes = qualityEvidenceNotes(job({ cases: [{
+      id: "invalid", description: "Invalid", required_tags: ["calm"], failures: ["Failed"],
+      diagnostics: { schema_version: "jev-tagging-diagnostics/v1", tags: [
+        { tag: "calm", candidate: false, fit: -1, period_probability: 2, status: "not_evaluated", grounding: [{ support: Infinity, conflict: NaN }] },
+        { tag: "bad", candidate: true, status: "invented" },
+      ] },
+    }] }));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.message).toContain("calm: not evaluated");
+    expect(notes[0]?.message).not.toMatch(/Infinity|NaN|invented|match -1/);
+  });
+
   it("explains the whole-case requirement behind the context-only failure", () => {
     const notes = qualityEvidenceNotes(job({
       minimum_quality_pass_rate: 0.9,

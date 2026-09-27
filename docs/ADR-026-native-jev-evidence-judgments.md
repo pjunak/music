@@ -43,13 +43,55 @@ mandatory. This follows the current response contract, without a legacy fallback
 
 ## Design decisions
 
+### Completed-run follow-up: engine v5
+
+The owner's 27 September v4/v27 export completes all 65 scenarios and 15 repeats:
+55/65 pass, including 14/15 safety, 4/5 custom and 6/9 context-only cases. All 418
+requests received responses, reporting 5,081,125 input tokens. This is a completed
+semantic failure, not another transport abort. It is not a listening-accuracy result.
+
+The heroic negative case exposes conflicting criteria: the bundled vocabulary sends
+"royal procession" as a heroic context cue, then the test forbids that association.
+Heroic scores 0.76 in both attempts. The origin-only castle expectation is also
+ambiguous: Origin is a game/film/album provenance field. The urgent acoustic case
+describes a fast pulse even though normalization withholds coarse tempo. Rejected
+tag scores are absent when other tags were accepted, limiting further diagnosis.
+
+V5 supplies definitions and synonyms without display names or retrieval context
+cues. Mood, use and period have aligned, distinct positive criteria. Musical
+questions omit identities, absolute recording level and other non-supporting
+technical facts; custom groups retain the facts their definitions may concern.
+Coverage qualifies the input and measurement reliability stays on acoustic cards.
+Questions sharing a view are batched. The maximum frame in each group bounds
+grounding budgets; the eight-candidate limit and all 0.70 gates remain unchanged.
+
+Quality-only diagnostics retain bounded provider states and every tag's fit,
+period probability, shortlist outcome, grounding scores and decision stage, even
+for partially successful or interrupted cases. Required tags are added by the
+evaluator after execution, never sent to Jev. Safety-repeat traces remain separate.
+Scores describe model judgments; multiple supporting observations are not presented
+as independent verification. The existing console and JSON export own this output.
+
+Suite v28 preserves every prior required tag and all acceptance thresholds. It
+supplies the castle use in the positive case's album and adds a provenance-only
+negative case: 66 scenarios, 16 safety repeats and nine context-only cases. The
+urgent fixture's description now matches the actual supplied proxies. Its numerical
+inputs and expected tag remain unchanged. These handcrafted acoustic positives
+still require independent listening qualification; no measurements or owner labels
+were invented to make them pass.
+
+No additional model, database, legacy reader, automatic retry or paid comparison
+runner is introduced. Existing listening-pilot comparisons remain the route to
+measure real usefulness. The next live run must use v5 and the full v28 suite;
+prior v4 outcomes do not certify it.
+
 1. Keep a dedicated native engine behind the existing tagger interface. Share
    consent, budgets, durable attempts, vocabulary validation and human review.
    Jev receives text facts and never receives audio or generates explanations.
-2. Put each complete tag and group meaning beside a literal evidence question.
+2. Put each tag definition/synonyms and group meaning beside a literal evidence question.
    Mood concerns a musical impression; setting/scene concern reasons for tabletop
    use. Descriptive metadata can support a tentative tag without proving how the
-   recording sounds. Isolated artist/company names and embedded commands cannot.
+   recording sounds. Isolated artist/company/source names and embedded commands cannot.
 3. Use independent applicability Nouls for non-period tags. Several tags may qualify,
    or none. Keep one full-vocabulary period Choice with an explicit none option,
    followed by an absolute applicability Noul for its winner. Never rank Choice
@@ -58,7 +100,7 @@ mandatory. This follows the current response contract, without a legacy fallback
    a score across an acceptance threshold. The independent Noul and grounding
    remain necessary even when a Choice passes parsing.
 4. Ground candidates with independent support and contradiction Nouls per actual
-   observation. Inline its content and meaning. Several sources can support a tag;
+   eligible observation. Inline its content and meaning. Several sources can support a tag;
    they do not compete for probability. No abstract sufficiency question remains.
 5. If an observation is judged both supporting and contradictory, retain it as a
    conflict. Require another unambiguous supporting observation or abstain.
@@ -85,7 +127,7 @@ are uncalibrated operating points, not measured music-tagging accuracy.
 
 ## Validation and adoption
 
-Engine `music-jev-decisions/v4` replaces v3 without a compatibility path. Local
+Engine `music-jev-decisions/v5` replaces v4 without a compatibility path. Local
 regressions cover rounded Choice totals on both sides of one, ties, malformed
 scores/options/winners, threshold preservation, HTTP handling and durable multi-song
 execution. Additional regressions cover optional usage, discarded extensions, malformed
@@ -96,7 +138,7 @@ quality result. The [implementation log](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md)
 records completed validation for this batch.
 
 After deployment, refresh AI setup, rerun **Test and make available**, then run the
-complete new quality suite with pinned jev-1.13.0. An old or partial report cannot
+complete v28 quality suite with pinned jev-1.13.0. An old or partial report cannot
 certify this engine/suite. If completed cases still miss supported tags, inspect
 those outcomes before further prompt changes. Adjust thresholds only with a separate
 judged development cohort, not to fit this acceptance suite. Independent listening

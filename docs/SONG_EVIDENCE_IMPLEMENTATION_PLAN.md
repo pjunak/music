@@ -7,6 +7,54 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev evidence views and rejection diagnostics — 27 September 2026
+
+The owner's completed v4/v27 run passes 55/65 scenarios, with 14/15 safety,
+4/5 custom-vocabulary and 6/9 context-only passes. All 418 requests received
+responses, reporting 5,081,125 input tokens. The remaining issues concern evidence
+and semantics, not another transport abort; this result does not measure listening
+accuracy.
+
+Implemented engine v5 with definitions/synonyms instead of display names and
+retrieval associations. Mood, use and period questions have consistent, separate
+criteria. Musical questions exclude identity/provenance, absolute recording level
+and non-supporting technical fields; custom definitions retain their factual input
+view. Coverage qualifies evidence and measurement reliability stays beside acoustic
+observations, including sections and endings. Original facts stay in local profiles.
+Questions share requests only within the same view, with conservative group-specific
+worst-case reservations and the existing eight-candidate bound.
+
+Quality report v10 adds bounded request states and every tag's fit, period score,
+candidate status, observation support/conflict scores and final/pending decision
+stage. Required tags are attached after execution. The existing test console
+summarizes failures and its JSON export includes all primary/repeat traces. Live
+song jobs do not persist these diagnostic traces. No new store, model, legacy
+reader, automatic retry or external comparison service is added.
+
+Shared input v25 clarifies that Origin is provenance. Suite v28 supplies an explicit
+castle-use album description and a separate provenance-name-only negative case:
+66 scenarios and 16 repeats. All previous required tags, the 90% thresholds, custom/
+200-tag coverage and nine-case context-only gate remain. The urgent fixture's prose
+now describes the supplied proxies rather than a withheld pulse. Its expected label
+and measurements remain unchanged. Independent listening must qualify these acoustic
+positives; no stronger measurements or listening judgments were invented.
+
+Validation: all 579 Rust workspace tests pass without skips, with real FFmpeg and
+the pinned optional voice model enabled; all 377 frontend tests pass. Workspace
+check, strict workspace/fuzz Clippy, formatting, architecture, doc tests, generated
+contracts, frontend lint/typecheck/build and 139 local documentation links pass.
+The 17 native-engine regressions include label/cue invariance, gain-only request
+identity, preserved endings/reliability, scoped custom facts, rejection stages,
+period gates, separate primary/repeat traces and worst-case request budgets.
+Durable execution tests also retain partial diagnostics on a rejected response.
+A mechanical comparison confirms all 65 original scenarios retain every required/
+forbidden tag, maximum, support constraint and gate.
+
+Fresh pinned Jev conformance, full v28 quality and independent listening remain
+required. Live tag-quality benefit and token savings are unmeasured; the acoustic
+positives still need independent listening qualification. No paid calls, push or
+deployment occurred. Overall accepted-delivery progress remains approximately **80%**.
+
 ## Jev response compatibility — 27 September 2026
 
 Continued the native API audit after the v4 repair. The documented SDK allows
@@ -348,7 +396,7 @@ options survey; this plan determines the narrower implementation scope.
 
 | Tool or approach | Old use | Current use | Planned decision | Importance and value; reason |
 |---|---|---|---|---|
-| Metadata-keyword mood analyzer | Title/genre/album guesses | Removed | Keep removed | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
+| Metadata-keyword mood analyzer | Title/genre/album guesses | Removed; Jev also excludes retrieval context cues from tag meaning | Keep removed; retain request retrieval separately | Remove: lexical associations were not independently grounded mood evidence. Ordinary metadata search remains useful. |
 | Audio energy/brightness/tension mood rules | Heuristic generated tags and saved axes | Removed | Keep removed | Remove: loudness and spectral measurements do not establish emotional meaning. |
 | FFmpeg / ffprobe | Decode and technical inspection | Bounded pools/downmix/deadlines plus analytic spectral and alias-suppression checks | Keep | Core: preserve original-audio content and detect spectral damage that correct duration/counts can miss. |
 | FFmpeg loudnorm / ebur128 | Loudnorm input measurements | Loudnorm retained; direct scanner comparison failed | Keep loudnorm until independently validated replacement | High correctness priority: a faster scanner missed an ending peak and disagreed on short-signal range. No speedup claim. |
@@ -360,13 +408,13 @@ options survey; this plan determines the narrower implementation scope.
 | AcoustID / Chromaprint | Recording identification | Existing conservative identity matching | Keep | Core for source matching: prevents attaching facts to the wrong recording; does not verify mood or equivalent editions. |
 | MusicBrainz | Recording/catalog enrichment | Current-policy recording genres, composer/date claims in shared evidence | Keep | High: attributable recording context without pretending catalog genres are listening judgments. |
 | Last.fm | Community tags, exact vocabulary mapping | Bounded original tags/counts with weak-source attribution | Keep bounded | Supporting: useful descriptors and vocabulary, but community counts are neither ground truth nor independent votes. |
-| Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references and abstention | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
+| Structured text model tagger | Whole-track confidence and tag list | Per-tag support, evidence/conflict references, abstention and v25 provenance distinction | Keep with review | Core optional interpretation: combines permitted evidence with the owner's vocabulary; never writes accepted tags itself. |
 | SQLite / durable jobs / review guards | Forced retries repeated facts; normal runs retained failed voice indefinitely | Current-only reset/freshness, compatible retry-chain reuse and voice-only failure recovery | Keep | Core: retry failed work without repeating current facts or looping on same-job failures; preserve authored tags and reject stale reviews. |
 | Bounded Rust analysis executor | A task panic permanently removed a worker | Typed panic failure; same fixed worker remains usable | Keep | High reliability: an unexpected extraction failure cannot disable later analysis; no automatic retries or larger pool. |
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | Native v3 rejected approximate Choice totals; ambiguous applicability wording | Native v4: direct evidence Nouls, independent grounding, approximate Choice scores and optional usage; response extensions discarded | Run full suite v27 and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
+| TypeSafe Jev | v4 completed 55/65; cues conflicted with safety expectations and partial results hid rejected scores | v5: definition-based questions, scoped evidence, gain-invariant musical requests and full quality traces | Fresh conformance, full v28 and independent listening comparison | Requested high priority: clearer evidence and diagnosable misses; live quality benefit and token savings remain unmeasured. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

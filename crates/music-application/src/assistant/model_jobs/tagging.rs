@@ -224,6 +224,7 @@ impl ModelEvaluationJobHandler {
             let chunk = &cases[planned.case_range];
             let vocabulary = &planned.vocabulary;
             let batch = planned.task;
+            let mut diagnostics = planned.native_task.as_ref().map(|task| task.diagnostics());
             let not_run = deterministic_execution_failure.is_some();
             let profiles = if let Some(error) = deterministic_execution_failure.as_ref() {
                 Err(not_run_after(error))
@@ -232,7 +233,9 @@ impl ModelEvaluationJobHandler {
                     .transport
                     .typed_decisions()
                     .ok_or_else(|| JobHandlerError::new("unsupported_provider_feature"))?;
-                native.execute(context, role, transport, usage).await?
+                native
+                    .execute(context, role, transport, usage, diagnostics.as_mut())
+                    .await?
             } else {
                 let mut correction = false;
                 loop {
@@ -257,7 +260,7 @@ impl ModelEvaluationJobHandler {
                 *deterministic_execution_failure = Some(error.clone());
             }
             for case in chunk {
-                let result = match &profiles {
+                let mut result = match &profiles {
                     Ok(profiles) => {
                         let track_id = case
                             .track
@@ -274,6 +277,7 @@ impl ModelEvaluationJobHandler {
                     }
                     Err(error) => case.assess(Err(error), vocabulary),
                 };
+                result.diagnostics = diagnostics.clone();
                 results.push(result);
                 progress.record(case.gate, safety_repeat, not_run);
                 update_progress(
@@ -540,7 +544,7 @@ impl ModelFeatureJobHandler {
                     .typed_decisions()
                     .ok_or_else(|| JobHandlerError::new("unsupported_provider_feature"))?;
                 native
-                    .execute(context, &role, transport, &mut provider_usage)
+                    .execute(context, &role, transport, &mut provider_usage, None)
                     .await?
                     .map_err(model_task_failure)?
             } else {

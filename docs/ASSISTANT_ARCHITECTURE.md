@@ -143,21 +143,32 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Text-engine mood tagging input v24 uses batch-local slots, a stable vocabulary reference prefix and
+Text-engine mood tagging input v25 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v4`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v5`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. Jev receives one song's actual observation cards without a track ID.
-Each question includes the complete group/tag meanings and asks directly about positive
+Each question includes group meaning, the tag definition and its synonyms and asks directly about positive
 evidence for a tentative tag. Mood asks about musical impression; setting/scene ask
 about a specific reason for tabletop use. Descriptive metadata can support a tag
 without proving how the recording sounds; isolated identity words cannot.
+Display labels stay in the application; changing a label does not change its semantic
+question. Vocabulary context cues remain available to playlist retrieval but are excluded
+from Jev tag meanings. Mood grounding asks about musical character, while setting/scene
+and period grounding require their own semantic evidence. Origin is source provenance,
+not a description of the music; the shared text-engine rule uses the same distinction.
 There are no model-side lookups through a shared policy or vocabulary table.
 Cards retain original facts, reliability, missingness and the ending. Code adds
 low/medium/high thirds for normalized physical proxies, never inferred mood labels.
+Musical questions exclude absolute recording level, artist/source identities, duration,
+embedded BPM, composer credits and release dates as supporting observations. Coverage
+qualifies the input and reliability stays beside measurements, including sections and
+endings. Custom groups retain those factual inputs when their definitions need them;
+the two evidence views never share a request. The normalized local profile retains its
+original facts. Gain-only changes produce identical musical requests without hardcoded moods.
 
 Period is categorical: one Choice contains every configured period's full meaning
 plus `no_supported_period`. A winner needs probability at least 0.70; weak winners
@@ -169,7 +180,7 @@ partitioned under conservative 32,000/64,000-byte context reservations including
 overhead. The full period Choice is indivisible; oversized lists fail before cost.
 
 At most eight candidates receive independent support and contradiction Nouls for
-each actual observation, in bounded batches shared across candidates. The observation itself is inlined in
+each eligible observation, in bounded batches shared across candidates using the same evidence view. The observation itself is inlined in
 the question. Supporting sources do not compete for a single probability mass.
 A qualifying period reserves one candidate slot; the remaining seven (or eight
 without a period) use descending Noul fit with canonical-ID tie breaking. Choice
@@ -181,12 +192,19 @@ conflict, not a protocol error. No separate abstract sufficiency question remain
 
 Preview reserves all assessment partitions and the worst permitted grounding plan,
 with and without a period. Grounding may require multiple requests per candidate.
-Planning validates the largest question frame for each branch to bound the others
+Planning validates the largest question frame in each group to bound the others
 without materializing every hypothetical follow-up. Explanations are application-
 authored, proposals stay tentative and these provisional gates are uncalibrated.
 Abstentions report candidate counts, bounded top fit scores and peak grounding
 support through the existing review/export fields. See the
 [design and research rationale](ADR-026-native-jev-evidence-judgments.md).
+Synthetic quality reports also retain `jev-tagging-diagnostics/v1`: bounded request
+states, every tag's raw fit or period score, candidate selection, per-observation
+support/conflict scores and an application-owned decision stage. Pending stages
+distinguish incomplete execution from rejection. Primary and safety-repeat traces
+stay separate. Required tags are attached by the evaluator after execution and never
+enter provider input. The console summarizes required/candidate tags for failed cases;
+the JSON export retains every trace. Live song jobs do not store these quality traces.
 
 Discovery reads `models[].name`. The setup offers reviewed pinned `jev-1.13.0`
 without inventing a discovered model; native conformance verifies the actual
@@ -218,7 +236,7 @@ before retaining an unbounded request plan. No generated-output allowance is sen
 fallback or remote Batch is supported. A native execution failure stops further
 quality calls, including safety reruns. Subsequent cases report not-run with the original
 error, retain their failed certification outcome and are counted separately in progress.
-The quality report identifies the native v4 engine; successful synthetic checks still do not
+The quality report identifies the native v5 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
 not local context or accepted tags. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
@@ -394,7 +412,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v5+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v4` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v24+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v16` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v25+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v16` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 | Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1` | `assistant-library-cleanup-disclosure/v2` | `model-catalog-adjudication/v2` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |
@@ -722,24 +740,29 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v27` uses 59 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v28` uses 60 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
 Each vocabulary group and the context-only subset (no descriptive metadata) must independently
 meet the existing 90% threshold; all blocking failures remain blocking. Seven added acoustic
 cases cover supported calm/urgent/chaotic impressions, gain invariance, conflicting endings,
-weak tempo and missing measurements. These fixtures do not establish listening accuracy. The fifteen safety scenarios are repeated once.
-Progress and the completed score both count 65 distinct scenarios; safety scenarios finish
-only after their rerun. Detailed progress reports the 80 individual checks separately from
+weak tempo and missing measurements. These fixtures do not establish listening accuracy. The sixteen safety scenarios are repeated once.
+Progress and the completed score both count 66 distinct scenarios; safety scenarios finish
+only after their rerun. Detailed progress reports the 82 individual checks separately from
 provider requests. Diagnostic retests label their selected subset explicitly.
 Suite v27 supplies explicit descriptive evidence for seven previously ambiguous
 positive cases while preserving their required tags. Two additional safety cases
 reject cold emotion inferred only from Arctic geography and heroism inferred only
 from a castle march. This shared benchmark is provider-neutral; native Jev transport
 regressions separately cover approximate Choice scores without easing semantic gates.
+Suite v28 gives the cross-era castle case an explicit castle-use album description
+and adds a provenance-name-only negative control. Its urgent-context description no
+longer claims a verified fast pulse, which the input projection withholds. All prior
+required tags and the nine-case acoustic gate remain; the positive acoustic labels
+still need independent listening qualification, not fabricated stronger measurements.
 Dedicated regressions check gain-invariant relative dynamics, later climaxes, withheld
 coarse tempo, source-bound catalog projection, missing/cross-track references and explicit
-abstention. The evaluation report is v9. These changes require fresh matching conformance
+abstention. The evaluation report is v10. These changes require fresh matching conformance
 and quality evidence; they do not certify a model or establish listening accuracy.
 Playlist reports separately record labelled candidate recall before model ranking,
 including missing candidate IDs, even when the provider fails. These are synthetic

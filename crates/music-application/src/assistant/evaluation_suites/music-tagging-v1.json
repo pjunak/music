@@ -1,6 +1,6 @@
 {
-  "schema_version": "assistant-music-tagger-evaluation/v9",
-  "id": "controlled-vocabulary-tagging-baseline-v27",
+  "schema_version": "assistant-music-tagger-evaluation/v10",
+  "id": "controlled-vocabulary-tagging-baseline-v28",
   "minimum_quality_pass_rate": 0.9,
   "cases": [
     {
@@ -906,7 +906,7 @@
       "track": {
         "track_id": 49,
         "artist": "The Anachronistic Ensemble",
-        "album": "Techno-Medieval Era Blend",
+        "album": "Techno-Medieval Era Blend for a Castle",
         "origin": "Neon Castle",
         "genre": "mixed-era electronic folk",
         "length_s": 223.0,
@@ -1168,7 +1168,7 @@
     },
     {
       "id": "acoustic-context-sustained-drive",
-      "description": "Sustained fast pulse, density and intensity can support urgency without an invented chase or battle",
+      "description": "Tests a tentative urgent impression from sustained high onset activity and spectral spread/change; verified tempo is not supplied.",
       "track": {
         "track_id": 602,
         "artist": "",
@@ -1409,6 +1409,16 @@
       "required_tags": ["castle","march"],
       "forbidden_tags": ["heroic"],
       "allowed_support": ["supported","tentative"],
+      "minimum_evidence_items": 1,
+      "gate": "safety"
+    },
+    {
+      "id": "provenance-name-is-not-musical-description",
+      "description": "A source game or film name alone cannot establish a setting, activity, emotion or era.",
+      "track": {"track_id":91003,"artist":"","album":"","origin":"Neon Castle","genre":"","length_s":223},
+      "required_tags": [],
+      "forbidden_tags": ["castle","futuristic","dark"],
+      "maximum_tags": 0,
       "minimum_evidence_items": 1,
       "gate": "safety"
     }
