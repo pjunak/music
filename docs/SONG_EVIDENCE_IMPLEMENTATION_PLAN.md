@@ -7,6 +7,37 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Dedicated Jev evidence judgments — 27 September 2026
+
+The next owner export confirms conformance passed for pinned Jev 1.13.0, but quality
+failed. Twelve primary cases completed (eleven empty, one march-only); a rejected
+typed response during forest-hunt stopped the remaining 50 cases and all 13 safety
+repeats. The export cannot recover rejected scores or the precise invalid response.
+A failed 0/63 certification is not 63 independently completed judgments.
+
+Implemented `music-jev-decisions/v3`: direct, complete tag questions; one applicability
+Noul per multi-label tag; full period Choice plus absolute applicability; independent
+observation support/contradiction Nouls. This removes competing citation probabilities
+and the redundant abstract sufficiency question. Numerical cards retain raw values
+and add descriptive physical bands; they do not generate moods. Same-observation
+ambiguity no longer aborts a run. Specific strict response diagnostics and explicit
+not-run case reporting use existing fields and storage. No legacy v2 path remains.
+
+See [the decision record and official research](ADR-026-native-jev-evidence-judgments.md)
+for rationale, provisional gates, cost limits and adoption steps. Quality thresholds,
+full vocabulary coverage, safety repeats, consent, durable attempts and review remain
+in force. Current local audio context and accepted tags are reusable. Live v3 quality
+and independent listening remain required; overall progress stays approximately **80%**.
+
+Local validation: all 567 Rust workspace tests pass without skips, including real
+FFmpeg and the pinned optional voice-model fixtures. All 374 frontend tests and the
+production build pass. Workspace check, strict workspace/fuzz Clippy, formatting,
+architecture, doc tests, generated contracts and local documentation links pass.
+The native regressions cover independent citations, contradictions, abstention,
+period selection, complete 200-tag vocabularies, shared-state batching, conservative
+reservations, precise response rejection and durable partial-run recovery. No paid
+provider call, push, deployment or claim of improved live music accuracy is included.
+
 ## Jev model-test repair — 27 September 2026
 
 The owner's diagnostic export records `conformance_mismatch`, which the server
@@ -279,7 +310,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | Not used | Native mood engine: categorical period Choice, multi-label Nouls, pinned setup, selected evidence and durable budgets | Run real conformance/quality and independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
+| TypeSafe Jev | Not used | Native v3: direct applicability Nouls, categorical period Choice, independent observation grounding and durable budgets | Rerun full quality on v3 and complete independent listening comparison | Requested high priority: removes the single generated-tag-list bottleneck; text evidence only, quality benefit unproven. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |
@@ -669,15 +700,14 @@ provider setup and mood-tagging jobs. See the
 - One song per state; group definitions and every runtime tag's full semantics are
   included. Partition all **200 allowed application tags** under both context limits.
   The separate offline pilot's larger vocabulary cap is not the runtime limit.
-- Since 27 September, period uses one Choice over its full definitions and an
-  explicit no-supported-period option. A winner needs probability at least 0.70;
-  its evidence follow-up also asks support/sufficiency Nouls, each requiring 0.70.
-  Distribution-derived Choice confidence is not a second evidence judgment.
-- Other groups retain per-tag support/sufficiency Nouls, each requiring 0.70, with
-  no probability multiplication or preferred tag. Up to eight candidates, including
-  at most one period, receive budgeted support/conflict Choice questions over real
-  observation IDs and an explicit none option. Oversized period lists fail without
-  truncation; all decisions remain reviewable rather than forced classifications.
+- Engine v3 uses a full period Choice plus an independent applicability Noul for its
+  winner; other groups have one applicability Noul per tag. Complete definitions are
+  inlined with each question. Choice probabilities and Nouls are not combined.
+- Up to eight candidates receive independent support/contradiction Nouls for each
+  observation. Multiple sources can support a tag without competing for probability.
+  A mixed judgment is a conflict; at least one unambiguous support source is required.
+  Fit, grounding and categorical selection have separate provisional 0.70 gates.
+  Requests are bounded and fully reserved; oversized full period lists fail.
 - The app assembles explanations, retains selected contradictions and labels every
   proposal tentative. Scores are uncalibrated. Exact request fingerprints and usage
   are checkpointed before cost; unchanged completed profiles use existing freshness.
@@ -686,8 +716,9 @@ provider setup and mood-tagging jobs. See the
   guards apply. Local fixtures cover malformed answers, full custom vocabularies,
   HTTP 401/422/429/529, submission timeout, budget rejection and restart uncertainty.
 
-The native engine is available for comparison once configured; it has not passed a
-live provider or independent listening evaluation. It consumes prepared textual evidence,
+The native engine is available for comparison once configured; conformance passed on the owner's
+deployed build, while live quality failed. Engine v3 and independent listening
+acceptance remain unverified. It consumes prepared textual evidence,
 so it cannot supply musical information missing from that evidence. Do not loosen
 safety or equate extra tags with quality to obtain a passing demonstration.
 

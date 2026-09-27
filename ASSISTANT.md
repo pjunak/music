@@ -315,8 +315,8 @@ Use a small, representative sample before running across the whole library.
 
 After the application's deployment finishes successfully, refresh the page. If
 **TypeSafe Jev** is missing from the connection types, the deployed build does not
-contain the native adapter yet. The group-aware Choice/Noul strategy requires the
-current Jev engine; updating it makes old model/quality checks stale.
+contain the native adapter yet. The dedicated applicability/grounding strategy requires
+Jev engine v3; updating it makes old model/quality checks stale.
 
 1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following
    its [quick start](https://docs.typesafe.ai/introduction/quickstart). No SDK or local
@@ -327,30 +327,40 @@ current Jev engine; updating it makes old model/quality checks stale.
    These are real provider calls; a synthetic pass is required before a library run.
 2. In **Mood library**, select a small varied pilot (for example five songs) and use
    immediate execution. The preview reserves every assessment partition plus up to
-   eight evidence-selection follow-ups per song. Raise the request/token limits only
+   eight candidates' observation checks per song. Grounding may require multiple requests
+   per candidate. Raise the request/token limits only
    after reviewing that preview, or reduce the selection. Remote Batch is unavailable.
 3. Review disclosure v16 and run tagging. Current local context can be reused; changing
    the interpreter makes older generated proposals stale without changing accepted tags.
    The no-tag stop guard stops after an empty song with Jev; turn it off deliberately
    when a fixed-cohort comparison needs all selected songs, including abstentions.
 4. Review and export the run. Jev proposals are tentative; the app writes their
-   explanations from Jev-selected evidence IDs and explicitly marks the Noul scores
+   explanations from independently judged observations and explicitly marks the Noul scores
    uncalibrated. Compare with independent listening using the existing
    [pilot workflow](docs/MOOD_PILOT.md). Do not accept extra labels solely for variety.
 
 The application chooses the Jev primitive automatically:
 
 - **Period:** one Choice compares every configured era plus a no-supported-period
-  option. A clear winner still needs independent support and evidence-sufficiency
-  Noul checks in its evidence request. Unknown is not timeless; cross era is a
-  standalone choice for an explicitly supported blend.
-- **Mood, scene, setting and custom groups:** independent support/sufficiency Nouls
-  allow several suitable tags. These groups are not forced into a single winner.
+  option. Its winner also needs an independent applicability Noul and a supporting
+  observation. Unknown is not timeless; cross era means an explicitly supported blend.
+- **Mood, scene, setting and custom groups:** one independent applicability Noul per
+  tag allows several suitable tags, or none.
+- **Grounding:** separate Nouls judge whether each observation supports or contradicts
+  a candidate. Several sources can support the same tag. An observation judged both
+  ways counts as a conflict; another supporting source is needed to retain the tag.
 
 At most eight candidates are examined, including at most one period. Choice
-probabilities are not ranked against Noul scores. All proposed tags still need
-selected supporting observations and human review. Missing evidence can produce
-empty results; there is no default mood, automatic retry or silent engine fallback.
+probabilities are not ranked against Noul scores. Tag match, concrete support and
+period Choice each have their own provisional 0.70 gate. All proposals require
+human review. Missing evidence can produce empty results; there is no default mood,
+automatic retry or silent engine fallback.
+
+An empty result now reports whether candidates reached grounding and includes bounded
+match scores. An invalid native response names the failed validation check. Quality
+cases skipped after it are marked **not run**, rather than presented as independent
+model judgments; they still prevent certification. Export a failed run for diagnosis
+before paying to repeat it. See the [Jev design](docs/ADR-026-native-jev-evidence-judgments.md).
 
 ### Mood tagging
 

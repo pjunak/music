@@ -205,7 +205,7 @@ mod tests {
             (422, "invalid_request"),
             (429, "rate_limited"),
             (529, "service_unavailable"),
-            (200, "invalid_typed_decisions"),
+            (200, "typed_answer_set_mismatch"),
         ] {
             let status_code = StatusCode::from_u16(status)?;
             let calls = Arc::new(AtomicUsize::new(0));

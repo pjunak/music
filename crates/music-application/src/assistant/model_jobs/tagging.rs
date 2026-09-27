@@ -5,6 +5,7 @@ struct TaggingQualityProgress {
     total_attempts: usize,
     completed_scenarios: usize,
     completed_attempts: usize,
+    skipped_attempts: usize,
 }
 
 impl TaggingQualityProgress {
@@ -18,11 +19,13 @@ impl TaggingQualityProgress {
             total_attempts: cases.len() + safety_count,
             completed_scenarios: 0,
             completed_attempts: 0,
+            skipped_attempts: 0,
         }
     }
 
-    fn record(&mut self, gate: TagQualityGate, safety_repeat: bool) {
+    fn record(&mut self, gate: TagQualityGate, safety_repeat: bool, not_run: bool) {
         self.completed_attempts += 1;
+        self.skipped_attempts += usize::from(not_run);
         // A safety scenario is complete only after both of its checks.
         if gate != TagQualityGate::Safety || safety_repeat {
             self.completed_scenarios += 1;
@@ -31,12 +34,20 @@ impl TaggingQualityProgress {
 
     fn message(&self) -> String {
         format!(
-            "Checked {} of {} scenarios; {} of {} individual checks including safety reruns",
+            "Processed {} of {} scenarios; {} of {} checks resolved including safety reruns; {} not run after an earlier failure",
             self.completed_scenarios,
             self.total_scenarios,
             self.completed_attempts,
             self.total_attempts,
+            self.skipped_attempts,
         )
+    }
+}
+
+fn not_run_after(error: &ModelTaskError) -> ModelTaskError {
+    ModelTaskError {
+        code: "model_evaluation_not_run".to_owned(),
+        diagnostic: Some(format!("Not run after an earlier failure: {}", error.code)),
     }
 }
 
@@ -156,8 +167,11 @@ impl ModelEvaluationJobHandler {
             Some(baseline) => merge_tagging_retest(baseline, evaluated)?,
             None => evaluated,
         };
-        let result =
+        let mut result =
             TagQualityEvaluationResult::summarize(&suite, merged).map_err(model_task_failure)?;
+        if execution.role.execution.adapter_id == crate::assistant::TYPESAFE_ADAPTER {
+            result.engine_id = crate::assistant::JEV_TAGGER_CONTRACT;
+        }
         context
             .check_cancelled()
             .await
@@ -210,8 +224,9 @@ impl ModelEvaluationJobHandler {
             let chunk = &cases[planned.case_range];
             let vocabulary = &planned.vocabulary;
             let batch = planned.task;
-            let profiles = if let Some(error) = deterministic_execution_failure.clone() {
-                Err(error)
+            let not_run = deterministic_execution_failure.is_some();
+            let profiles = if let Some(error) = deterministic_execution_failure.as_ref() {
+                Err(not_run_after(error))
             } else if let Some(native) = planned.native_task {
                 let transport = self
                     .transport
@@ -235,6 +250,7 @@ impl ModelEvaluationJobHandler {
                 }
             };
             if let Err(error) = &profiles
+                && !not_run
                 && (role.execution.adapter_id == crate::assistant::TYPESAFE_ADAPTER
                     || deterministic_tagger_execution_failure(error))
             {
@@ -259,7 +275,7 @@ impl ModelEvaluationJobHandler {
                     Err(error) => case.assess(Err(error), vocabulary),
                 };
                 results.push(result);
-                progress.record(case.gate, safety_repeat);
+                progress.record(case.gate, safety_repeat, not_run);
                 update_progress(
                     context,
                     progress.completed_scenarios,
@@ -687,6 +703,50 @@ mod quality_progress_tests {
     use super::*;
 
     #[test]
+    fn aborted_quality_cases_remain_failed_and_distinct_from_the_rejected_response()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let suite = tag_quality_suite()?;
+        let error = ModelTaskError::new("model_execution_typed_answer_set_mismatch");
+        let skipped = not_run_after(&error);
+        let mut results = Vec::new();
+        let mut repeats = Vec::new();
+        let mut progress = TaggingQualityProgress::new(&suite.cases);
+        for (index, case) in suite.cases.iter().enumerate() {
+            let vocabulary = case.vocabulary.snapshot()?;
+            let result = case.assess(Err(if index == 0 { &error } else { &skipped }), &vocabulary);
+            assert!(!result.passed);
+            assert_eq!(
+                result
+                    .failures
+                    .iter()
+                    .any(|v| v.contains("model_evaluation_not_run")),
+                index > 0
+            );
+            assert!(result.failures.iter().any(|v| v.contains(&error.code)));
+            results.push(result);
+            progress.record(case.gate, false, index > 0);
+            if case.gate == TagQualityGate::Safety {
+                repeats.push(case.assess(Err(&skipped), &vocabulary));
+                progress.record(case.gate, true, true);
+            }
+        }
+        let report =
+            TagQualityEvaluationResult::summarize(&suite, merge_safety_repeats(results, repeats)?)?;
+        assert!(!report.passed);
+        assert_eq!(report.passed_cases, 0);
+        assert_eq!(report.total_cases as usize, suite.cases.len());
+        assert_eq!(report.minimum_quality_pass_rate, 0.90);
+        assert_eq!(progress.skipped_attempts, progress.total_attempts - 1);
+        assert_eq!(progress.completed_scenarios, suite.cases.len());
+        assert!(
+            progress
+                .message()
+                .contains("not run after an earlier failure")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn full_suite_and_retest_count_scenarios_once_after_safety_repeats()
     -> Result<(), Box<dyn std::error::Error>> {
         let suite = tag_quality_suite()?;
@@ -706,14 +766,14 @@ mod quality_progress_tests {
                 .collect::<Vec<_>>();
             let expected_total = cases.len();
             for case in cases {
-                progress.record(case.gate, false);
+                progress.record(case.gate, false, false);
                 assert_eq!(progress.total_scenarios, expected_total);
                 assert!(progress.completed_scenarios < expected_total);
             }
             assert_eq!(progress.completed_scenarios, expected_total - safety.len());
             assert_eq!(progress.completed_attempts, expected_total);
             for case in safety {
-                progress.record(case.gate, true);
+                progress.record(case.gate, true, false);
                 assert_eq!(progress.total_scenarios, expected_total);
             }
             assert_eq!(progress.completed_scenarios, expected_total);

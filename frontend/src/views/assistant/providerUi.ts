@@ -44,6 +44,14 @@ const VERIFICATION_FAILURES: Record<string, string> = {
 
 const MODEL_TEST_FAILURES: Record<string, string> = {
   pinned_model_required: "Select a pinned Jev version, such as jev-1.13.0. Moving aliases cannot be used for reproducible tagging.",
+  typed_response_shape_invalid: "Jev returned an invalid response envelope. Check the pinned model and API contract; the request was not retried.",
+  typed_answer_shape_invalid: "Jev returned a malformed typed answer. The request was not retried.",
+  typed_answer_set_mismatch: "Jev returned missing or unexpected answers. The request was not retried.",
+  typed_answer_type_mismatch: "Jev returned the wrong answer type for a Noul or Choice question. The request was not retried.",
+  typed_probability_invalid: "Jev returned a probability outside the valid 0–1 range. The request was not retried.",
+  typed_choice_options_mismatch: "Jev returned missing or unexpected Choice options. The request was not retried.",
+  typed_choice_distribution_invalid: "Jev returned Choice probabilities that do not sum to one. The request was not retried.",
+  typed_choice_selection_invalid: "Jev selected a Choice option that is not the most probable option. The request was not retried.",
   invalid_typed_decisions: "Jev returned incomplete or invalid typed judgments. No result from that recording was saved.",
   provider_model_mismatch: "The provider returned a different model version. Verify the pinned version before rerunning.",
   unsupported_reasoning_mode: "This model does not support the selected thinking setting. Choose one of its supported effort levels.",

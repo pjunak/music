@@ -47,6 +47,20 @@ describe("provider UI helpers", () => {
     expect(modelTestFailureMessage(code)).toContain(threshold);
   });
 
+  it.each([
+    ["typed_response_shape_invalid", "response envelope"],
+    ["typed_answer_shape_invalid", "malformed typed answer"],
+    ["typed_answer_set_mismatch", "missing or unexpected answers"],
+    ["typed_answer_type_mismatch", "wrong answer type"],
+    ["typed_probability_invalid", "probability outside"],
+    ["typed_choice_options_mismatch", "missing or unexpected Choice options"],
+    ["typed_choice_distribution_invalid", "do not sum to one"],
+    ["typed_choice_selection_invalid", "not the most probable"],
+  ])("explains the rejected Jev response %s", (code, reason) => {
+    expect(modelTestFailureMessage(code)).toContain(reason);
+    expect(modelTestFailureMessage(code)).toContain("not retried");
+  });
+
   it("explains provider-specific failures without exposing upstream details", () => {
     expect(modelTestFailureMessage("parameter_unknown")).toContain(
       "does not support",

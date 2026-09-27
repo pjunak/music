@@ -569,19 +569,27 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let answers=request.questions.iter().map(|(key,question)| {
                 let value=match question {
-                    music_application::assistant::TypedQuestion::Noul{instructions,..}=>json!({"type":"noul","noul":if ["combat", "medieval"].iter().any(|name| instructions["tag"]["name"] == *name){0.95}else{0.05}}),
+                    music_application::assistant::TypedQuestion::Noul{instructions,..}=>{
+                        let matching_tag = ["combat", "medieval"].iter().any(|name| instructions["tag"]["name"] == *name);
+                        let support = !key.starts_with("conflict_") && matching_tag
+                            && (!key.starts_with("support_") || instructions["observation"]["id"] == "metadata.genre");
+                        json!({"type":"noul","noul":if support {0.95}else{0.05}})
+                    },
                     music_application::assistant::TypedQuestion::Choice{criteria,..}=>{
                         let choice = if key == "period" {
                             criteria.iter().find(|(_, meaning)| meaning["name"] == "medieval").map_or("no_supported_period", |(id, _)| id.as_str())
-                        } else if key == "support" { "metadata.genre" } else { "no_observation" };
+                        } else { "no_supported_period" };
                         json!({"type":"choice","choice":choice,"probabilities":criteria.keys().map(|id|(id.clone(),if id==choice{1.0}else{0.0})).collect::<BTreeMap<_,_>>(),"confidence":1.0})
                     }
                 };
                 (key.clone(),value)
             }).collect::<BTreeMap<_,_>>();
             let invalid = self.fail_second
-                && request.state["observations"]["metadata.genre"] == "second recording"
-                && request.questions.contains_key("support");
+                && request.state["observations"]["metadata.genre"]["value"] == "second recording"
+                && request
+                    .questions
+                    .keys()
+                    .any(|key| key.starts_with("support_"));
             StructuredModelResult {
                 token_details: Default::default(),
                 outcome: ProviderAttemptOutcome::ResponseReceived,
@@ -721,7 +729,7 @@ async fn jev_pipeline_executes_selected_evidence_and_preserves_only_complete_rec
         );
         assert_eq!(usage(&job)?["uncertain_requests"], 0);
         if fail_second {
-            assert_eq!(job.error.as_deref(), Some("invalid_typed_decisions"));
+            assert_eq!(job.error.as_deref(), Some("typed_answer_set_mismatch"));
         }
         stop_coordinator(coordinator).await?;
     }

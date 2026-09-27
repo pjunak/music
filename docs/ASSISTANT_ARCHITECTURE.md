@@ -148,31 +148,42 @@ per-measurement context reliability. Full membership is validated before resolvi
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v2`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v3`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
-requirements. Jev receives one song's actual observations and full group/tag meanings,
-without a track identifier. Period is categorical: one Choice contains every
-configured period's complete meaning plus `no_supported_period`. Its selected option
-needs probability at least 0.70; a tie, weak winner or none option abstains. The
-selected period then receives independent support/sufficiency Noul checks in its
-existing evidence follow-up, each requiring at least 0.70. A relative Choice winner
-alone does not establish support. The provider's distribution-derived confidence
-is not an independent sufficiency measurement and is not multiplied into a score.
-All other groups use two Noul questions per tag with separate 0.70 support and
-sufficiency gates. All configured entries (up to 200 total) retain their full meanings.
-Requests are partitioned under conservative 32,000/64,000-byte context reservations
-including overhead; the period Choice is indivisible, and an oversized full list is
-rejected before cost rather than silently shortlisted.
+requirements. Jev receives one song's actual observation cards without a track ID.
+Each question includes the complete group/tag meanings and direct literal judgment;
+there are no model-side lookups through a shared policy or vocabulary table.
+Cards retain original facts, reliability, missingness and the ending. Code adds
+low/medium/high thirds for normalized physical proxies, never inferred mood labels.
 
-At most eight candidates receive a support/conflict Choice request with an explicit
-no-observation option. A qualifying period reserves one slot; the remaining seven
-(or eight without a period candidate) use descending Noul support with canonical-ID
-tie breaking. Choice probabilities are never ranked against Noul support scores.
-A support observation selection needs probability at least 0.50; validated conflict
-references are retained. The period winner's two Noul checks share that same request,
-so they add no round trip. Preview reserves at most one period follow-up and the
-worst-case token total with or without it. The application authors the explanation,
-all proposals remain tentative, and these starting gates are not library-calibrated.
+Period is categorical: one Choice contains every configured period's full meaning
+plus `no_supported_period`. A winner needs probability at least 0.70; weak winners
+and none abstain. Its follow-up also requires an independent applicability Noul
+at least 0.70. Distribution-derived Choice confidence is not a second measurement.
+Other groups use one direct applicability Noul per tag, also requiring 0.70.
+Every configured entry (up to 200 total) retains its full meaning. Requests are
+partitioned under conservative 32,000/64,000-byte context reservations including
+overhead. The full period Choice is indivisible; oversized lists fail before cost.
+
+At most eight candidates receive independent support and contradiction Nouls for
+each actual observation, in bounded batches shared across candidates. The observation itself is inlined in
+the question. Supporting sources do not compete for a single probability mass.
+A qualifying period reserves one candidate slot; the remaining seven (or eight
+without a period) use descending Noul fit with canonical-ID tie breaking. Choice
+probabilities are never ranked against Noul scores. Support needs at least 0.70;
+a contradiction at least 0.70 takes precedence for that observation. A candidate
+needs at least one unambiguous supporting source; up to four supporting and four
+conflicting citations are retained. Mixed judgments cause abstention or a retained
+conflict, not a protocol error. No separate abstract sufficiency question remains.
+
+Preview reserves all assessment partitions and the worst permitted grounding plan,
+with and without a period. Grounding may require multiple requests per candidate.
+Planning validates the largest question frame for each branch to bound the others
+without materializing every hypothetical follow-up. Explanations are application-
+authored, proposals stay tentative and these provisional gates are uncalibrated.
+Abstentions report candidate counts, bounded top fit scores and peak grounding
+support through the existing review/export fields. See the
+[design and research rationale](ADR-026-native-jev-evidence-judgments.md).
 
 Discovery reads `models[].name`. The setup offers reviewed pinned `jev-1.13.0`
 without inventing a discovered model; native conformance verifies the actual
@@ -182,7 +193,8 @@ challenges occur only in question IDs and are checked locally to reject mismatch
 answers; Jev is never asked to compare random strings. This follows its documented
 [semantic-versus-mechanical limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
 Strict parsing still rejects missing/extra answers, invalid distributions and model
-mismatches. Distinct positive, negative and Choice failure codes persist through the
+mismatches. Response errors distinguish malformed envelopes/answers, answer membership,
+wrong types, out-of-range probabilities, Choice membership, sum and winner failures. Distinct positive, negative and Choice failure codes persist through the
 existing role record and appear on the task card, console and export after reload;
 no raw provider response or new store is added. Quality thresholds remain separate.
 Moving aliases, chat fields and thinking overrides are rejected. Native
@@ -191,7 +203,9 @@ write-ahead usage ledger. Preview and execution reserve the entire worst-case re
 plan; planning rejects selections above 1,000 songs or 1,000 worst-case native calls
 before retaining an unbounded request plan. No generated-output allowance is sent or reserved. No automatic retry, text
 fallback or remote Batch is supported. A native execution failure stops further
-quality calls, including safety reruns; successful synthetic checks still do not
+quality calls, including safety reruns. Subsequent cases report not-run with the original
+error, retain their failed certification outcome and are counted separately in progress.
+The quality report identifies the native v3 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
 not local context or accepted tags. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).

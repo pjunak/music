@@ -154,13 +154,15 @@ pub fn typed_answers(
     payload: Value,
 ) -> Result<BTreeMap<String, TypedAnswer>, ModelTaskError> {
     let answers: BTreeMap<String, TypedAnswer> = serde_json::from_value(payload)
-        .map_err(|_| ModelTaskError::new("invalid_typed_decisions"))?;
+        .map_err(|_| ModelTaskError::new("typed_answer_shape_invalid"))?;
     if answers.keys().ne(request.questions.keys()) {
-        return Err(ModelTaskError::new("invalid_typed_decisions"));
+        return Err(ModelTaskError::new("typed_answer_set_mismatch"));
     }
     for (key, question) in &request.questions {
-        let valid = match (question, &answers[key]) {
-            (TypedQuestion::Noul { .. }, TypedAnswer::Noul { noul }) => probability(*noul),
+        let error = match (question, &answers[key]) {
+            (TypedQuestion::Noul { .. }, TypedAnswer::Noul { noul }) => {
+                (!probability(*noul)).then_some("typed_probability_invalid")
+            }
             (
                 TypedQuestion::Choice { criteria, .. },
                 TypedAnswer::Choice {
@@ -169,18 +171,27 @@ pub fn typed_answers(
                     confidence,
                 },
             ) => {
-                probability(*confidence)
-                    && criteria.keys().eq(probabilities.keys())
-                    && probabilities.values().all(|value| probability(*value))
-                    && (probabilities.values().sum::<f64>() - 1.0).abs() <= 0.0001
-                    && probabilities.get(choice).is_some_and(|selected| {
-                        probabilities.values().all(|value| value <= selected)
-                    })
+                if !probability(*confidence)
+                    || probabilities.values().any(|value| !probability(*value))
+                {
+                    Some("typed_probability_invalid")
+                } else if criteria.keys().ne(probabilities.keys()) {
+                    Some("typed_choice_options_mismatch")
+                } else if (probabilities.values().sum::<f64>() - 1.0).abs() > 0.0001 {
+                    Some("typed_choice_distribution_invalid")
+                } else if !probabilities
+                    .get(choice)
+                    .is_some_and(|selected| probabilities.values().all(|value| value <= selected))
+                {
+                    Some("typed_choice_selection_invalid")
+                } else {
+                    None
+                }
             }
-            _ => false,
+            _ => Some("typed_answer_type_mismatch"),
         };
-        if !valid {
-            return Err(ModelTaskError::new("invalid_typed_decisions"));
+        if let Some(code) = error {
+            return Err(ModelTaskError::new(code));
         }
     }
     Ok(answers)
@@ -206,7 +217,7 @@ pub fn parse_typesafe_response(
     value: Value,
 ) -> Result<StructuredModelResult, ModelTaskError> {
     let response: TypeSafeResponse = serde_json::from_value(value)
-        .map_err(|_| ModelTaskError::new("invalid_typed_decisions"))?;
+        .map_err(|_| ModelTaskError::new("typed_response_shape_invalid"))?;
     if response.model != model {
         return Err(ModelTaskError::new("provider_model_mismatch"));
     }
@@ -450,33 +461,93 @@ mod tests {
         let request = typed_conformance_request("nonce");
         let valid = response("nonce")["answers"].clone();
         typed_answers(&request, valid.clone())?;
-        for (path, value) in [
-            ("/yes_nonce/noul", json!(-0.1)),
-            ("/yes_nonce/noul", json!(1.01)),
-            ("/yes_nonce/noul", json!("0.9")),
-            ("/yes_nonce/type", json!("score")),
-            ("/choice_nonce/confidence", json!(1.1)),
-            ("/choice_nonce/choice", json!("missing")),
-            ("/choice_nonce/choice", json!("instrumental_music")),
+        for (path, value, code) in [
+            ("/yes_nonce/noul", json!(-0.1), "typed_probability_invalid"),
+            ("/yes_nonce/noul", json!(1.01), "typed_probability_invalid"),
+            (
+                "/yes_nonce/noul",
+                json!("0.9"),
+                "typed_answer_shape_invalid",
+            ),
+            (
+                "/yes_nonce/type",
+                json!("score"),
+                "typed_answer_shape_invalid",
+            ),
+            (
+                "/yes_nonce",
+                json!({"type":"choice","choice":"a","probabilities":{"a":1.0,"b":0.0},"confidence":1.0}),
+                "typed_answer_type_mismatch",
+            ),
+            (
+                "/choice_nonce/confidence",
+                json!(1.1),
+                "typed_probability_invalid",
+            ),
+            (
+                "/choice_nonce/probabilities/solo_singing",
+                json!(-0.1),
+                "typed_probability_invalid",
+            ),
+            (
+                "/choice_nonce/choice",
+                json!("missing"),
+                "typed_choice_selection_invalid",
+            ),
+            (
+                "/choice_nonce/choice",
+                json!("instrumental_music"),
+                "typed_choice_selection_invalid",
+            ),
             (
                 "/choice_nonce/probabilities",
                 json!({"solo_singing":0.8,"instrumental_music":0.1,"silence":0.0}),
+                "typed_choice_distribution_invalid",
             ),
             (
                 "/choice_nonce/probabilities",
                 json!({"solo_singing":0.8,"injected":0.1,"silence":0.1}),
+                "typed_choice_options_mismatch",
             ),
         ] {
             let mut invalid = valid.clone();
             *invalid.pointer_mut(path).ok_or("path")? = value;
-            assert!(typed_answers(&request, invalid).is_err(), "{path}");
+            assert_eq!(
+                typed_answers(&request, invalid)
+                    .err()
+                    .ok_or("expected invalid answer")?
+                    .code,
+                code,
+                "{path}"
+            );
         }
         let mut missing = valid.clone();
         missing.as_object_mut().ok_or("object")?.remove("yes_nonce");
-        assert!(typed_answers(&request, missing).is_err());
+        assert_eq!(
+            typed_answers(&request, missing)
+                .err()
+                .ok_or("missing answer")?
+                .code,
+            "typed_answer_set_mismatch"
+        );
         let mut extra = valid;
         extra["injected"] = json!({"type":"noul","noul":1.0});
-        assert!(typed_answers(&request, extra).is_err());
+        assert_eq!(
+            typed_answers(&request, extra)
+                .err()
+                .ok_or("extra answer")?
+                .code,
+            "typed_answer_set_mismatch"
+        );
+        let mut invalid_envelope = response("nonce");
+        invalid_envelope["injected"] = json!("unexpected");
+        assert_eq!(
+            parse_typesafe_response("jev-1.13.0", &request, invalid_envelope)
+                .err()
+                .ok_or("invalid envelope")?
+                .code,
+            "typed_response_shape_invalid"
+        );
         Ok(())
     }
     #[test]
