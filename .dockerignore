@@ -15,9 +15,12 @@
 !frontend/package.json
 !frontend/package-lock.json
 !frontend/tsconfig.app.json
+!frontend/tsconfig.compat.json
 !frontend/tsconfig.json
 !frontend/tsconfig.node.json
 !frontend/vite.config.ts
+!frontend/compat/
+!frontend/compat/**
 !frontend/public/
 !frontend/public/**
 !frontend/scripts/

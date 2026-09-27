@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { finalTreeViolations, isPythonArtifact } from "./rewrite-tree.mjs";
+import {
+  finalTreeViolations,
+  isPythonArtifact,
+  type GitTreeEntry,
+} from "./rewrite-tree.mts";
 
-function entry(path, oid = "a".repeat(40)) {
+function entry(path: string, oid = "a".repeat(40)): GitTreeEntry {
   return { mode: "100644", type: "blob", oid, path };
 }
 
-test("project-owned Python artifacts are detected by path and packaging name", () => {
+await test("project-owned Python artifacts are detected by path and packaging name", () => {
   assert.equal(isPythonArtifact("legacy/main.py"), true);
   assert.equal(isPythonArtifact("tools/helper.pyi"), true);
   assert.equal(isPythonArtifact("tools/requirements-dev.txt"), true);
@@ -16,7 +20,7 @@ test("project-owned Python artifacts are detected by path and packaging name", (
   assert.equal(isPythonArtifact("docs/ADR-013-python.md"), false);
 });
 
-test("final scan rejects runtime remnants, transition tools, and generated artifacts", () => {
+await test("final scan rejects runtime remnants, transition tools, and generated artifacts", () => {
   const contents = new Map([
     ["Dockerfile", "FROM python:3.14-slim\n"],
     ["README.md", "Build with Dockerfile.rust and uv sync.\n"],
@@ -39,7 +43,7 @@ test("final scan rejects runtime remnants, transition tools, and generated artif
   assert.equal(report.match(/backend\//gu)?.length, 1);
 });
 
-test("final scan permits compatibility history and a native active surface", () => {
+await test("final scan permits compatibility history and a native active surface", () => {
   const contents = new Map([
     ["Dockerfile", "FROM debian:stable-slim\nCOPY music-server /usr/local/bin/music-server\n"],
     ["README.md", "The release image contains no Python runtime.\n"],

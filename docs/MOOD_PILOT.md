@@ -26,7 +26,7 @@ will produce the later run exports:
 ```
 
 ```powershell
-node tools/mood-pilot.mjs init inventory.json vocabulary.json draft.jsonl
+node tools/mood-pilot.mts init inventory.json vocabulary.json draft.jsonl
 ```
 
 Initialization rejects retained run exports. Deriving the sample from returned
@@ -57,7 +57,7 @@ unlistened rows at `reviewed: false`, `blind: null` with empty intervals and lab
 freezing does not require listening or invent whether it was blind:
 
 ```powershell
-node tools/mood-pilot.mjs freeze draft.jsonl vocabulary.json pilot.jsonl
+node tools/mood-pilot.mts freeze draft.jsonl vocabulary.json pilot.jsonl
 ```
 
 The seed assigns about 30% of independent groups to confirmation and the rest to
@@ -99,7 +99,7 @@ Record ambiguity in `notes`; do not overwrite disagreement to match the model.
 After freezing, check the selected split without supplying predictions:
 
 ```powershell
-node tools/mood-pilot.mjs status pilot.jsonl vocabulary.json
+node tools/mood-pilot.mts status pilot.jsonl vocabulary.json
 ```
 
 The read-only `song-mood-readiness/v1` report lists blocking library track IDs,
@@ -132,9 +132,9 @@ runs or their selected tracks from the comparison. A missing row is unavailable;
 a retained row with `tags: []` is an explicit abstention.
 
 ```powershell
-node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json > development-score.json
-node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json --confirmation > confirmation-score.json
-node --test tools/mood-pilot.test.mjs
+node tools/mood-pilot.mts score pilot.jsonl candidate-run.json vocabulary.json > development-score.json
+node tools/mood-pilot.mts score pilot.jsonl candidate-run.json vocabulary.json --confirmation > confirmation-score.json
+node --test tools/mood-pilot.test.mts
 ```
 
 Normal scoring and comparison require blind, whole-track judgments for **every**
@@ -180,8 +180,8 @@ Save both current-contract retained run exports before another run replaces resu
 Use the frozen pilot and vocabulary for both sides:
 
 ```powershell
-node tools/mood-pilot.mjs compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json > development-comparison.json
-node tools/mood-pilot.mjs compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json --confirmation > confirmation-comparison.json
+node tools/mood-pilot.mts compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json > development-comparison.json
+node tools/mood-pilot.mts compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json --confirmation > confirmation-comparison.json
 ```
 
 The comparison contains both score reports, per-category and per-tag deltas, result
@@ -220,8 +220,8 @@ Assisted corrections and partial listening can help investigate failures. To ins
 those judgments, use the explicit diagnostic mode with the same frozen cohort:
 
 ```powershell
-node tools/mood-pilot.mjs score pilot.jsonl candidate-run.json vocabulary.json --diagnostic > diagnostic-score.json
-node tools/mood-pilot.mjs compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json --diagnostic > diagnostic-comparison.json
+node tools/mood-pilot.mts score pilot.jsonl candidate-run.json vocabulary.json --diagnostic > diagnostic-score.json
+node tools/mood-pilot.mts compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json --diagnostic > diagnostic-comparison.json
 ```
 
 Every report, including both sides of a comparison, records

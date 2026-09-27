@@ -88,7 +88,9 @@ export function ModeManagerModal({
   }
 
   return (
+    /* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- The backdrop click dismisses the modal; the close button provides keyboard access. */
     <div className="modal-backdrop" onMouseDown={onClose}>
+      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- This handler only prevents backdrop bubbling; the dialog is not a standalone control. */}
       <div
         className="modal mode-manager"
         role="dialog"
@@ -103,7 +105,7 @@ export function ModeManagerModal({
           </button>
         </header>
         <div className="modal-body">
-          <form className="mode-create-row" onSubmit={create}>
+          <form className="mode-create-row" onSubmit={(event) => void create(event)}>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}

@@ -189,16 +189,18 @@ export function LibraryView() {
             label="Find and batch-fix common filename/tag issues"
             icon={<SparkleIcon />}
             className="library-cleanup-btn"
-            onClick={() =>
-              navigate("/assistant/cleanup/run", {
+            onClick={() => {
+              void Promise.resolve(navigate("/assistant/cleanup/run", {
                 state: {
                   cleanupScope: {
                     path,
                     trackIds: [...checked],
                   },
                 },
-              })
-            }
+              })).catch((error: unknown) => {
+                toast.error("Navigation failed", error instanceof Error ? error.message : undefined);
+              });
+            }}
           >
             Clean up
           </IconButton>
@@ -274,21 +276,23 @@ function RescanButton({
       icon={<RescanIcon />}
       className="library-rescan"
       disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          const r = await libraryApi.rescan();
-          const parts: string[] = [];
-          if (r.added) parts.push(`+${r.added} added`);
-          if (r.updated) parts.push(`${r.updated} updated`);
-          if (r.removed) parts.push(`-${r.removed} removed`);
-          toast.success("Rescan complete", parts.join(", ") || "No changes.");
-          onComplete();
-        } catch (e) {
-          toast.error("Rescan failed", e instanceof Error ? e.message : undefined);
-        } finally {
-          setBusy(false);
-        }
+      onClick={() => {
+        void (async () => {
+          setBusy(true);
+          try {
+            const r = await libraryApi.rescan();
+            const parts: string[] = [];
+            if (r.added) parts.push(`+${r.added} added`);
+            if (r.updated) parts.push(`${r.updated} updated`);
+            if (r.removed) parts.push(`-${r.removed} removed`);
+            toast.success("Rescan complete", parts.join(", ") || "No changes.");
+            onComplete();
+          } catch (e) {
+            toast.error("Rescan failed", e instanceof Error ? e.message : undefined);
+          } finally {
+            setBusy(false);
+          }
+        })();
       }}
     >
       {busy ? "Rescanning…" : "Rescan"}
@@ -367,7 +371,7 @@ function MusicWorkspace({
     };
   }, [searching, query, path, refreshKey, setChecked]);
 
-  const loadAll = useCallback(musicAllFolders, []);
+  const loadAll = useCallback(() => musicAllFolders(), []);
 
   function revealTrack(t: Track) {
     setFocused(t.id);
@@ -412,7 +416,7 @@ function MusicWorkspace({
             onSelect={onPathChange}
             loadAll={loadAll}
             refreshKey={refreshKey}
-            onDropOnFolder={onDropOnFolder}
+            onDropOnFolder={(folderPath, payload) => void onDropOnFolder(folderPath, payload)}
           />
           <FolderActions
             root="music"
@@ -566,7 +570,7 @@ function SfxBrowser({
     };
   }, [path, refreshKey]);
 
-  const loadAll = useCallback(sfxAllFolders, []);
+  const loadAll = useCallback(() => sfxAllFolders(), []);
 
   async function onDropOnFolder(folderPath: string, payload: unknown) {
     if (
@@ -624,7 +628,7 @@ function SfxBrowser({
       onPathChange={onPathChange}
       refreshKey={refreshKey}
       loadAll={loadAll}
-      onDropOnFolder={onDropOnFolder}
+      onDropOnFolder={(folderPath, payload) => void onDropOnFolder(folderPath, payload)}
       onRefresh={onRefresh}
       onPathReset={() => onPathChange("")}
       error={error}
@@ -637,6 +641,7 @@ function SfxBrowser({
         ) : (
           <ul className="sfx-file-list">
             {files.map((f) => (
+              /* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Native drag behavior belongs to the list row while its action buttons remain keyboard accessible. */
               <li
                 key={f.path}
                 className="sfx-file-row"
@@ -1215,7 +1220,7 @@ function SelectionToolbar({
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const loadAll = useCallback(musicAllFolders, []);
+  const loadAll = useCallback(() => musicAllFolders(), []);
 
   const ids = [...selected];
 
@@ -1466,7 +1471,9 @@ function MusicTrackList({
             <th>Name</th>
             <th>File</th>
             <th className="col-num">Length</th>
-            <th className="col-actions" />
+            <th className="col-actions" scope="col">
+              <span className="sr-only">Actions</span>
+            </th>
           </tr>
         </thead>
         <tbody>

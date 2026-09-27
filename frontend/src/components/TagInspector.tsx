@@ -78,7 +78,7 @@ const ALL_FIELDS = [...LIBRARY_FIELDS, ...TAG_FIELDS];
 
 function fieldStr(t: Track, key: FieldKey): string {
   if (key === "release_date") return trackReleaseDate(t);
-  const v = t[key] as string | number | null | undefined;
+  const v = t[key];
   return v === null || v === undefined ? "" : String(v);
 }
 

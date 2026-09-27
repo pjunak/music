@@ -4,7 +4,7 @@
     "correctness": "off"
   },
   "jsPlugins": [
-    "./local-plugin.js"
+    "./local-plugin.mts"
   ],
   "rules": {
     "local/stable-store-selector": "error"

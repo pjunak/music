@@ -78,8 +78,16 @@ export function LibraryCleanupRunView() {
       <CleanupWorkflow
         path={path}
         checkedIds={checkedIds}
-        onClose={() => navigate("/library")}
-        onOpenHistory={() => navigate("../history")}
+        onClose={() => {
+          void Promise.resolve(navigate("/library")).catch((error: unknown) => {
+            toast.error("Navigation failed", error instanceof Error ? error.message : undefined);
+          });
+        }}
+        onOpenHistory={() => {
+          void Promise.resolve(navigate("../history")).catch((error: unknown) => {
+            toast.error("Navigation failed", error instanceof Error ? error.message : undefined);
+          });
+        }}
         onApplied={() => undefined}
       />
     </div>
@@ -112,7 +120,17 @@ export function LibraryCleanupHistoryView() {
 
 export function LibraryCleanupRejectedView() {
   const navigate = useNavigate();
-  return <CleanupWorkflow path="" checkedIds={[]} startInRejected onClose={() => navigate("/library")} onApplied={() => undefined} />;
+  return <CleanupWorkflow
+    path=""
+    checkedIds={[]}
+    startInRejected
+    onClose={() => {
+      void Promise.resolve(navigate("/library")).catch((error: unknown) => {
+        toast.error("Navigation failed", error instanceof Error ? error.message : undefined);
+      });
+    }}
+    onApplied={() => undefined}
+  />;
 }
 
 function capabilityLabel(capability: string): string {

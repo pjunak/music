@@ -249,7 +249,10 @@ export function EqAssistantView({
 
       <div className="assistant-workbench">
         <aside className="assistant-composer">
-          <form className="surface-card assistant-form" onSubmit={startDraft}>
+          <form
+            className="surface-card assistant-form"
+            onSubmit={(event) => void startDraft(event)}
+          >
             <Field label="Preset name">
               <input
                 value={name}
@@ -311,7 +314,11 @@ export function EqAssistantView({
                   max={Math.max(1, job.progress_total)}
                 />
               )}
-              <button type="button" className="btn-secondary" onClick={cancelDraft}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => void cancelDraft()}
+              >
                 {job.status === "cancel_requested" ? "Cancelling…" : "Cancel draft"}
               </button>
             </section>

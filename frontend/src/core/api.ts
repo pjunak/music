@@ -84,7 +84,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (!response.ok || (text && !looksLikeJson)) {
     const fromJson =
       parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
-        ? formatApiDetail((parsed as { detail: unknown }).detail)
+        ? formatApiDetail(parsed.detail)
         : null;
     const snippet = text.slice(0, 200).replace(/\s+/g, " ").trim();
     const detail =
@@ -200,7 +200,9 @@ function formatApiDetail(detail: unknown): string | null {
       return null;
     }
   }
-  return detail == null ? null : String(detail);
+  return typeof detail === "number" || typeof detail === "boolean" || typeof detail === "bigint"
+    ? String(detail)
+    : null;
 }
 
 export interface AuthoringImportPreview {

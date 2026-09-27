@@ -527,7 +527,7 @@ export function PlaylistBuilderView({
             planningMethod === "model" ? " is-model-planning" : ""
           }`}
         >
-          <form className="assistant-form" onSubmit={suggest}>
+          <form className="assistant-form" onSubmit={(event) => void suggest(event)}>
             <Field
               label="Mood or scene"
               hint="Try: tense rainy investigation, calm tavern, or triumphant battle."
@@ -546,6 +546,7 @@ export function PlaylistBuilderView({
               <legend>Planning method</legend>
               <div className="assistant-planning-options">
                 <label
+                  aria-label="Local planner"
                   className={`assistant-planning-option${
                     planningMethod === "local" ? " is-selected" : ""
                   }`}
@@ -564,6 +565,7 @@ export function PlaylistBuilderView({
                   </span>
                 </label>
                 <label
+                  aria-label="Connected model"
                   className={`assistant-planning-option${
                     planningMethod === "model" ? " is-selected" : ""
                   }${

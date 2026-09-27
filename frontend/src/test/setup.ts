@@ -41,7 +41,7 @@ function makeStorage(): Storage {
       data.set(key, String(value));
     },
   };
-  return storage as Storage;
+  return storage;
 }
 
 for (const name of ["localStorage", "sessionStorage"] as const) {

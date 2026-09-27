@@ -6,17 +6,29 @@ import { setImmediate } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 import { checkCancelled, frameCount, FRAME_SIZE, HOP, MAX_SAMPLES, PATCH_FRAMES, PATCH_HOP,
-  readInputs, withReferenceRuntime } from "./effnet-reference.mjs";
+  readInputs, withReferenceRuntime } from "./effnet-reference.mts";
+import type { ReferenceOptions, ReferenceRuntime, ReferenceScores } from "./effnet-reference.mts";
 
 const MEL_BANDS = 96;
 const AGGREGATION = "nearest_patch_center_time_partition/v1";
+export interface ScheduledPatch {
+  frame_start: number;
+  valid_start_sample: number;
+  valid_end_sample: number;
+  padding_start_samples: number;
+  padding_end_samples: number;
+  weight_start_sample: number;
+  weight_end_sample: number;
+}
+interface SummaryHead { mean: Float64Array; m2: Float64Array; max: Float64Array }
+export type ReferenceRuntimeProvider = <T>(options: ReferenceOptions, consume: (runtime: ReferenceRuntime) => T | Promise<T>) => Promise<T>;
 
 // Each sample contributes once. These weights are a summary convention, not mood boundaries.
-export function* patchSchedule(sampleCount) {
+export function* patchSchedule(sampleCount: number): Generator<ScheduledPatch, void> {
   const count = frameCount(sampleCount), last = count - PATCH_FRAMES;
   assert(last >= 0, "Audio is too short for one complete patch");
-  const center = start => (start + (PATCH_FRAMES - 1) / 2) * HOP;
-  let start = 0, previous = null;
+  const center = (start: number): number => (start + (PATCH_FRAMES - 1) / 2) * HOP;
+  let start = 0, previous: number | null = null;
   while (true) {
     const next = start === last ? null : Math.min(start + PATCH_HOP, last);
     const supportStart = start * HOP - FRAME_SIZE / 2;
@@ -33,12 +45,23 @@ export function* patchSchedule(sampleCount) {
   }
 }
 
-function sameSnapshot(left, right) {
-  return ["dev", "ino", "size", "mtimeNs", "ctimeNs"].every(key => left[key] === right[key]);
+function sameSnapshot(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
+    left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
 }
 
 export class PcmFrames {
-  constructor(file) {
+  file: string;
+  fd: number | undefined;
+  before: fs.BigIntStats;
+  samples: number;
+  count: number;
+  hash: ReturnType<typeof createHash>;
+  consumed: number;
+  finished: boolean;
+  digest?: string;
+
+  constructor(file: string) {
     this.file = file;
     this.fd = fs.openSync(file, "r");
     try {
@@ -54,7 +77,9 @@ export class PcmFrames {
       this.finished = false;
     } catch (error) { this.close(); throw error; }
   }
-  *frames(signal) {
+  *frames(signal?: AbortSignal): Generator<Float32Array, void> {
+    const descriptor = this.fd;
+    assert(descriptor !== undefined, "PCM stream is closed");
     const bytes = Buffer.alloc(HOP * 4), frame = new Float32Array(FRAME_SIZE);
     for (let i = 0; i < this.count; i++) {
       checkCancelled(signal);
@@ -62,7 +87,7 @@ export class PcmFrames {
       const needed = Math.min(HOP, this.samples - this.consumed) * 4;
       let used = 0;
       while (used < needed) {
-        const read = fs.readSync(this.fd, bytes, used, needed - used, null);
+        const read: number = fs.readSync(descriptor, bytes, used, needed - used, null);
         assert(read > 0, "PCM was truncated during streaming");
         used += read;
       }
@@ -76,8 +101,8 @@ export class PcmFrames {
       yield frame; // Reused buffer; the consumer must finish before requesting the next frame.
     }
     assert.equal(this.consumed, this.samples);
-    assert.equal(fs.readSync(this.fd, bytes, 0, 1, null), 0, "PCM grew during streaming");
-    assert(sameSnapshot(this.before, fs.fstatSync(this.fd, { bigint: true })) &&
+    assert.equal(fs.readSync(descriptor, bytes, 0, 1, null), 0, "PCM grew during streaming");
+    assert(sameSnapshot(this.before, fs.fstatSync(descriptor, { bigint: true })) &&
       sameSnapshot(this.before, fs.statSync(this.file, { bigint: true })), "PCM changed during streaming");
     this.digest = this.hash.digest("hex");
     this.finished = true;
@@ -88,22 +113,29 @@ export class PcmFrames {
 }
 
 export class TrackSummary {
+  end: number;
+  patches: number;
+  heads: Record<"mood" | "instrument", SummaryHead>;
+
   constructor() {
     this.end = 0;
     this.patches = 0;
-    this.heads = Object.fromEntries([["mood", 56], ["instrument", 40]].map(([name, length]) =>
-      [name, { mean: new Float64Array(length), m2: new Float64Array(length), max: new Float64Array(length) }]));
+    this.heads = {
+      mood: { mean: new Float64Array(56), m2: new Float64Array(56), max: new Float64Array(56) },
+      instrument: { mean: new Float64Array(40), m2: new Float64Array(40), max: new Float64Array(40) },
+    };
   }
-  add(patch, scores) {
+  add(patch: Pick<ScheduledPatch, "weight_start_sample" | "weight_end_sample">, scores: ReferenceScores): void {
     const begin = patch.weight_start_sample, end = patch.weight_end_sample;
     assert(Number.isSafeInteger(begin) && Number.isSafeInteger(end) && begin === this.end && end > begin,
       "Weights must partition valid time exactly");
-    for (const [name, head] of Object.entries(this.heads)) {
+    const heads = [["mood", this.heads.mood], ["instrument", this.heads.instrument]] as const;
+    for (const [name, head] of heads) {
       assert(scores[name]?.length === head.mean.length &&
         scores[name].every(value => Number.isFinite(value) && value >= 0 && value <= 1), "Invalid head scores");
     }
     const weight = end - begin;
-    for (const [name, head] of Object.entries(this.heads)) {
+    for (const [name, head] of heads) {
       scores[name].forEach((value, i) => {
         const delta = value - head.mean[i];
         head.mean[i] += weight / end * delta;
@@ -114,7 +146,7 @@ export class TrackSummary {
     this.end = end;
     this.patches++;
   }
-  finish(samples) {
+  finish(samples: number): Record<string, { mean: number[]; stddev: number[]; max: number[] }> {
     assert(this.end === samples && this.patches > 0, "Incomplete track summary");
     return Object.fromEntries(Object.entries(this.heads).map(([name, head]) => [name, {
       mean: Array.from(head.mean), stddev: Array.from(head.m2, value => Math.sqrt(Math.max(0, value / samples))),
@@ -123,7 +155,11 @@ export class TrackSummary {
   }
 }
 
-export async function streamTrack(file, runtime, { signal, onPatch = () => {} } = {}) {
+export async function streamTrack(
+  file: string,
+  runtime: ReferenceRuntime,
+  { signal, onPatch = () => {} }: { signal?: AbortSignal; onPatch?: (patch: ScheduledPatch & ReferenceScores) => void | Promise<void> } = {},
+) {
   checkCancelled(signal);
   const input = new PcmFrames(file), started = performance.now();
   try {
@@ -156,10 +192,10 @@ export async function streamTrack(file, runtime, { signal, onPatch = () => {} } 
   } finally { input.close(); }
 }
 
-export async function generateStreamReference(options, withRuntime = withReferenceRuntime) {
+export async function generateStreamReference(options: ReferenceOptions, withRuntime: ReferenceRuntimeProvider = withReferenceRuntime) {
   const inputs = readInputs(options.inputs);
   const output = fs.openSync(options.output, "wx");
-  const write = record => fs.writeFileSync(output, JSON.stringify(record) + "\n");
+  const write = (record: Record<string, unknown>): void => fs.writeFileSync(output, JSON.stringify(record) + "\n");
   const started = performance.now(), cpuStart = process.cpuUsage();
   let tracks = 0, patches = 0;
   try {
@@ -185,23 +221,25 @@ export async function generateStreamReference(options, withRuntime = withReferen
     // Only completed tracks and successfully released runtime sessions can complete the run.
     write({ record_type: "complete", ...result });
     return result;
-  } catch (error) {
-    if (error?.name !== "AbortError") throw error;
+  } catch (error: unknown) {
+    if (error === null || typeof error !== "object" || !("name" in error) || error.name !== "AbortError") throw error;
     const result = { status: "cancelled", tracks, patches };
     write({ record_type: "cancelled", ...result });
     return result;
   } finally { fs.closeSync(output); }
 }
 
-export async function main(args) {
+export async function main(args: string[]) {
   const { values } = parseArgs({
     args, options: Object.fromEntries(["inputs", "essentia", "ort", "models", "output"].map(key => [key, { type: "string" }])),
   });
   assert(["inputs", "essentia", "ort", "models", "output"].every(key => values[key]),
     "Usage: --inputs PCM_PATHS_JSON --essentia PACKAGE_DIRECTORY --ort PACKAGE_DIRECTORY --models DIRECTORY --output NEW_JSONL");
   const controller = new AbortController(), cancel = () => controller.abort();
+  const required = (key: string): string => { const value = values[key]; assert(value); return value; };
   process.on("SIGINT", cancel); process.on("SIGTERM", cancel);
-  try { return await generateStreamReference({ ...values, signal: controller.signal }); }
+  try { return await generateStreamReference({ inputs: required("inputs"), essentia: required("essentia"), ort: required("ort"),
+    models: required("models"), output: required("output"), signal: controller.signal }); }
   finally { process.off("SIGINT", cancel); process.off("SIGTERM", cancel); }
 }
 

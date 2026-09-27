@@ -5,6 +5,11 @@ function number(value: unknown): string {
   return typeof value === "number" && Number.isFinite(value) ? String(Math.round(value * 100) / 100) : "unknown";
 }
 function label(value: unknown): string { return typeof value === "string" ? value.replaceAll("_", " ") : "unknown"; }
+function itemName(item: unknown): string {
+  if (typeof item === "string") return item;
+  const name = object(item).name;
+  return typeof name === "string" ? name : "unknown";
+}
 
 export function ModelInputEvidence({ input }: { input: Record<string, unknown> }) {
   const context = object(input.context_evidence);
@@ -16,7 +21,7 @@ export function ModelInputEvidence({ input }: { input: Record<string, unknown> }
   const catalog = object(input.catalog_evidence);
   const claims = Array.isArray(catalog.claims) ? catalog.claims.map(object) : [];
   const claimValue = (value: unknown) => Array.isArray(value)
-    ? value.map((item) => typeof item === "string" ? item : String(object(item).name ?? "unknown")).join(", ")
+    ? value.map(itemName).join(", ")
     : typeof value === "string" ? value : "unknown";
   const metadata = ["artist", "album", "origin", "genre"].filter((key) => typeof input[key] === "string" && input[key] !== "");
   return <details>

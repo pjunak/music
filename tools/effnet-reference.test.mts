@@ -6,15 +6,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { decodePcm, frameCount, MAX_SAMPLES, patchSamples, readBounded, readInputs, selectPatches, projectModelMetadata, loadModelMetadata } from "./effnet-reference.mjs";
+import { decodePcm, frameCount, MAX_SAMPLES, patchSamples, readBounded, readInputs, selectPatches, projectModelMetadata, loadModelMetadata } from "./effnet-reference.mts";
 
-test("float32-le input retains quiet and signed values without normalization", () => {
+void test("float32-le input retains quiet and signed values without normalization", () => {
   const expected = [0, -0, 0.25, -2, Math.fround(1e-20)], bytes = Buffer.alloc(expected.length * 4);
   expected.forEach((value, i) => bytes.writeFloatLE(value, i * 4));
   assert.deepEqual(Array.from(decodePcm(bytes)), expected);
 });
 
-test("invalid, empty and non-finite PCM is rejected", () => {
+void test("invalid, empty and non-finite PCM is rejected", () => {
   for (const size of [0, 1, 3, 5]) assert.throws(() => decodePcm(Buffer.alloc(size)), /float32-le/);
   for (const value of [NaN, Infinity, -Infinity]) {
     const bytes = Buffer.alloc(4); bytes.writeFloatLE(value);
@@ -22,7 +22,7 @@ test("invalid, empty and non-finite PCM is rejected", () => {
   }
 });
 
-test("centered frame counts include both boundaries without silence filtering", () => {
+void test("centered frame counts include both boundaries without silence filtering", () => {
   for (const [length, count] of [[1, 2], [255, 2], [256, 2], [257, 3], [512, 3], [513, 4], [32768, 129]]) {
     assert.equal(frameCount(length), count);
   }
@@ -30,11 +30,12 @@ test("centered frame counts include both boundaries without silence filtering", 
   assert.equal(frameCount(MAX_SAMPLES), 56251);
 });
 
-test("patch selection uses the 62-frame interior grid and always reaches the final frame", () => {
+void test("patch selection uses the 62-frame interior grid and always reaches the final frame", () => {
   for (const size of [32257, 32768, 33025, 100000, MAX_SAMPLES]) {
-    const selected = selectPatches(size), count = frameCount(size);
+    const selected = selectPatches(size), count = frameCount(size), ending = selected.at(-1);
+    assert.ok(selected[0]); assert.ok(ending);
     assert.equal(selected[0].frame_start, 0);
-    assert.equal(selected.at(-1).frame_start + 128, count);
+    assert.equal(ending.frame_start + 128, count);
     assert.equal(new Set(selected.map(item => item.frame_start)).size, selected.length);
     assert(selected.length >= 1 && selected.length <= 3);
     const middle = selected.find(item => item.position === "middle");
@@ -44,7 +45,7 @@ test("patch selection uses the 62-frame interior grid and always reaches the fin
   assert.throws(() => selectPatches(32256), /too short/);
 });
 
-test("beginning padding never shifts the original samples", () => {
+void test("beginning padding never shifts the original samples", () => {
   const samples = Float32Array.from({ length: 40000 }, (_, i) => i + 1), patch = patchSamples(samples, 0);
   assert.equal(patch.sample_offset, 0);
   assert.equal(patch.samples.length, 33024);
@@ -55,7 +56,7 @@ test("beginning padding never shifts the original samples", () => {
   assert.equal(patch.valid_end_sample, 32768);
 });
 
-test("silent beginnings, internal gaps and endings retain their exact timeline positions", () => {
+void test("silent beginnings, internal gaps and endings retain their exact timeline positions", () => {
   const samples = new Float32Array(100001);
   samples[2048] = 0.25; samples[31000] = -0.5; samples[66000] = 1;
   for (const selected of selectPatches(samples.length)) {
@@ -73,9 +74,10 @@ test("silent beginnings, internal gaps and endings retain their exact timeline p
   assert.equal(patchSamples(new Float32Array(samples.length), 0).samples.filter(Boolean).length, 0);
 });
 
-test("ending padding follows the last original sample and never repeats the tail", () => {
+void test("ending padding follows the last original sample and never repeats the tail", () => {
   const samples = new Float32Array(100001); samples[samples.length - 1] = 0.75;
-  const start = selectPatches(samples.length).at(-1).frame_start;
+  const ending = selectPatches(samples.length).at(-1); assert.ok(ending);
+  const start = ending.frame_start;
   const patch = patchSamples(samples, start), last = samples.length - 1 - (start * 256 - 256);
   assert.equal(patch.samples[last], 0.75);
   assert(patch.samples.slice(last + 1).every(value => value === 0));
@@ -85,14 +87,14 @@ test("ending padding follows the last original sample and never repeats the tail
   assert.deepEqual(overlapping.slice(0, 512), Array.from(samples.slice(start * 256, start * 256 + 512)));
 });
 
-test("invalid patch positions and non-finite support fail explicitly", () => {
+void test("invalid patch positions and non-finite support fail explicitly", () => {
   const samples = new Float32Array(40000);
   for (const start of [-1, 0.5, NaN, 31]) assert.throws(() => patchSamples(samples, start), /outside/);
   samples[1] = NaN;
   assert.throws(() => patchSamples(samples, 0), /Non-finite/);
 });
 
-test("bounded readers reject oversized files and invalid private manifests", async () => {
+void test("bounded readers reject oversized files and invalid private manifests", async () => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), "music-reference-"));
   try {
     const file = path.join(directory, "paths.json");
@@ -108,21 +110,31 @@ test("bounded readers reject oversized files and invalid private manifests", asy
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
-test("failed CLI does not print private paths, tensors or a reference completion", async () => {
-  const cli = fileURLToPath(new URL("./effnet-reference.mjs", import.meta.url));
+void test("failed CLI does not print private paths, tensors or a reference completion", async () => {
+  const cli = fileURLToPath(new URL("./effnet-reference.mts", import.meta.url));
   try {
     await promisify(execFile)(process.execPath, [cli, "--inputs", path.join(tmpdir(), "private-recording-name.json"),
       "--essentia", "absent", "--ort", "absent", "--models", "absent", "--output", "absent"]);
     assert.fail("Expected the missing-input command to fail");
-  } catch (error) {
-    assert.equal(error.code, 1);
-    assert.equal(error.stdout, "");
-    assert.match(error.stderr, /EffNet reference failed/);
-    assert.doesNotMatch(error.stderr, /private-recording-name|stack|at main/);
+  } catch (error: unknown) {
+    assert(error instanceof Error && "code" in error && "stdout" in error && "stderr" in error);
+    const failure = error as Error & { code: number; stdout: string; stderr: string };
+    assert.equal(failure.code, 1);
+    assert.equal(failure.stdout, "");
+    assert.match(failure.stderr, /EffNet reference failed/);
+    assert.doesNotMatch(failure.stderr, /private-recording-name|stack|at main/);
   }
 });
 
-function headMetadata(role = "mood") {
+interface MutableMetadata {
+  name: string;
+  version: string;
+  classes: Array<string | number>;
+  inference: { sample_rate: number; embedding_model: { model_name: string } };
+  schema: { outputs: Array<{ output_purpose: string; shape: Array<string | number> }> };
+}
+
+function headMetadata(role: "mood" | "instrument" = "mood"): MutableMetadata {
   const length = role === "mood" ? 56 : 40;
   return {
     name: role === "mood" ? "mtg_jamendo_moodtheme" : "mtg_jamendo_instrument", version: "1",
@@ -132,8 +144,8 @@ function headMetadata(role = "mood") {
   };
 }
 
-test("head metadata retains the exact label positions independently of its input object", () => {
-  for (const role of ["mood", "instrument"]) {
+void test("head metadata retains the exact label positions independently of its input object", () => {
+  for (const role of ["mood", "instrument"] as const) {
     const metadata = headMetadata(role);
     metadata.classes[0] = "z-last-alphabetically"; metadata.classes[1] = "A-first-alphabetically";
     const result = projectModelMetadata(role, metadata);
@@ -145,12 +157,12 @@ test("head metadata retains the exact label positions independently of its input
   }
 });
 
-test("label counts, duplicates and malformed names cannot define score meanings", () => {
-  const variants = [
-    m => m.classes.pop(), m => m.classes.push("extra"), m => { m.classes[0] = m.classes[1]; },
-    m => { m.classes[0] = ""; }, m => { m.classes[0] = " padded "; },
-    m => { m.classes[0] = 1; }, m => { m.classes[0] = "line\nbreak"; },
-    m => { m.classes[0] = "x".repeat(129); },
+void test("label counts, duplicates and malformed names cannot define score meanings", () => {
+  const variants: Array<(metadata: ReturnType<typeof headMetadata>) => void> = [
+    metadata => { metadata.classes.pop(); }, metadata => { metadata.classes.push("extra"); }, metadata => { metadata.classes[0] = metadata.classes[1]; },
+    metadata => { metadata.classes[0] = ""; }, metadata => { metadata.classes[0] = " padded "; },
+    metadata => { metadata.classes[0] = 1; }, metadata => { metadata.classes[0] = "line\nbreak"; },
+    metadata => { metadata.classes[0] = "x".repeat(129); },
   ];
   for (const mutate of variants) {
     const metadata = headMetadata(); mutate(metadata);
@@ -158,13 +170,13 @@ test("label counts, duplicates and malformed names cannot define score meanings"
   }
 });
 
-test("wrong model, version, sample rate, dimensions or encoder pairing fail explicitly", () => {
-  const variants = [
-    m => { m.name = "other-head"; }, m => { m.version = "2"; },
-    m => { m.inference.sample_rate = 44100; }, m => { m.schema.outputs[0].shape = [40]; },
-    m => { m.schema.outputs[0].output_purpose = "embeddings"; },
-    m => { m.schema.outputs.push(m.schema.outputs[0]); },
-    m => { m.inference.embedding_model.model_name = "other-1280-encoder"; },
+void test("wrong model, version, sample rate, dimensions or encoder pairing fail explicitly", () => {
+  const variants: Array<(metadata: ReturnType<typeof headMetadata>) => void> = [
+    metadata => { metadata.name = "other-head"; }, metadata => { metadata.version = "2"; },
+    metadata => { metadata.inference.sample_rate = 44100; }, metadata => { metadata.schema.outputs[0].shape = [40]; },
+    metadata => { metadata.schema.outputs[0].output_purpose = "embeddings"; },
+    metadata => { metadata.schema.outputs.push(metadata.schema.outputs[0]); },
+    metadata => { metadata.inference.embedding_model.model_name = "other-1280-encoder"; },
   ];
   for (const mutate of variants) {
     const metadata = headMetadata(); mutate(metadata);
@@ -173,7 +185,7 @@ test("wrong model, version, sample rate, dimensions or encoder pairing fail expl
   assert.throws(() => projectModelMetadata("constructor", headMetadata()), /Unknown model role/);
 });
 
-test("encoder metadata identifies embeddings without exporting unused style labels", () => {
+void test("encoder metadata identifies embeddings without exporting unused style labels", () => {
   const metadata = {
     name: "EffnetDiscogs", version: "1", classes: Array.from({ length: 400 }, (_, i) => "style-" + i),
     inference: { sample_rate: 16000 },
@@ -183,7 +195,7 @@ test("encoder metadata identifies embeddings without exporting unused style labe
     { name: "EffnetDiscogs", version: "1", embedding_dimensions: 1280 });
 });
 
-test("unverified metadata fails before it can be used as a label map", async () => {
+void test("unverified metadata fails before it can be used as a label map", async () => {
   const directory = await fs.mkdtemp(path.join(tmpdir(), "music-model-metadata-"));
   try {
     const file = path.join(directory, "discogs-effnet-bsdynamic-1.json");

@@ -158,9 +158,9 @@ export function PlaylistsView() {
           >
             <PlaylistBuilderView
               embedded
-              onCreated={async (name) => {
+              onCreated={(name) => {
                 setAssisting(false);
-                await refresh(name);
+                void refresh(name);
               }}
             />
           </AuthoringAssistWorkspace>
@@ -168,10 +168,9 @@ export function PlaylistsView() {
           <CreatePlaylistForm
             modeId={activeModeId}
             onClose={() => setCreating(false)}
-            onCreated={async (p) => {
+            onCreated={(p) => {
               setCreating(false);
-              await refresh();
-              setSelected(p);
+              void refresh().then(() => setSelected(p));
             }}
           />
         ) : selected !== null ? (
@@ -231,7 +230,10 @@ function CreatePlaylistForm({
   }
 
   return (
-    <form onSubmit={submit} className="playlist-form surface-card authoring-card">
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="playlist-form surface-card authoring-card"
+    >
       <h3 className="section-label">New playlist</h3>
       <Field label="Name">
         <input
@@ -527,7 +529,7 @@ function PlaylistDetail({
           Click <strong>+</strong> on a row, or drag a track up into the list above.
         </p>
         <TrackBrowser
-          onPickTrack={addTrack}
+          onPickTrack={(track) => void addTrack(track)}
           dragPayload={(t) => ({
             kind: "playlist-track",
             id: t.id,

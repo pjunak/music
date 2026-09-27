@@ -48,7 +48,7 @@ describe("source and edition review", () => {
     expect(propose).toBeEnabled();
     expect(propose).not.toBeChecked();
     await user.click(propose);
-    expect(JSON.parse(screen.getByRole("status").textContent!)[0]).toMatchObject({ source: "Creator tracklist", propose: true });
+    expect(JSON.parse(screen.getByRole("status").textContent)[0]).toMatchObject({ source: "Creator tracklist", propose: true });
     await user.clear(source);
     expect(propose).not.toBeChecked();
     expect(propose).toBeDisabled();

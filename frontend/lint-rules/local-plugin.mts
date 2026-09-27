@@ -1,4 +1,4 @@
-import stableStoreSelector from "./stable-store-selector.js";
+import stableStoreSelector from "./stable-store-selector.mts";
 
 export default {
   meta: {

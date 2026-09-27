@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createCohort, scorePilot, comparePilot, main } from "./cleanup-pilot.mjs";
+import { createCohort, scorePilot, comparePilot, main } from "./cleanup-pilot.mts";
+import type { CleanupCohort, CleanupCohortTrack, CleanupManifestTrack, CleanupOperation, CleanupPlan, CleanupRun, FieldJudgment } from "./cleanup-pilot.mts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-const id = (number) => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
-const manifest = Array.from({ length: 10 }, (_, index) => ({ track_id: index + 1, family: `composer-${Math.floor(index / 2)}`, stratum: index % 2 ? "partial album" : "soundtrack" }));
-const cohort = () => {
+const id = (number: number): string => `00000000-0000-4000-8000-${String(number).padStart(12, "0")}`;
+const manifest: CleanupManifestTrack[] = Array.from({ length: 10 }, (_, index) => ({ track_id: index + 1, family: `composer-${Math.floor(index / 2)}`, stratum: index % 2 ? "partial album" : "soundtrack" }));
+const cohort = (): CleanupCohort => {
   const result = createCohort(manifest);
   for (const track of result.tracks) {
     track.reviewed = true;
@@ -20,12 +21,12 @@ const cohort = () => {
   }
   return result;
 };
-const plan = (track_id, status = "identified") => ({ schema: "library-cleanup-enrichment/v1", track_id, status, partial: false,
+const plan = (track_id: number, status: CleanupPlan["status"] = "identified"): CleanupPlan => ({ track_id, status, partial: false,
   identity: status === "identified" ? { recording_mbid: id(track_id), release_mbid: id(100) } : null, candidates: [], ops: [] });
-const run = (plans) => ({ schema: "library-cleanup-enrichment/v1", plans });
-const op = (field, old, value) => ({ track_id: 1, kind: "tag", field, old, new: value });
+const run = (plans: CleanupPlan[]): CleanupRun => ({ schema: "library-cleanup-enrichment/v1", plans });
+const op = (field: string, old: FieldJudgment["current"], value: FieldJudgment["current"]): CleanupOperation => ({ track_id: 1, kind: "tag", field, old, new: value });
 
-test("family splits are deterministic, keep siblings together and reject scope tampering", () => {
+void test("family splits are deterministic, keep siblings together and reject scope tampering", () => {
   const result = createCohort(manifest);
   assert.deepEqual(result, createCohort([...manifest].reverse()));
   assert.equal(result.tracks.filter((track) => track.split === "holdout").length, 2);
@@ -39,7 +40,7 @@ test("family splits are deterministic, keep siblings together and reject scope t
   assert.throws(() => createCohort([...manifest, manifest[0]]), /duplicate/);
 });
 
-test("independent labels are mandatory and unknown labels never improve precision", () => {
+void test("independent labels are mandatory and unknown labels never improve precision", () => {
   assert.throws(() => scorePilot(createCohort(manifest), run([])), /independent/);
   const labeled = cohort();
   labeled.tracks.forEach((track) => { track.expected_recording_mbids = null; track.expected_release_mbids = null; track.fields = {}; });
@@ -55,7 +56,7 @@ test("independent labels are mandatory and unknown labels never improve precisio
   assert.equal(score.retrieval_coverage, null);
 });
 
-test("reports missing, failed, partial and deliberate abstention separately", () => {
+void test("reports missing, failed, partial and deliberate abstention separately", () => {
   const partial = plan(3); partial.partial = true;
   const result = scorePilot(cohort(), run([plan(1, "unmatched"), plan(2, "failed"), partial]));
   assert.equal(result.all.missing_results, 7);
@@ -64,12 +65,12 @@ test("reports missing, failed, partial and deliberate abstention separately", ()
   assert.equal(result.all.partial_results, 1);
   assert.equal(result.all.recording_precision, 1);
   assert.equal(result.all.recording_coverage, 0.1);
-  assert.equal(Object.values(result.splits).reduce((sum, split) => sum + split.all.tracks, 0), 10);
+  assert.equal(Object.values(result.splits).reduce((sum, split) => sum + (split.all.tracks ?? 0), 0), 10);
 });
 
-test("retrieval includes direct identifiers and distinguishes rejected candidates from missed candidates", () => {
+void test("retrieval includes direct identifiers and distinguishes rejected candidates from missed candidates", () => {
   const unresolved = plan(2, "unmatched"); unresolved.candidates = [{ id: id(2) }];
-  const wrong = plan(3); wrong.identity.recording_mbid = id(999);
+  const wrong = plan(3); assert.ok(wrong.identity); wrong.identity.recording_mbid = id(999);
   wrong.identity.release_mbid = id(999);
   const score = scorePilot(cohort(), { result: run([plan(1), unresolved, wrong]) }).all;
   assert.equal(score.known_recordings, 10);
@@ -80,7 +81,7 @@ test("retrieval includes direct identifiers and distinguishes rejected candidate
   assert.equal(score.wrong_recordings, 1);
 });
 
-test("measures harmful proposals and useful corrections against the same metadata snapshot", () => {
+void test("measures harmful proposals and useful corrections against the same metadata snapshot", () => {
   const predicted = plan(1);
   predicted.ops = [op("artist", "Composer", "Various Artists"), op("title", "01 - Song", "Song"), op("genre", "", "Classical")];
   const score = scorePilot(cohort(), run([predicted])).all;
@@ -95,11 +96,11 @@ test("measures harmful proposals and useful corrections against the same metadat
   assert.throws(() => scorePilot(cohort(), run([predicted])), /different original metadata snapshots/);
 });
 
-test("explicit no-match labels penalize proposed identities, acceptable editions support alternatives", () => {
+void test("explicit no-match labels penalize proposed identities, acceptable editions support alternatives", () => {
   const labeled = cohort();
   labeled.tracks[0].expected_recording_mbids = [];
   labeled.tracks[0].expected_release_mbids = [id(100), id(101)];
-  const predicted = plan(1); predicted.identity.release_mbid = id(101);
+  const predicted = plan(1); assert.ok(predicted.identity); predicted.identity.release_mbid = id(101);
   const result = scorePilot(labeled, run([predicted, plan(11)]));
   assert.equal(result.all.wrong_recordings, 1);
   assert.equal(result.all.correct_releases, 1);
@@ -108,7 +109,7 @@ test("explicit no-match labels penalize proposed identities, acceptable editions
   assert.equal(result.all.recording_proposals, 1);
 });
 
-test("zero-valued source tags can be judged and corrected", () => {
+void test("zero-valued source tags can be judged and corrected", () => {
   const labeled = cohort();
   labeled.tracks[0].fields.track_no = { current: 0, acceptable: [1] };
   const predicted = plan(1); predicted.ops = [op("track_no", 0, 1)];
@@ -117,8 +118,10 @@ test("zero-valued source tags can be judged and corrected", () => {
   assert.equal(score.useful_corrections, 1);
 });
 
-test("rejects malformed exports, duplicate IDs, contradictory statuses and duplicate field proposals", () => {
+void test("rejects malformed exports, duplicate IDs, contradictory statuses and duplicate field proposals", () => {
   assert.throws(() => scorePilot(cohort(), { plans: [] }), /enrichment/);
+  assert.throws(() => scorePilot(cohort(), null), /enrichment/);
+  assert.throws(() => scorePilot(cohort(), { schema: "invalid", plans: [] }), /enrichment/);
   assert.throws(() => scorePilot(cohort(), run([plan(1), plan(1)])), /duplicate/);
   assert.throws(() => scorePilot(cohort(), run([{ ...plan(1), status: "unmatched" }])), /contradicts/);
   assert.throws(() => scorePilot(cohort(), run([{ ...plan(1), candidates: [{ id: "invalid" }] }])), /candidates/);
@@ -128,7 +131,7 @@ test("rejects malformed exports, duplicate IDs, contradictory statuses and dupli
   assert.throws(() => scorePilot(labeled, run([])), /known field/);
 });
 
-test("CLI preparation preserves existing files and bounds input size", async () => {
+void test("CLI preparation preserves existing files and bounds input size", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cleanup-pilot-"));
   try {
     const source = join(directory, "manifest.json"), target = join(directory, "cohort.json");
@@ -141,10 +144,14 @@ test("CLI preparation preserves existing files and bounds input size", async () 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-const developmentTrack = (labeled) => labeled.tracks.find((track) => track.split === "development");
-const trackOp = (track, field, old, value) => ({ ...op(field, old, value), track_id: track.track_id });
+const developmentTrack = (labeled: CleanupCohort): CleanupCohortTrack => {
+  const track = labeled.tracks.find((candidate) => candidate.split === "development");
+  assert.ok(track);
+  return track;
+};
+const trackOp = (track: CleanupCohortTrack, field: string, old: FieldJudgment["current"], value: FieldJudgment["current"]): CleanupOperation => ({ ...op(field, old, value), track_id: track.track_id });
 
-test("comparisons isolate development from pending holdout judgments and require an explicit holdout choice", () => {
+void test("comparisons isolate development from pending holdout judgments and require an explicit holdout choice", () => {
   const labeled = cohort(), track = developmentTrack(labeled);
   for (const item of labeled.tracks.filter((item) => item.split === "holdout")) {
     item.reviewed = false; item.evidence_notes = "";
@@ -165,7 +172,7 @@ test("comparisons isolate development from pending holdout judgments and require
   assert.equal(holdout.delta.recording_precision, null);
 });
 
-test("paired comparisons expose mixed identity gains and damage to already-correct fields", () => {
+void test("paired comparisons expose mixed identity gains and damage to already-correct fields", () => {
   const labeled = cohort(), track = developmentTrack(labeled);
   const before = plan(track.track_id, "unmatched"), after = plan(track.track_id);
   after.ops = [trackOp(track, "artist", "Composer", "Various Artists"), trackOp(track, "title", "01 - Song", "Song")];
@@ -182,11 +189,12 @@ test("paired comparisons expose mixed identity gains and damage to already-corre
   assert.equal(result.delta.damaged_correct_fields, 1);
   assert.equal(result.delta.useful_corrections, 1);
   assert.equal(difference.changed.fields.artist.state, "damaged_correct");
+  assert.ok(difference.changed.fields.artist.proposal);
   assert.equal(difference.changed.fields.artist.proposal.new, "Various Artists");
   assert.equal(result.delta.recording_precision, null);
 });
 
-test("lost matches and useful corrections are regressions even when aggregate precision stays perfect", () => {
+void test("lost matches and useful corrections are regressions even when aggregate precision stays perfect", () => {
   const labeled = cohort(), tracks = labeled.tracks.filter((track) => track.split === "development").slice(0, 2);
   const first = plan(tracks[0].track_id), second = plan(tracks[1].track_id);
   first.ops = [trackOp(tracks[0], "title", "01 - Song", "Song")];
@@ -200,9 +208,9 @@ test("lost matches and useful corrections are regressions even when aggregate pr
   assert.ok(result.differences[0].regressions.includes("lost_candidate"));
 });
 
-test("missing and failed results never receive credit for avoiding wrong identities or field changes", () => {
+void test("missing and failed results never receive credit for avoiding wrong identities or field changes", () => {
   const labeled = cohort(), track = developmentTrack(labeled), wrong = plan(track.track_id);
-  wrong.identity.recording_mbid = id(999); wrong.identity.release_mbid = id(999);
+  assert.ok(wrong.identity); wrong.identity.recording_mbid = id(999); wrong.identity.release_mbid = id(999);
   wrong.ops = [trackOp(track, "artist", "Composer", "Wrong"), trackOp(track, "title", "01 - Song", "Wrong")];
   for (const plans of [[], [plan(track.track_id, "failed")]]) {
     const result = comparePilot(labeled, run([wrong]), run(plans));
@@ -217,11 +225,11 @@ test("missing and failed results never receive credit for avoiding wrong identit
   assert.ok(abstained.differences[0].improvements.includes("avoided_wrong_field"));
 });
 
-test("unknown identities and fields remain unscored when predictions change", () => {
+void test("unknown identities and fields remain unscored when predictions change", () => {
   const labeled = cohort(), track = developmentTrack(labeled);
   track.expected_recording_mbids = null; track.expected_release_mbids = null; track.fields = {};
   const before = plan(track.track_id), after = plan(track.track_id);
-  after.identity.recording_mbid = id(999);
+  assert.ok(after.identity); after.identity.recording_mbid = id(999);
   after.ops = [trackOp(track, "artist", "Unknown", "Claimed")];
   const result = comparePilot(labeled, run([before]), run([after]));
   assert.equal(result.differences[0].classification, "changed");
@@ -231,7 +239,7 @@ test("unknown identities and fields remain unscored when predictions change", ()
   assert.equal(result.delta.recording_precision, null);
 });
 
-test("candidate recovery, partial results, acceptable variants and field damage stay distinct", () => {
+void test("candidate recovery, partial results, acceptable variants and field damage stay distinct", () => {
   const labeled = cohort(), track = developmentTrack(labeled);
   track.fields.artist.acceptable.push("Composer Alias");
   const before = plan(track.track_id, "unmatched"), retrieved = { ...before, candidates: [{ id: id(track.track_id) }], partial: true };
@@ -248,8 +256,9 @@ test("candidate recovery, partial results, acceptable variants and field damage 
   assert.equal(comparePilot(labeled, run([plan(track.track_id)]), run([alternate])).differences[0].regressions[0], "new_unnecessary_field_change");
 });
 
-test("comparison validates both metadata snapshots, normalizes IDs and does not modify its inputs", () => {
+void test("comparison validates both metadata snapshots, normalizes IDs and does not modify its inputs", () => {
   const labeled = cohort(), track = developmentTrack(labeled), before = plan(track.track_id), after = plan(track.track_id);
+  assert.ok(before.identity); assert.ok(after.identity);
   before.identity.recording_mbid = "abcdefab-abcd-4000-8000-000000000001";
   after.identity.recording_mbid = before.identity.recording_mbid.toUpperCase();
   track.expected_recording_mbids = [before.identity.recording_mbid];
@@ -261,22 +270,22 @@ test("comparison validates both metadata snapshots, normalizes IDs and does not 
   assert.throws(() => comparePilot(labeled, run([after]), run([before])), /different original metadata snapshots/);
 });
 
-test("CLI comparison reads retained exports, produces JSON and leaves input files unchanged", async () => {
+void test("CLI comparison reads retained exports, produces JSON and leaves input files unchanged", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cleanup-compare-"));
   try {
-    const inputs = [cohort(), run([]), run([])];
+    const inputs: [CleanupCohort, CleanupRun, CleanupRun] = [cohort(), run([]), run([])];
     const paths = ["cohort.json", "baseline.json", "changed.json"].map((name) => join(directory, name));
     await Promise.all(paths.map((path, i) => writeFile(path, JSON.stringify(inputs[i]))));
-    const { stdout } = await promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths]);
+    const { stdout } = await promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mts", "compare", ...paths]);
     assert.deepEqual(JSON.parse(stdout), comparePilot(...inputs));
-    const holdout = await promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths, "holdout"]);
+    const holdout = await promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mts", "compare", ...paths, "holdout"]);
     assert.equal(JSON.parse(holdout.stdout).split, "holdout");
     for (const [i, path] of paths.entries()) assert.deepEqual(JSON.parse(await readFile(path, "utf8")), inputs[i]);
-    await assert.rejects(promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mjs", "compare", ...paths, "all"]), /never combine/);
+    await assert.rejects(promisify(execFile)(process.execPath, ["tools/cleanup-pilot.mts", "compare", ...paths, "all"]), /never combine/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("scores precise dates and composer fields without converting them to years", () => {
+void test("scores precise dates and composer fields without converting them to years", () => {
   const labeled = cohort();
   labeled.tracks[0].fields = {
     release_date: { current: "2024", acceptable: ["2024-02-29"] },

@@ -20,14 +20,14 @@
 
   // ---- Activation gate --------------------------------------------------
 
-  function rootEl() { return document.getElementById("root"); }
+  function rootEl(): HTMLElement { return document.getElementById("root") as HTMLElement; }
 
   function reactMounted() {
     var r = rootEl();
     return !!(r && r.children && r.children.length > 0);
   }
 
-  function whenReady(fn) {
+  function whenReady(fn: () => void) {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", fn);
     } else {
@@ -37,18 +37,18 @@
 
   // ---- DOM helpers ------------------------------------------------------
 
-  function el(tag, style, text) {
+  function el(tag: string, style: string, text?: string | null) {
     var e = document.createElement(tag);
     if (style) e.style.cssText = style;
     if (text != null) e.appendChild(document.createTextNode(text));
     return e;
   }
 
-  function clearNode(node) {
+  function clearNode(node: Node) {
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
-  function setText(node, text) {
+  function setText(node: Node, text: string | null | undefined) {
     clearNode(node);
     node.appendChild(document.createTextNode(text == null ? "" : text));
   }
@@ -60,12 +60,12 @@
       var a = document.createElement("audio");
       a.volume = 0.5;
       return a.volume > 0.4 && a.volume < 0.6;
-    } catch (e) {
+    } catch (_error) {
       return false;
     }
   }
 
-  function clamp01(v) {
+  function clamp01(v: number) {
     if (v < 0) return 0;
     if (v > 1) return 1;
     return v;
@@ -80,7 +80,7 @@
     "position:fixed;top:0;left:0;right:0;bottom:0;" +
     "text-align:center;overflow:hidden;";
 
-  function renderUnsupported(reason) {
+  function renderUnsupported(reason: string | null) {
     var r = rootEl();
     clearNode(r);
     r.style.cssText = PAGE_STYLE;
@@ -93,7 +93,7 @@
     r.appendChild(wrap);
   }
 
-  function renderStartScreen(onStart) {
+  function renderStartScreen(onStart: () => void) {
     var r = rootEl();
     clearNode(r);
     r.style.cssText = PAGE_STYLE;
@@ -108,7 +108,9 @@
     btn.onclick = onStart;
     wrap.appendChild(btn);
     r.appendChild(wrap);
-    try { btn.focus(); } catch (e) {}
+    try { btn.focus(); } catch (_error) {
+      // Some TV browsers expose focus() but reject programmatic focus.
+    }
   }
 
   function renderPlayer() {
@@ -223,14 +225,14 @@
     r.appendChild(footer);
 
     return {
-      setStatus: function (text, color) {
+      setStatus: function (text: string, color: string) {
         setText(status, text);
         status.style.color = color || "#888";
       },
-      setTitle: function (text) { setText(title, text || "—"); },
-      setArtist: function (text) { setText(artist, text || ""); },
-      setAlbum: function (text) { setText(album, text || ""); },
-      setAlbumArt: function (url) {
+      setTitle: function (text: string | null | undefined) { setText(title, text || "—"); },
+      setArtist: function (text: string | null | undefined) { setText(artist, text || ""); },
+      setAlbum: function (text: string | null | undefined) { setText(album, text || ""); },
+      setAlbumArt: function (url: string | null) {
         if (url) {
           // Set src last — onload/onerror swap visibility once the
           // browser has resolved the image (cached or 404'd).
@@ -241,7 +243,7 @@
           artFallback.style.display = "";
         }
       },
-      setProgress: function (currentMs, totalMs) {
+      setProgress: function (currentMs: number, totalMs: number) {
         var c = currentMs || 0;
         var t = totalMs || 0;
         setText(timeCurrent, formatTime(c));
@@ -249,8 +251,8 @@
         var pct = t > 0 ? Math.min(100, Math.max(0, (c / t) * 100)) : 0;
         progressFill.style.width = pct + "%";
       },
-      setDeviceName: function (name) { setText(deviceName, name || ""); },
-      setPlaying: function (isPlaying) {
+      setDeviceName: function (name: string) { setText(deviceName, name || ""); },
+      setPlaying: function (isPlaying: boolean) {
         // U+25B6 ▶  /  U+23F8 ⏸ — works on legacy fonts that don't
         // have the larger play-circle codepoints.
         setText(playingIcon, isPlaying ? "▶" : "⏸");
@@ -266,9 +268,9 @@
   // policy on browsers that enforce it.
   var SILENT_WAV = "data:audio/wav;base64,UklGRmQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 
-  function makeAudioEngine(useCrossfade) {
-    var a = document.createElement("audio");
-    var b = document.createElement("audio");
+  function makeAudioEngine(useCrossfade: boolean) {
+    var a = document.createElement("audio") as CompatAudioElement;
+    var b = document.createElement("audio") as CompatAudioElement;
     a.preload = "auto";
     b.preload = "auto";
     document.body.appendChild(a);
@@ -276,10 +278,10 @@
 
     var active = a;
     var inactive = b;
-    var ramp = null;
+    var ramp: number | null = null;
     var masterVol = 1.0;
 
-    function streamUrl(trackId) {
+    function streamUrl(trackId: number) {
       return "/api/library/tracks/" + trackId + "/stream";
     }
 
@@ -287,16 +289,20 @@
       if (ramp) { clearInterval(ramp); ramp = null; }
     }
 
-    function safePlay(audioEl) {
+    function safePlay(audioEl: HTMLAudioElement) {
       try {
-        var p = audioEl.play();
-        if (p && typeof p["catch"] === "function") {
-          p["catch"](function (err) {
-            try { console.warn("[compat-mode] play() rejected:", err); } catch (e) {}
+        var p = audioEl.play() as Promise<void> | null | undefined;
+        if (p != null && typeof p["catch"] === "function") {
+          p["catch"](function (err: unknown) {
+            try { console.warn("[compat-mode] play() rejected:", err); } catch (_error) {
+              // Logging is optional on consoles with incomplete implementations.
+            }
           });
         }
       } catch (e) {
-        try { console.warn("[compat-mode] play() threw:", e); } catch (err) {}
+        try { console.warn("[compat-mode] play() threw:", e); } catch (_error) {
+          // Logging must not turn a recoverable playback failure into a crash.
+        }
       }
     }
 
@@ -306,23 +312,25 @@
     // park the target on the element and apply it on `loadedmetadata`. One
     // persistent listener per element; the latest request wins (a new src
     // load clears any stale target).
-    function attachPendingSeek(el) {
+    function attachPendingSeek(el: CompatAudioElement) {
       el.addEventListener("loadedmetadata", function () {
         var t = el.__pendingSeekS;
         el.__pendingSeekS = null;
         if (t != null) {
-          try { el.currentTime = t; } catch (e) {}
+          try { el.currentTime = t; } catch (_error) {
+            // A failed legacy-media seek is retried by the next server epoch.
+          }
         }
       });
     }
     attachPendingSeek(a);
     attachPendingSeek(b);
 
-    function requestSeek(el, targetMs) {
+    function requestSeek(el: CompatAudioElement, targetMs: number) {
       var t = targetMs / 1000;
       if (el.readyState >= 1) {  // HAVE_METADATA — safe to seek now
         el.__pendingSeekS = null;
-        try { el.currentTime = t; } catch (e) { el.__pendingSeekS = t; }
+        try { el.currentTime = t; } catch (_error) { el.__pendingSeekS = t; }
       } else {
         el.__pendingSeekS = t;
       }
@@ -335,18 +343,24 @@
         safePlay(a);
         safePlay(b);
         setTimeout(function () {
-          try { a.pause(); b.pause(); } catch (e) {}
+          try { a.pause(); b.pause(); } catch (_error) {
+            // Priming is best-effort on old autoplay implementations.
+          }
         }, 50);
-      } catch (e) {}
+      } catch (_error) {
+        // Failure to prime does not prevent a later user-initiated play attempt.
+      }
     }
 
     // Load `trackId` into the player, optionally starting at `startMs`
     // (a mid-track join or an interrupt (re)join; 0/absent = from the top).
-    function swap(trackId, crossfadeMs, shouldPlay, startMs) {
+    function swap(trackId: number, crossfadeMs: number, shouldPlay: boolean, startMs: number) {
       stopRamp();
       var url = streamUrl(trackId);
       if (!useCrossfade || crossfadeMs < 50) {
-        try { active.pause(); } catch (e) {}
+        try { active.pause(); } catch (_error) {
+          // Replacing the source remains the fallback when pause() throws.
+        }
         active.__pendingSeekS = null;
         active.src = url;
         active.volume = masterVol;
@@ -366,9 +380,13 @@
         var t = (nowMs() - startTime) / crossfadeMs;
         if (t >= 1) {
           toEl.volume = masterVol;
-          try { fromEl.pause(); } catch (e) {}
+          try { fromEl.pause(); } catch (_error) {
+            // The completed fade can still release the source below.
+          }
           fromEl.volume = masterVol;
-          try { fromEl.src = ""; } catch (e) {}
+          try { fromEl.src = ""; } catch (_error) {
+            // Source cleanup is best-effort on legacy media elements.
+          }
           stopRamp();
           return;
         }
@@ -379,15 +397,19 @@
       inactive = fromEl;
     }
 
-    function setPlaying(shouldPlay) {
+    function setPlaying(shouldPlay: boolean) {
       if (shouldPlay) safePlay(active);
-      else try { active.pause(); } catch (e) {}
+      else try { active.pause(); } catch (_error) {
+        // The server state remains authoritative if pause() is unavailable.
+      }
     }
 
-    function setVolume(v) {
+    function setVolume(v: number) {
       masterVol = clamp01(v);
       if (!ramp) {
-        try { active.volume = masterVol; } catch (e) {}
+        try { active.volume = masterVol; } catch (_error) {
+          // Some legacy engines expose a read-only volume property.
+        }
       }
     }
 
@@ -395,7 +417,7 @@
     // position_epoch gate (the server's explicit "a seek happened" signal);
     // re-gating here against the element clock would open a dead-band that
     // silently drops small honest seeks the outer gate already admitted.
-    function seek(targetMs) {
+    function seek(targetMs: number) {
       requestSeek(active, targetMs);
     }
 
@@ -404,14 +426,20 @@
       try {
         var t = active.currentTime;
         if (typeof t === "number" && !isNaN(t)) return Math.floor(t * 1000);
-      } catch (e) {}
+      } catch (_error) {
+        // An unavailable media clock is represented as null below.
+      }
       return null;
     }
 
     function clearAudio() {
       stopRamp();
-      try { a.pause(); a.src = ""; } catch (e) {}
-      try { b.pause(); b.src = ""; } catch (e) {}
+      try { a.pause(); a.src = ""; } catch (_error) {
+        // Clearing either legacy media element is independently best-effort.
+      }
+      try { b.pause(); b.src = ""; } catch (_error) {
+        // Clearing either legacy media element is independently best-effort.
+      }
     }
 
     return {
@@ -427,14 +455,17 @@
 
   // ---- Track metadata fetch ---------------------------------------------
 
-  function fetchTrack(trackId, cb) {
+  function fetchTrack(
+    trackId: number,
+    cb: (error: unknown, track: CompatTrackMetadata | null) => void
+  ) {
     try {
       var xhr = new XMLHttpRequest();
       xhr.open("GET", "/api/library/tracks/" + trackId, true);
       xhr.onreadystatechange = function () {
         if (xhr.readyState !== 4) return;
         if (xhr.status >= 200 && xhr.status < 300) {
-          try { cb(null, JSON.parse(xhr.responseText)); }
+          try { cb(null, JSON.parse(xhr.responseText) as CompatTrackMetadata); }
           catch (e) { cb(e, null); }
         } else {
           cb(new Error("HTTP " + xhr.status), null);
@@ -448,8 +479,8 @@
 
   // ---- WebSocket client w/ reconnect ------------------------------------
 
-  function makeWsClient(url, handlers) {
-    var ws = null;
+  function makeWsClient(url: string, handlers: CompatWsHandlers) {
+    var ws: WebSocket | null = null;
     var backoff = 1000;
     var stopped = false;
     // Connection attempts since startup that never reached onopen (reset to 0
@@ -474,7 +505,7 @@
       );
       try {
         ws = new WebSocket(url);
-      } catch (e) {
+      } catch (_error) {
         handlers.onStatus("WebSocket constructor failed", "#ff7373");
         scheduleReconnectOrGiveUp();
         return;
@@ -486,10 +517,10 @@
         handlers.onStatus("connected via WebSocket", "#4caf50");
         handlers.onOpen(send);
       };
-      ws.onmessage = function (event) {
-        var msg;
-        try { msg = JSON.parse(event.data); }
-        catch (e) { return; }
+      ws.onmessage = function (event: MessageEvent<string>) {
+        var msg: CompatServerMessage;
+        try { msg = JSON.parse(event.data) as CompatServerMessage; }
+        catch (_error) { return; }
         handlers.onMessage(msg);
       };
       ws.onerror = function () { /* onclose drives reconnect */ };
@@ -519,15 +550,19 @@
       setTimeout(connect, wait);
     }
 
-    function send(action) {
+    function send(action: CompatClientAction) {
       if (ws && ws.readyState === 1) {
-        try { ws.send(JSON.stringify(action)); } catch (e) {}
+        try { ws.send(JSON.stringify(action)); } catch (_error) {
+          // Reconnect reconciliation supplies the next authoritative state.
+        }
       }
     }
 
     function close() {
       stopped = true;
-      if (ws) { try { ws.close(); } catch (e) {} }
+      if (ws) { try { ws.close(); } catch (_error) {
+        // The client is already marked stopped even if close() throws.
+      } }
     }
 
     connect();
@@ -550,10 +585,10 @@
   // controller's output list — acceptable trade-off for an emergency
   // fallback path.
 
-  function makePollingClient(handlers, clientId) {
+  function makePollingClient(handlers: CompatPollingHandlers, clientId: string) {
     var stopped = false;
-    var pollTimer = null;
-    var statusTimer = null;
+    var pollTimer: number | null = null;
+    var statusTimer: number | null = null;
     var lastSuccessAt = 0;
     var errorCount = 0;
     var inFlight = false;
@@ -581,7 +616,9 @@
       try {
         var xhr = new XMLHttpRequest();
         xhr.open("GET", "/api/sync/state?client_id=" + encodeURIComponent(clientId), true);
-        try { xhr.timeout = POLL_TIMEOUT_MS; } catch (e) {}
+        try { xhr.timeout = POLL_TIMEOUT_MS; } catch (_error) {
+          // Older XHR implementations may not support a writable timeout.
+        }
         xhr.ontimeout = fail;
         xhr.onerror = fail;
         xhr.onreadystatechange = function () {
@@ -589,19 +626,21 @@
           settled = true;
           inFlight = false;
           if (xhr.status >= 200 && xhr.status < 300) {
-            var state = null;
-            try { state = JSON.parse(xhr.responseText); }
-            catch (e) { registerError(); return; }
+            var state: CompatPlayerState | null = null;
+            try { state = JSON.parse(xhr.responseText) as CompatPlayerState; }
+            catch (_error) { registerError(); return; }
             lastSuccessAt = nowMs();
             errorCount = 0;
             hardFailed = false;
-            try { handlers.onState(state); } catch (e) {}
+            try { handlers.onState(state); } catch (_error) {
+              // A later poll can recover from a malformed state application.
+            }
           } else {
             registerError();
           }
         };
         xhr.send(null);
-      } catch (e) {
+      } catch (_error) {
         fail();
       }
     }
@@ -660,7 +699,7 @@
     return out;
   }
 
-  function getQueryParam(key) {
+  function getQueryParam(key: string) {
     var search = window.location.search || "";
     if (search.charAt(0) === "?") search = search.substring(1);
     var pairs = search.split("&");
@@ -668,7 +707,7 @@
       var kv = pairs[i].split("=");
       if (kv[0] === key) {
         try { return decodeURIComponent((kv[1] || "").replace(/\+/g, " ")); }
-        catch (e) { return kv[1] || ""; }
+        catch (_error) { return kv[1] || ""; }
       }
     }
     return null;
@@ -681,11 +720,13 @@
   // in Settings → Devices sticks to this id across reloads, and it's what
   // makes the device addressable in active_output_device_ids / device_volumes.
   //
-  function readPersisted(key) {
+  function readPersisted(key: string) {
     try {
       if (!window.localStorage) return null;
       return localStorage.getItem(key);
-    } catch (e) {}
+    } catch (_error) {
+      // Storage can be unavailable in private or restricted TV browser modes.
+    }
     return null;
   }
 
@@ -693,8 +734,11 @@
     var stored = readPersisted("compat-mode.client_id");
     if (stored) return stored;
     var id = "compat-" + makeShortId() + makeShortId() + nowMs().toString(36);
-    try { window.localStorage && localStorage.setItem("compat-mode.client_id", id); }
-    catch (e) {}
+    try {
+      if (window.localStorage) localStorage.setItem("compat-mode.client_id", id);
+    } catch (_error) {
+      // The in-memory identity still works for this page lifetime.
+    }
     return id;
   }
 
@@ -710,19 +754,25 @@
   function getDeviceName() {
     var fromUrl = getQueryParam("name");
     if (fromUrl) {
-      try { window.localStorage && localStorage.setItem("compat-mode.name", fromUrl); }
-      catch (e) {}
+      try {
+        if (window.localStorage) localStorage.setItem("compat-mode.name", fromUrl);
+      } catch (_error) {
+        // The requested label still applies for this page lifetime.
+      }
       return fromUrl;
     }
     var stored = readPersisted("compat-mode.name");
     if (stored) return stored;
     var generated = "Old TV (" + makeShortId() + ")";
-    try { window.localStorage && localStorage.setItem("compat-mode.name", generated); }
-    catch (e) {}
+    try {
+      if (window.localStorage) localStorage.setItem("compat-mode.name", generated);
+    } catch (_error) {
+      // The generated label remains usable for this page lifetime.
+    }
     return generated;
   }
 
-  function formatTime(ms) {
+  function formatTime(ms: number) {
     if (!ms || ms < 0 || isNaN(ms)) return "0:00";
     var totalSec = Math.floor(ms / 1000);
     var min = Math.floor(totalSec / 60);
@@ -738,12 +788,14 @@
     if (_started) return;
     _started = true;
     var crossfadeOk = supportsFractionalVolume();
-    try { console.log("[compat-mode] crossfade supported:", crossfadeOk); } catch (e) {}
+    try { console.log("[compat-mode] crossfade supported:", crossfadeOk); } catch (_error) {
+      // Logging is optional on consoles with incomplete implementations.
+    }
     var ui = renderPlayer();
     var engine = makeAudioEngine(crossfadeOk);
     engine.prime();
 
-    var lastTrackId = null;
+    var lastTrackId: number | null | undefined = null;
     var lastIsPlaying = false;
     // Whether the previously applied state had an interrupt active — drives
     // the "hard cut on lane switch" rule in applyState.
@@ -762,7 +814,7 @@
     var passivePolling = false;
     // In WS mode, the send function (captured in onOpen) — used for the 1 Hz
     // position reports below. null in polling mode (read-only transport).
-    var wsSend = null;
+    var wsSend: CompatSend | null = null;
     // Timeline state. The server owns the playback clock now, so position_ms
     // is current in every push; we interpolate between pushes locally so the
     // progress bar moves smoothly. currentTrackLengthMs comes from
@@ -773,11 +825,11 @@
     // position_epoch of the last applied state. The server bumps it ONLY on
     // deliberate moves (seek / skip / loop restart / interrupt transitions);
     // we seek iff it changed. null = no state applied yet.
-    var lastEpoch = null;
+    var lastEpoch: number | null = null;
     var lastRevision = -1;
     var hasStateThisConnection = false;
 
-    function isThisDeviceActive(state) {
+    function isThisDeviceActive(state: CompatPlayerState) {
       if (passivePolling) return true;
       var outputs = state.active_output_device_ids || [];
       for (var i = 0; i < outputs.length; i++) {
@@ -786,7 +838,7 @@
       return false;
     }
 
-    function applyState(state) {
+    function applyState(state: CompatPlayerState | null | undefined) {
       if (!state) return;
       var revision = (typeof state.revision === "number") ? state.revision : 0;
       if (hasStateThisConnection && revision < lastRevision) return;
@@ -819,7 +871,7 @@
       }
       var outputVolume = hasAbsoluteVolumes
         ? ((state.device_volumes && typeof state.device_volumes[myDeviceId] === "number")
-            ? deviceVolume : state.default_device_volume)
+            ? deviceVolume : state.default_device_volume as number)
         : ((typeof state.volume === "number" ? state.volume : 1) * deviceVolume);
       // Crossfade only applies to ambient→ambient track changes; interrupt
       // transitions are hard cuts (an alert shouldn't fade in late).
@@ -852,7 +904,7 @@
           // <img> onerror handler falls back to the placeholder glyph.
           ui.setAlbumArt("/api/library/tracks/" + trackId + "/cover");
           currentTrackLengthMs = 0;
-          fetchTrack(trackId, function (err, t) {
+          fetchTrack(trackId, function (err: unknown, t: CompatTrackMetadata | null) {
             if (err || !t) return;
             ui.setTitle(t.display_title || t.title || ("Track " + trackId));
             ui.setArtist(t.artist || "");
@@ -935,7 +987,9 @@
       setTimeout(function () {
         makePollingClient({
           onState: applyState,
-          onStatus: ui.setStatus,
+          onStatus: function (text: string, color: string) {
+            ui.setStatus(text, color);
+          },
           onHardFailure: function () {
             ui.setStatus("Cannot reach server — check network / cert", "#ff7373");
           }
@@ -952,8 +1006,10 @@
     }
 
     makeWsClient(wsUrl, {
-      onStatus: ui.setStatus,
-      onOpen: function (send) {
+      onStatus: function (text: string, color: string) {
+        ui.setStatus(text, color);
+      },
+      onOpen: function (send: CompatSend) {
         // Self-assign identity from our own stable client_id: the server's
         // your_device_id is empty by design (it doesn't know us until this
         // register arrives). This is what makes isThisDeviceActive() match
@@ -970,7 +1026,7 @@
           protocol_version: 2
         });
       },
-      onMessage: function (msg) {
+      onMessage: function (msg: CompatServerMessage) {
         if (!msg || !msg.type) return;
         // your_device_id is empty by design now — identity is our own
         // client_id (set in onOpen). Snapshot and delta both just carry state.

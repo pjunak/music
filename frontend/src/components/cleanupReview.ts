@@ -23,7 +23,7 @@ export async function rejectedOperationIds(result: CleanupAnalyzeResult): Promis
     const chunk = proposals.slice(i, i + 100);
     const matches = await cleanupApi.matchRejected(chunk);
     if (matches.length !== chunk.length) throw new Error("The rejected suggestion list could not be checked.");
-    matches.forEach((id, index) => { if (id !== null) rejected.add(chunk[index]!.op_id); });
+    matches.forEach((id, index) => { if (id !== null) rejected.add(chunk[index].op_id); });
   }
   return rejected;
 }

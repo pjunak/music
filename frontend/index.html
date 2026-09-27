@@ -13,7 +13,7 @@
          path: a browser with no module support at all skips the module script
          below and runs this immediately, no waiting. For an explicit ?compat
          preview on a modern browser, main.tsx injects it on demand. -->
-    <script nomodule src="/compat-mode.js"></script>
+    <script nomodule src="/compat-mode.js" vite-ignore></script>
     <script type="module" src="/src/main.tsx"></script>
     <!-- SPA boot watchdog (classic script — runs on every browser, ES5 only).
          `nomodule` above gates on *module support*, but that isn't the same as
@@ -29,37 +29,6 @@
          old paint timer it can't steal #root from a capable-but-slow browser; a
          render crash stays owned by the ErrorBoundary (which keeps #root
          populated). -->
-    <script>
-      (function () {
-        var rescued = false;
-        function rescueToCompatMode() {
-          if (rescued || window.__SPA_BOOTED__ || window.__COMPAT_MODE_ACTIVE__) return;
-          rescued = true;
-          var s = document.createElement("script");
-          s.src = "/compat-mode.js";
-          (document.body || document.documentElement).appendChild(s);
-        }
-        // Fast path: a script parse/eval error (the `??` SyntaxError) or a
-        // failed bundle fetch fires here before boot. Defer briefly so a
-        // transient error on an otherwise-booting bundle lets boot win the race.
-        window.addEventListener("error", function (e) {
-          if (window.__SPA_BOOTED__) return;
-          var t = e && e.target;
-          if ((t && t.tagName === "SCRIPT") || (e && e.message)) {
-            setTimeout(rescueToCompatMode, 250);
-          }
-        }, true);
-        // Once the page finishes loading, the load-blocking module bundle has
-        // either executed (flag set -> no-op) or silently failed to (flag unset
-        // -> rescue, for TVs that don't surface a catchable parse error). A
-        // short grace absorbs any execution lag.
-        window.addEventListener("load", function () {
-          setTimeout(rescueToCompatMode, 1500);
-        });
-        // Absolute backstop for the pathological "load never fires" hang (e.g. a
-        // module fetch that stalls without erroring).
-        setTimeout(rescueToCompatMode, 10000);
-      })();
-    </script>
+    <script data-compat-watchdog></script>
   </body>
 </html>

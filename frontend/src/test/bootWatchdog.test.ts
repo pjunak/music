@@ -1,8 +1,8 @@
-/** Tests for the SPA boot watchdog (the inline ES5 `<script>` in index.html)
+/** Tests for the generated ES5 SPA boot watchdog
  *  and its contract with the boot beacon in main.tsx.
  *
- *  We extract and run the REAL inline watchdog out of index.html — no second
- *  copy to drift — driving it with an injected window/document so each case is
+ *  We generate the same watchdog that Vite inlines into index.html, then run
+ *  it with an injected window/document so each case is
  *  fully isolated (fresh closure + fresh listener registry + fresh timer set).
  *  The scenarios simulate the reported bug: an older TV that supports
  *  `<script type=module>` yet can't parse the bundle's modern syntax, so the
@@ -13,6 +13,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { generateCompatAssets } from "../../scripts/compat-build.mts";
 
 /** Read a repo file as text. Resolves from the vitest cwd (the frontend dir
  *  under `npm run test`) with a fallback for a repo-root cwd. (import.meta.url
@@ -49,24 +51,19 @@ interface WatchdogDocument {
 }
 type RunWatchdog = (window: WatchdogWindow, document: WatchdogDocument) => void;
 
-/** Pull the real inline boot-watchdog out of index.html. Comments are stripped
- *  first so a `<script …>` mentioned in prose can't be mistaken for the
- *  (attribute-less) watchdog tag. Throws loudly if the watchdog is gone — that
- *  failure means the blank-screen guard was removed, which is the point. */
-function loadWatchdogSource(): string {
-  const html = readProjectFile("index.html").replace(/<!--[\s\S]*?-->/g, "");
-  const match = html.match(/<script>([\s\S]*?)<\/script>/);
-  if (match === null) {
-    throw new Error("inline watchdog <script> not found in index.html");
+function findFrontendRoot(): string {
+  for (const root of [process.cwd(), resolve(process.cwd(), "frontend")]) {
+    try {
+      generateCompatAssets(root);
+      return root;
+    } catch {
+      // Try the repo-root fallback when Vitest was launched above frontend.
+    }
   }
-  const source = match[1];
-  if (!source.includes("rescueToCompatMode") || !source.includes("__SPA_BOOTED__")) {
-    throw new Error("extracted <script> is not the boot watchdog");
-  }
-  return source;
+  throw new Error(`could not locate compatibility sources from cwd ${process.cwd()}`);
 }
 
-const WATCHDOG_SOURCE = loadWatchdogSource();
+const WATCHDOG_SOURCE = generateCompatAssets(findFrontendRoot()).bootWatchdog;
 
 interface Harness {
   win: WatchdogWindow;

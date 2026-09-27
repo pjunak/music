@@ -69,7 +69,7 @@ export function LoginModal() {
       className="login-modal"
       closeButton
       onClose={() => setOpen(false)}
-      onSubmit={onSubmit}
+      onSubmit={(event) => void onSubmit(event)}
       footer={
         <>
           <button type="button" onClick={() => setOpen(false)}>

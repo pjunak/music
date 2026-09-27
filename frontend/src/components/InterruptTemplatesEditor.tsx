@@ -317,7 +317,10 @@ function InterruptTemplateForm({
   }
 
   return (
-    <form onSubmit={submit} className="interrupt-form surface-card authoring-card">
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="interrupt-form surface-card authoring-card"
+    >
       <h3 className="section-label">
         {mode === "create" ? "New interrupt template" : "Edit interrupt template"}
       </h3>

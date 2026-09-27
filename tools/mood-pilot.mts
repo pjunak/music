@@ -6,25 +6,115 @@ import { pathToFileURL } from "node:url";
 export const SCHEMA = "song-mood-judgments/v2";
 export const INVENTORY_SCHEMA = "song-mood-inventory/v1";
 const MAX_TRACKS = 1000;
-const STATES = new Set(["positive", "negative", "uncertain", "unjudged"]);
-const CATEGORIES = ["all", "mood", "session_use", "period", "custom"];
-const check = (ok, message) => { if (!ok) throw new Error(message); };
-const text = (value, limit = 512) => typeof value === "string" && value.length > 0 && value.length <= limit;
-const id = (value) => Number.isSafeInteger(value) && value > 0;
-const unique = (items) => Array.isArray(items) && new Set(items).size === items.length;
-function canonical(value) {
+type JudgmentState = "positive" | "negative" | "uncertain" | "unjudged";
+type Category = "all" | "mood" | "session_use" | "period" | "custom";
+type PilotSplit = "development" | "confirmation";
+export interface MoodVocabularyTag { id: string; name: string }
+export interface MoodVocabularyGroup { key: string; tags: MoodVocabularyTag[] }
+export interface MoodVocabulary { groups: MoodVocabularyGroup[]; [key: string]: unknown }
+export interface MoodInventory { schema_version: string; track_ids: number[] }
+export interface PilotManifest {
+  kind: "manifest";
+  schema_version: string;
+  seed: string;
+  vocabulary_fingerprint: string;
+  annotator: string;
+  core_tag_ids: string[];
+  separate_by: string[];
+  confirmation_fraction: number;
+  session_requests: string[];
+  selection_notes: string;
+  partition_fingerprint: string | null;
+}
+export interface PilotJudgment {
+  kind: "judgment";
+  track_id: number;
+  file_reference: string;
+  recording_group: string;
+  duplicate_group: string | null;
+  album: string | null;
+  composers: string[];
+  split: PilotSplit | null;
+  duration_seconds: number | null;
+  scope: "whole_track" | "excerpt";
+  listened_intervals: Array<[number, number]>;
+  blind: boolean | null;
+  reviewed: boolean;
+  labels: Record<string, JudgmentState>;
+  session_notes: string;
+  notes: string;
+}
+export type PilotRows = [PilotManifest, ...PilotJudgment[]];
+export interface MoodRunResult { track_id: number; tags: string[]; source_signature: string }
+export interface MoodRun { schema_version: string; run_id?: string; track_results: MoodRunResult[]; usage?: Record<string, number> }
+interface IndexedPrediction { tags: string[]; source_signature: string }
+interface VocabularyIndex {
+  tags: Map<string, { name: string; category: Exclude<Category, "all"> }>;
+  names: Map<string, string>;
+  fingerprint: string;
+}
+interface CountMap {
+  tracks: number;
+  missing_results: number;
+  empty_results: number;
+  proposed_tags: number;
+  useful_tags: number;
+  false_positive_tags: number;
+  uncertain_proposals: number;
+  unjudged_proposals: number;
+  positive_judgments: number;
+  negative_judgments: number;
+  uncertain_judgments: number;
+  unjudged_judgments: number;
+  eligible_tracks: number;
+  covered_tracks: number;
+}
+interface Metrics extends CountMap {
+  missed_positive_tags: number;
+  precision: number | null;
+  recall: number | null;
+  useful_track_coverage: number | null;
+  proposal_judgment_coverage: number | null;
+  judgment_coverage: number | null;
+}
+type MetricMap = Record<string, number | null>;
+interface IntervalReport extends Record<string, unknown> {
+  precision: [number, number] | null;
+  recall: [number, number] | null;
+  useful_track_coverage: [number, number] | null;
+  independent_groups: number;
+  replicates: number;
+  defined_replicates: Record<string, number>;
+}
+interface DeltaCategory extends Record<string, unknown> {
+  precision: number | null;
+  recall: number | null;
+  useful_track_coverage: number | null;
+  bootstrap_95: IntervalReport;
+}
+
+const STATES = new Set<JudgmentState>(["positive", "negative", "uncertain", "unjudged"]);
+const CATEGORIES: Category[] = ["all", "mood", "session_use", "period", "custom"];
+const check: (ok: unknown, message: string) => asserts ok = (ok, message) => { if (!ok) throw new Error(message); };
+const text = (value: unknown, limit = 512): value is string => typeof value === "string" && value.length > 0 && value.length <= limit;
+const id = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const unique = (items: unknown): items is unknown[] => Array.isArray(items) && new Set(items).size === items.length;
+function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonical(record[key])]));
+  }
   return value;
 }
-const hash = (value) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+const hash = (value: unknown): string => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 
-function vocabularyIndex(vocabulary) {
+function vocabularyIndex(vocabulary: MoodVocabulary): VocabularyIndex {
   check(Array.isArray(vocabulary?.groups), "Supply the vocabulary used for these judgments.");
-  const tags = new Map(), names = new Map();
+  const tags = new Map<string, { name: string; category: Exclude<Category, "all"> }>(), names = new Map<string, string>();
   for (const group of vocabulary.groups) {
     check(text(group.key) && Array.isArray(group.tags), "Invalid vocabulary group.");
-    const category = ["scene", "setting"].includes(group.key) ? "session_use" : ["mood", "period"].includes(group.key) ? group.key : "custom";
+    const category: Exclude<Category, "all"> = ["scene", "setting"].includes(group.key) ? "session_use" : group.key === "mood" || group.key === "period" ? group.key : "custom";
     for (const tag of group.tags) {
       check(text(tag.id, 128) && text(tag.name, 128) && !tags.has(tag.id) && !names.has(tag.name), "Vocabulary IDs and names must be unique.");
       tags.set(tag.id, { name: tag.name, category }); names.set(tag.name, tag.id);
@@ -34,41 +124,47 @@ function vocabularyIndex(vocabulary) {
   return { tags, names, fingerprint: hash(vocabulary) };
 }
 
-function runIndex(run, names) {
+function runIndex(run: MoodRun, names: Map<string, string>): Map<number, IndexedPrediction> {
   check(run?.schema_version === "assistant-mood-run-export/v1" && Array.isArray(run.track_results) && run.track_results.length <= 5000, "Expected a retained mood-run export.");
   const results = new Map();
   for (const row of run.track_results) {
     check(id(row.track_id) && !results.has(row.track_id) && unique(row.tags) && row.tags.length <= 8, "Invalid or duplicate run result.");
     check(row.tags.every((tag) => names.has(tag)), "Run contains a tag absent from this vocabulary.");
     check(text(row.source_signature), "Every retained result needs its source signature.");
-    results.set(row.track_id, { tags: row.tags.map((tag) => names.get(tag)), source_signature: row.source_signature });
+    results.set(row.track_id, { tags: row.tags.map((tag) => {
+      const tagId = names.get(tag); check(tagId, "Run contains a tag absent from this vocabulary."); return tagId;
+    }), source_signature: row.source_signature });
   }
   return results;
 }
 
-export function createPilot(inventory, vocabulary) {
+export function createPilot(inventory: unknown, vocabulary: MoodVocabulary): PilotRows {
   const { fingerprint } = vocabularyIndex(vocabulary);
-  check(inventory?.schema_version === INVENTORY_SCHEMA && Object.keys(inventory).every((key) => ["schema_version", "track_ids"].includes(key)), "Expected an explicit listening inventory, not model results. Export selected tracks before running the tagger.");
-  const trackIds = inventory.track_ids;
+  check(inventory !== null && typeof inventory === "object" && !Array.isArray(inventory), "Expected an explicit listening inventory, not model results. Export selected tracks before running the tagger.");
+  const candidate = inventory as Partial<MoodInventory> & Record<string, unknown>;
+  check(candidate.schema_version === INVENTORY_SCHEMA && Object.keys(candidate).every((key) => ["schema_version", "track_ids"].includes(key)), "Expected an explicit listening inventory, not model results. Export selected tracks before running the tagger.");
+  const trackIds = candidate.track_ids;
   check(unique(trackIds) && trackIds.length >= 2 && trackIds.length <= MAX_TRACKS && trackIds.every(id), "Select 2-1000 unique positive library track IDs; aim for 60-100 varied recordings.");
-  return [{ kind: "manifest", schema_version: SCHEMA, seed: "music-listening-1", vocabulary_fingerprint: fingerprint,
+  const validTrackIds = trackIds.filter(id);
+  const manifest: PilotManifest = { kind: "manifest", schema_version: SCHEMA, seed: "music-listening-1", vocabulary_fingerprint: fingerprint,
     annotator: "", core_tag_ids: [], separate_by: [], confirmation_fraction: 0.3,
-    session_requests: [], selection_notes: "", partition_fingerprint: null },
-  ...[...trackIds].sort((a, b) => a - b).map((track_id) => ({ kind: "judgment", track_id,
+    session_requests: [], selection_notes: "", partition_fingerprint: null };
+  const tracks: PilotJudgment[] = validTrackIds.sort((a, b) => a - b).map((track_id) => ({ kind: "judgment", track_id,
     file_reference: "", recording_group: "", duplicate_group: null, album: null, composers: [],
     split: null, duration_seconds: null, scope: "whole_track", listened_intervals: [], blind: null, reviewed: false,
-    labels: {}, session_notes: "", notes: "" }))];
+    labels: {}, session_notes: "", notes: "" }));
+  return [manifest, ...tracks];
 }
 
-export function parsePilot(content) {
+export function parsePilot(content: string): PilotRows {
   check(Buffer.byteLength(content) <= 10 * 1024 * 1024, "Pilot input exceeds 10 MiB.");
   const lines = content.trim().split(/\r?\n/);
   check(lines.length >= 3 && lines.length <= MAX_TRACKS + 1, "Expected a manifest and 2-1000 judgment rows in JSONL.");
-  return lines.map((line, index) => { try { return JSON.parse(line); } catch { throw new Error(`Invalid JSON on pilot line ${index + 1}.`); } });
+  return lines.map((line, index) => { try { return JSON.parse(line); } catch { throw new Error(`Invalid JSON on pilot line ${index + 1}.`); } }) as PilotRows;
 }
-export const serializePilot = (rows) => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
+export const serializePilot = (rows: readonly unknown[]): string => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 
-function validatePilot(rows, vocabulary) {
+function validatePilot(rows: PilotRows, vocabulary: MoodVocabulary) {
   check(Array.isArray(rows) && rows.length >= 3 && rows.length <= MAX_TRACKS + 1, "Expected a grouped JSONL pilot.");
   const [manifest, ...tracks] = rows, index = vocabularyIndex(vocabulary);
   check(manifest?.kind === "manifest" && manifest.schema_version === SCHEMA, "Unsupported pilot contract; prepare a new grouped listening pilot.");
@@ -85,7 +181,7 @@ function validatePilot(rows, vocabulary) {
     check(track.duplicate_group === null || text(track.duplicate_group), "Invalid duplicate group.");
     check(track.album === null || text(track.album), "Invalid album identity.");
     check(unique(track.composers) && track.composers.length <= 30 && track.composers.every((value) => text(value)), "Invalid composer identities.");
-    check(Number.isFinite(track.duration_seconds) && track.duration_seconds > 0 && track.duration_seconds <= 86400, "Set a finite recording duration in seconds (greater than zero, at most one day) before freezing.");
+    check(typeof track.duration_seconds === "number" && Number.isFinite(track.duration_seconds) && track.duration_seconds > 0 && track.duration_seconds <= 86400, "Set a finite recording duration in seconds (greater than zero, at most one day) before freezing.");
     check(["whole_track", "excerpt"].includes(track.scope) && typeof track.reviewed === "boolean" && (typeof track.blind === "boolean" || (!track.reviewed && track.blind === null)), "Record listening scope and review status; reviewed tracks need an explicit blinding status.");
     check(Array.isArray(track.listened_intervals) && track.listened_intervals.length <= 100, "Invalid listened intervals.");
     let end = 0;
@@ -97,43 +193,46 @@ function validatePilot(rows, vocabulary) {
   return { manifest, tracks, ...index };
 }
 
-function groupedTracks(tracks, separateBy) {
+function groupedTracks(tracks: PilotJudgment[], separateBy: string[]): PilotJudgment[][] {
   const parents = tracks.map((_, index) => index);
-  const root = (index) => { while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; } return index; };
-  const seen = new Map();
+  const root = (index: number): number => { while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; } return index; };
+  const seen = new Map<string, number>();
   tracks.forEach((track, index) => {
     const keys = [`recording:${track.recording_group}`, `file:${track.file_reference}`];
     if (track.duplicate_group) keys.push(`duplicate:${track.duplicate_group}`);
     if (separateBy.includes("album") && track.album) keys.push(`album:${track.album}`);
     if (separateBy.includes("composer")) keys.push(...track.composers.map((value) => `composer:${value}`));
-    for (const key of keys) { if (seen.has(key)) parents[root(index)] = root(seen.get(key)); else seen.set(key, index); }
+    for (const key of keys) {
+      const previous = seen.get(key);
+      if (previous !== undefined) parents[root(index)] = root(previous); else seen.set(key, index);
+    }
   });
-  const groups = new Map();
-  tracks.forEach((track, index) => { const key = root(index); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(track); });
+  const groups = new Map<number, PilotJudgment[]>();
+  tracks.forEach((track, index) => { const key = root(index), group = groups.get(key); if (group) group.push(track); else groups.set(key, [track]); });
   return [...groups.values()].map((group) => group.sort((a, b) => a.track_id - b.track_id));
 }
 
-function partition(manifest, tracks) {
+function partition(manifest: PilotManifest, tracks: PilotJudgment[]): Map<number, PilotSplit> {
   const groups = groupedTracks(tracks, manifest.separate_by).sort((a, b) => hash([manifest.seed, a.map((t) => t.track_id)]).localeCompare(hash([manifest.seed, b.map((t) => t.track_id)])));
   check(groups.length >= 2, "Grouping leaves fewer than two independent groups; revise the sample, not related-recording identities.");
   const confirmation = Math.max(1, Math.min(groups.length - 1, Math.round(groups.length * manifest.confirmation_fraction)));
-  return new Map(groups.flatMap((group, i) => group.map((track) => [track.track_id, i < confirmation ? "confirmation" : "development"])));
+  return new Map(groups.flatMap((group, i) => group.map((track): [number, PilotSplit] => [track.track_id, i < confirmation ? "confirmation" : "development"])));
 }
-function partitionFingerprint(manifest, tracks) {
+function partitionFingerprint(manifest: PilotManifest, tracks: PilotJudgment[]): string {
   return hash({ seed: manifest.seed, vocabulary: manifest.vocabulary_fingerprint, core: [...manifest.core_tag_ids].sort(),
     separate_by: [...manifest.separate_by].sort(), confirmation_fraction: manifest.confirmation_fraction,
     tracks: [...tracks].sort((a, b) => a.track_id - b.track_id).map((t) => [t.track_id, t.file_reference, t.duration_seconds, t.recording_group, t.duplicate_group, t.album, [...t.composers].sort(), t.split]) });
 }
-export function freezePilot(rows, vocabulary) {
+export function freezePilot(rows: PilotRows, vocabulary: MoodVocabulary): PilotRows {
   const { manifest, tracks } = validatePilot(rows, vocabulary);
   check(manifest.partition_fingerprint === null && tracks.every((track) => track.split === null), "Pilot is already frozen; do not reshuffle a confirmation cohort.");
   const splits = partition(manifest, tracks);
-  const frozen = tracks.map((track) => ({ ...track, split: splits.get(track.track_id) })).sort((a, b) => a.track_id - b.track_id);
+  const frozen = tracks.map((track) => ({ ...track, split: splits.get(track.track_id) ?? null })).sort((a, b) => a.track_id - b.track_id);
   return [{ ...manifest, partition_fingerprint: partitionFingerprint(manifest, frozen) }, ...frozen];
 }
 
-function counts(tracks, predictions, included) {
-  const result = { tracks: tracks.length, missing_results: 0, empty_results: 0, proposed_tags: 0,
+function counts(tracks: PilotJudgment[], predictions: Map<number, IndexedPrediction>, included: string[]): CountMap {
+  const result: CountMap = { tracks: tracks.length, missing_results: 0, empty_results: 0, proposed_tags: 0,
     useful_tags: 0, false_positive_tags: 0, uncertain_proposals: 0, unjudged_proposals: 0,
     positive_judgments: 0, negative_judgments: 0, uncertain_judgments: 0, unjudged_judgments: 0, eligible_tracks: 0, covered_tracks: 0 };
   for (const track of tracks) {
@@ -143,25 +242,31 @@ function counts(tracks, predictions, included) {
     let positive = 0, accepted = 0;
     for (const tag of included) {
       const state = track.labels[tag] ?? "unjudged";
-      result[`${state}_judgments`]++;
+      if (state === "positive") result.positive_judgments++;
+      else if (state === "negative") result.negative_judgments++;
+      else if (state === "uncertain") result.uncertain_judgments++;
+      else result.unjudged_judgments++;
       if (state === "positive") positive++;
       if (!proposals.has(tag)) continue;
       result.proposed_tags++;
       if (state === "positive") { result.useful_tags++; accepted++; }
       else if (state === "negative") result.false_positive_tags++;
-      else result[`${state}_proposals`]++;
+      else if (state === "uncertain") result.uncertain_proposals++;
+      else result.unjudged_proposals++;
     }
     if (positive) { result.eligible_tracks++; if (accepted) result.covered_tracks++; }
   }
   return result;
 }
-function rates(count) {
+type SumKey = "useful_tags" | "false_positive_tags" | "positive_judgments" | "eligible_tracks" | "covered_tracks";
+type RateKey = "precision" | "recall" | "useful_track_coverage";
+function rates(count: Pick<CountMap, SumKey>): Pick<Metrics, RateKey> {
   const judged = count.useful_tags + count.false_positive_tags;
   return { precision: judged ? count.useful_tags / judged : null,
     recall: count.positive_judgments ? count.useful_tags / count.positive_judgments : null,
     useful_track_coverage: count.eligible_tracks ? count.covered_tracks / count.eligible_tracks : null };
 }
-function metrics(count) {
+function metrics(count: CountMap): Metrics {
   const judged = count.useful_tags + count.false_positive_tags;
   const labels = count.positive_judgments + count.negative_judgments;
   const total = labels + count.uncertain_judgments + count.unjudged_judgments;
@@ -169,22 +274,28 @@ function metrics(count) {
     proposal_judgment_coverage: count.proposed_tags ? judged / count.proposed_tags : null,
     judgment_coverage: total ? labels / total : null };
 }
-const RATE_KEYS = ["precision", "recall", "useful_track_coverage"];
-const SUM_KEYS = ["useful_tags", "false_positive_tags", "positive_judgments", "eligible_tracks", "covered_tracks"];
-const difference = (before, after) => before === null || after === null ? null : after - before;
-function metricDelta(before, after) {
+const RATE_KEYS: RateKey[] = ["precision", "recall", "useful_track_coverage"];
+const SUM_KEYS: SumKey[] = ["useful_tags", "false_positive_tags", "positive_judgments", "eligible_tracks", "covered_tracks"];
+const difference = (before: number | null, after: number | null): number | null => before === null || after === null ? null : after - before;
+function metricDelta(before: object, after: object): MetricMap {
+  const afterValues = new Map<string, unknown>(Object.entries(after));
   return Object.fromEntries(Object.entries(before)
     .filter(([, value]) => value === null || typeof value === "number")
-    .map(([key, value]) => [key, difference(value, after[key])]));
+    .map(([key, value]) => {
+      const beforeValue: number | null = typeof value === "number" ? value : null;
+      const afterValue = afterValues.get(key);
+      return [key, difference(beforeValue, typeof afterValue === "number" || afterValue === null ? afterValue : null)];
+    }));
 }
-function intervals(groups, runs, included, seed) {
-  const samples = Object.fromEntries(RATE_KEYS.map((key) => [key, []]));
+function intervals(groups: PilotJudgment[][], runs: Array<Map<number, IndexedPrediction>>, included: string[], seed: unknown): IntervalReport {
+  const samples: Record<string, number[]> = Object.fromEntries(RATE_KEYS.map((key) => [key, []]));
   const aggregates = groups.map((group) => runs.map((predictions) => counts(group, predictions, included)));
   let state = Number.parseInt(hash(seed).slice(0, 8), 16) || 1;
   const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296; };
   const replicates = groups.length >= 2 ? 1000 : 0;
   for (let iteration = 0; iteration < replicates; iteration++) {
-    const totals = runs.map(() => Object.fromEntries(SUM_KEYS.map((key) => [key, 0])));
+    const totals: Array<Pick<CountMap, SumKey>> = runs.map(() => ({ useful_tags: 0, false_positive_tags: 0,
+      positive_judgments: 0, eligible_tracks: 0, covered_tracks: 0 }));
     for (let i = 0; i < groups.length; i++) {
       // Both candidates receive the same resampled groups, including missing results.
       const paired = aggregates[Math.floor(random() * groups.length)];
@@ -196,16 +307,16 @@ function intervals(groups, runs, included, seed) {
       if (value !== null) samples[key].push(value);
     }
   }
-  const percentile = (values) => {
+  const percentile = (values: number[]): [number, number] | null => {
     values.sort((a, b) => a - b);
     return values.length < 900 ? null : [values[Math.floor(values.length * 0.025)], values[Math.min(values.length - 1, Math.floor(values.length * 0.975))]];
   };
-  return { ...Object.fromEntries(RATE_KEYS.map((key) => [key, percentile(samples[key])])),
-    independent_groups: groups.length, replicates,
+  return { precision: percentile(samples.precision), recall: percentile(samples.recall),
+    useful_track_coverage: percentile(samples.useful_track_coverage), independent_groups: groups.length, replicates,
     defined_replicates: Object.fromEntries(RATE_KEYS.map((key) => [key, samples[key].length])) };
 }
 
-function prepareFrozenPilot(rows, vocabulary, split, mode) {
+function prepareFrozenPilot(rows: PilotRows, vocabulary: MoodVocabulary, split: string, mode: string) {
   const context = validatePilot(rows, vocabulary), { manifest, tracks } = context;
   check(["development", "confirmation"].includes(split), "Choose development or confirmation explicitly.");
   check(["independent", "diagnostic"].includes(mode), "Choose independent or diagnostic scoring explicitly.");
@@ -216,7 +327,7 @@ function prepareFrozenPilot(rows, vocabulary, split, mode) {
   return { ...context, split, mode, selected, groups: groupedTracks(selected, manifest.separate_by) };
 }
 
-function coversWholeTrack(track) {
+function coversWholeTrack(track: PilotJudgment): boolean {
   let coveredThrough = 0;
   for (const [start, end] of track.listened_intervals) {
     if (start !== coveredThrough) return false;
@@ -226,8 +337,8 @@ function coversWholeTrack(track) {
 }
 
 // Readiness and scoring must reject the same listening conditions, including in diagnostics.
-function listeningBlockers({ selected, mode }) {
-  const checks = [
+function listeningBlockers({ selected, mode }: { selected: PilotJudgment[]; mode: string }) {
+  const checks: Array<[code: string, message: string, blocked: (track: PilotJudgment) => boolean]> = [
     ["unfinished_listening", "Finish listening judgments and intervals for the selected split.",
       (track) => !track.reviewed || track.listened_intervals.length === 0],
     ["incomplete_whole_track", "Whole-track judgments must cover the complete frozen duration without gaps; record partial listening as excerpt scope.",
@@ -239,20 +350,21 @@ function listeningBlockers({ selected, mode }) {
     track_ids: selected.filter(blocked).map((track) => track.track_id) })).filter((issue) => issue.track_ids.length > 0);
 }
 
-function prepareScoring(rows, vocabulary, split, mode) {
+function prepareScoring(rows: PilotRows, vocabulary: MoodVocabulary, split: string, mode: string) {
   const context = prepareFrozenPilot(rows, vocabulary, split, mode);
   const blockers = listeningBlockers(context);
   check(blockers.length === 0, blockers[0]?.message);
   return context;
 }
 
-export function pilotReadiness(rows, vocabulary, split = "development", mode = "independent") {
+export function pilotReadiness(rows: PilotRows, vocabulary: MoodVocabulary, split = "development", mode = "independent") {
   const context = prepareFrozenPilot(rows, vocabulary, split, mode);
   const { manifest, selected, groups } = context, blockers = listeningBlockers(context);
   const blocked = new Set(blockers.flatMap((issue) => issue.track_ids));
-  const coreJudgments = Object.fromEntries([...STATES].map((state) => [state, 0]));
+  const coreJudgments: Record<JudgmentState, number> = { positive: 0, negative: 0, uncertain: 0, unjudged: 0 };
   let durationSeconds = 0, listenedSeconds = 0;
   for (const track of selected) {
+    check(track.duration_seconds !== null, "Frozen tracks require a duration");
     durationSeconds += track.duration_seconds;
     listenedSeconds += track.listened_intervals.reduce((sum, [start, end]) => sum + end - start, 0);
     for (const tag of manifest.core_tag_ids) coreJudgments[track.labels[tag] ?? "unjudged"]++;
@@ -267,41 +379,43 @@ export function pilotReadiness(rows, vocabulary, split = "development", mode = "
     scope_note: "Selected split only; confirmation requires --confirmation. Readiness checks listening declarations and the frozen contract, not model results, judgment quality or production acceptance. Core-label counts include unfinished rows; omitted labels are unjudged, never negative. Even a ready cohort may have no judged labels and produce unknown metrics. Declared time cannot prove listening or blinding; assisted listening cannot be made blind by relabeling it. No provider calls or file changes occur." };
 }
 
-function scorePrepared(context, run, predictions) {
+function scorePrepared(context: ReturnType<typeof prepareScoring>, run: MoodRun, predictions: Map<number, IndexedPrediction>) {
   const { manifest, tracks, tags, split, mode, selected, groups } = context;
-  const report = (included) => metrics(counts(selected, predictions, included));
+  const report = (included: string[]): Metrics => metrics(counts(selected, predictions, included));
   const categories = Object.fromEntries(CATEGORIES.map((category) => {
-    const included = manifest.core_tag_ids.filter((tag) => category === "all" || tags.get(tag).category === category);
+    const included = manifest.core_tag_ids.filter((tag) => category === "all" || tags.get(tag)?.category === category);
     return [category, { ...report(included), bootstrap_95: intervals(groups, [predictions], included, [manifest.partition_fingerprint, split, category]) }];
-  }));
-  const overlap = (values) => { const dev = new Set(tracks.filter((t) => t.split === "development").flatMap(values)); return [...new Set(tracks.filter((t) => t.split === "confirmation").flatMap(values))].filter((v) => dev.has(v)).sort(); };
+  })) as Record<Category, Metrics & { bootstrap_95: ReturnType<typeof intervals> }>;
+  const overlap = (values: (track: PilotJudgment) => string[]): string[] => { const dev = new Set(tracks.filter((t) => t.split === "development").flatMap(values)); return [...new Set(tracks.filter((t) => t.split === "confirmation").flatMap(values))].filter((v) => dev.has(v)).sort(); };
   return { schema_version: "song-mood-score/v2", split, assessment_mode: mode, partition_fingerprint: manifest.partition_fingerprint,
     judgments_fingerprint: hash(selected), run_id: run.run_id ?? null, categories,
     per_tag: Object.fromEntries(manifest.core_tag_ids.map((tag) => [tag, { ...tags.get(tag), ...report([tag]) }])),
     non_core_proposals: selected.reduce((sum, track) => sum + (predictions.get(track.track_id)?.tags.filter((tag) => !manifest.core_tag_ids.includes(tag)).length ?? 0), 0),
     listening: { blind_tracks: selected.filter((t) => t.blind).length, assisted_tracks: selected.filter((t) => !t.blind).length, excerpt_tracks: selected.filter((t) => t.scope === "excerpt").length },
     residual_overlap: { albums: overlap((t) => t.album ? [t.album] : []), composers: overlap((t) => t.composers) },
-    run_source_signatures: Object.fromEntries(selected.filter((t) => predictions.has(t.track_id)).map((t) => [t.track_id, predictions.get(t.track_id).source_signature])),
+    run_source_signatures: Object.fromEntries(selected.flatMap((track) => {
+      const prediction = predictions.get(track.track_id); return prediction ? [[track.track_id, prediction.source_signature]] : [];
+    })),
     scope_note: "Independent mode requires declared blind, complete-recording judgments for the whole selected split. Diagnostic mode includes assisted/excerpt judgments and cannot establish independent whole-recording accuracy. Duration, scope and blinding are listener declarations, not proof of listening. Only judged core tags are scored. Precision uses positive/negative proposals; recall uses known positive judgments, including misses from unavailable results. Uncertain and unjudged labels are masked. Intervals resample whole independent groups, not tracks; small or biased samples do not establish general accuracy. Verify file references against the run before comparing. Usage covers the entire exported run.", usage: run.usage ?? null };
 }
 
-export function scorePilot(rows, run, vocabulary, split = "development", mode = "independent") {
+export function scorePilot(rows: PilotRows, run: MoodRun, vocabulary: MoodVocabulary, split = "development", mode = "independent") {
   const context = prepareScoring(rows, vocabulary, split, mode);
   return scorePrepared(context, run, runIndex(run, context.names));
 }
 
-function assessResult(result) {
+function assessResult(result: IndexedPrediction | undefined) {
   return { availability: !result ? "missing" : result.tags.length ? "proposed" : "abstained", tags: [...(result?.tags ?? [])].sort() };
 }
-function compareTrack(track, before, after, coreTags) {
+function compareTrack(track: PilotJudgment, before: IndexedPrediction | undefined, after: IndexedPrediction | undefined, coreTags: string[]) {
   const baseline = assessResult(before), candidate = assessResult(after);
   if (JSON.stringify(baseline) === JSON.stringify(candidate)) return null;
   const added = candidate.tags.filter((tag) => !baseline.tags.includes(tag));
   const removed = baseline.tags.filter((tag) => !candidate.tags.includes(tag));
-  const judgments = (ids) => ids.filter((tag) => coreTags.includes(tag))
+  const judgments = (ids: string[]) => ids.filter((tag) => coreTags.includes(tag))
     .map((tag_id) => ({ tag_id, judgment: track.labels[tag_id] ?? "unjudged" }));
   const addedCore = judgments(added), removedCore = judgments(removed);
-  const improvements = [], regressions = [];
+  const improvements: string[] = [], regressions: string[] = [];
   if (!before && after) improvements.push("recovered_result");
   if (before && !after) regressions.push("lost_result");
   if (addedCore.some((tag) => tag.judgment === "positive")) improvements.push("gained_useful_tag");
@@ -317,17 +431,18 @@ function compareTrack(track, before, after, coreTags) {
     improvements, regressions };
 }
 
-export function comparePilot(rows, baselineRun, candidateRun, vocabulary, split = "development", mode = "independent") {
+export function comparePilot(rows: PilotRows, baselineRun: MoodRun, candidateRun: MoodRun, vocabulary: MoodVocabulary, split = "development", mode = "independent") {
   const context = prepareScoring(rows, vocabulary, split, mode);
   const { manifest, selected, groups, tags, names } = context;
   const before = runIndex(baselineRun, names), after = runIndex(candidateRun, names);
   const baseline = scorePrepared(context, baselineRun, before), candidate = scorePrepared(context, candidateRun, after);
   const categories = Object.fromEntries(CATEGORIES.map((category) => {
-    const included = manifest.core_tag_ids.filter((tag) => category === "all" || tags.get(tag).category === category);
+    const included = manifest.core_tag_ids.filter((tag) => category === "all" || tags.get(tag)?.category === category);
     return [category, { ...metricDelta(baseline.categories[category], candidate.categories[category]),
       bootstrap_95: intervals(groups, [before, after], included, [manifest.partition_fingerprint, split, category]) }];
-  }));
-  const differences = selected.map((track) => compareTrack(track, before.get(track.track_id), after.get(track.track_id), manifest.core_tag_ids)).filter(Boolean);
+  })) as Record<Category, DeltaCategory>;
+  const differences = selected.map((track) => compareTrack(track, before.get(track.track_id), after.get(track.track_id), manifest.core_tag_ids))
+    .filter((track): track is NonNullable<typeof track> => track !== null);
   return { schema_version: "song-mood-comparison/v2", split, assessment_mode: mode, partition_fingerprint: manifest.partition_fingerprint,
     judgments_fingerprint: baseline.judgments_fingerprint, baseline_run_fingerprint: hash(baselineRun), candidate_run_fingerprint: hash(candidateRun),
     baseline, candidate, delta: { categories,
@@ -344,32 +459,33 @@ export function comparePilot(rows, baselineRun, candidateRun, vocabulary, split 
     scope_note: "Independent mode requires declared blind, complete-recording judgments for every selected track. Diagnostic comparisons cannot establish independent whole-recording gains. Selected split only; candidate minus baseline on the same judgments. Rate deltas are fractions and remain null if either denominator is empty. Bootstrap intervals resample the same whole independent groups on both sides; missing results remain in the cohort. Availability and tag signals can overlap; mixed changes need review. Uncertain, unjudged and non-core changes establish no quality gain. Verify frozen file references and record candidate settings before comparing; run fingerprints are audit identities, not proof of matching audio or a controlled experiment. Usage covers entire exports, not just scored tracks. No automatic pass threshold." };
 }
 
-async function readBounded(path) {
+async function readBounded(path: string): Promise<string> {
   check((await stat(path)).size <= 10 * 1024 * 1024, "Pilot input exceeds 10 MiB.");
   return readFile(path, "utf8");
 }
-const readJson = async (path) => JSON.parse(await readBounded(path));
-const USAGE = "Usage: node tools/mood-pilot.mjs init inventory.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | status pilot.jsonl vocabulary.json [--confirmation] [--diagnostic] | score pilot.jsonl run.json vocabulary.json [--confirmation] [--diagnostic] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation] [--diagnostic]";
-export async function main(args) {
+const readJson = async <T,>(path: string): Promise<T> => JSON.parse(await readBounded(path)) as T;
+const USAGE = "Usage: node tools/mood-pilot.mts init inventory.json vocabulary.json draft.jsonl | freeze draft.jsonl vocabulary.json pilot.jsonl | status pilot.jsonl vocabulary.json [--confirmation] [--diagnostic] | score pilot.jsonl run.json vocabulary.json [--confirmation] [--diagnostic] | compare pilot.jsonl baseline-run.json candidate-run.json vocabulary.json [--confirmation] [--diagnostic]";
+export async function main(args: string[]): Promise<void> {
   if (args[0] === "init" && args.length === 4) {
-    const [inventory, vocabulary] = await Promise.all(args.slice(1, 3).map(readJson));
+    const [inventory, vocabulary] = await Promise.all([readJson<MoodInventory>(args[1]), readJson<MoodVocabulary>(args[2])]);
     await writeFile(args[3], serializePilot(createPilot(inventory, vocabulary)), { flag: "wx" });
   } else if (args[0] === "freeze" && args.length === 4) {
-    const [content, vocabulary] = await Promise.all([readBounded(args[1]), readJson(args[2])]);
+    const [content, vocabulary] = await Promise.all([readBounded(args[1]), readJson<MoodVocabulary>(args[2])]);
     await writeFile(args[3], serializePilot(freezePilot(parsePilot(content), vocabulary)), { flag: "wx" });
   } else if (["status", "score", "compare"].includes(args[0])) {
-    const fileCount = { status: 2, score: 3, compare: 4 }[args[0]];
+    const fileCount = args[0] === "status" ? 2 : args[0] === "score" ? 3 : 4;
     const paths = args.slice(1, fileCount + 1), flags = args.slice(fileCount + 1);
     check(paths.length === fileCount && paths.every((path) => !path.startsWith("--")) && unique(flags) && flags.every((flag) => ["--confirmation", "--diagnostic"].includes(flag)), USAGE);
-    const [content, ...inputs] = await Promise.all([readBounded(paths[0]), ...paths.slice(1).map(readJson)]);
+    const content = await readBounded(paths[0]);
+    const inputs = await Promise.all(paths.slice(1).map((path) => readJson<unknown>(path)));
     const rows = parsePilot(content), split = flags.includes("--confirmation") ? "confirmation" : "development";
     const mode = flags.includes("--diagnostic") ? "diagnostic" : "independent";
-    const result = args[0] === "status" ? pilotReadiness(rows, inputs[0], split, mode)
-      : args[0] === "score" ? scorePilot(rows, inputs[0], inputs[1], split, mode)
-      : comparePilot(rows, inputs[0], inputs[1], inputs[2], split, mode);
+    const result = args[0] === "status" ? pilotReadiness(rows, inputs[0] as MoodVocabulary, split, mode)
+      : args[0] === "score" ? scorePilot(rows, inputs[0] as MoodRun, inputs[1] as MoodVocabulary, split, mode)
+      : comparePilot(rows, inputs[0] as MoodRun, inputs[1] as MoodRun, inputs[2] as MoodVocabulary, split, mode);
     process.stdout.write(JSON.stringify(result, null, 2) + "\n");
   } else throw new Error(USAGE);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+  main(process.argv.slice(2)).catch((error: unknown) => { process.stderr.write(`${error instanceof Error ? error.message : "Mood pilot failed"}\n`); process.exitCode = 1; });
 }

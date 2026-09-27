@@ -127,6 +127,9 @@ is selected using [the validation matrix](VALIDATION.md).
 
 ## Frontend rules
 
+- Authored browser, test, and Node tooling source is TypeScript. Keep the root
+  source guard and type-aware Oxlint gate covering every maintained source area;
+  generated JavaScript remains build output. See [validation](VALIDATION.md#frontend).
 - Zustand selectors must not create fresh arrays/objects inside the selector.
   Return the raw reference and default outside, or use `usePlayerArray`.
   `local/stable-store-selector` enforces this.
@@ -170,7 +173,7 @@ is selected using [the validation matrix](VALIDATION.md).
 - Private-library context/voice runs, long resource soaks, and physical-speaker checks are useful
   post-cutover operational checks for this personal deployment, not merge blockers. Keep failures
   visible and fix them normally; never weaken model or protocol contracts merely to make a check pass.
-- `rewrite-tree.mjs final` protects the completed language boundary. Do not weaken its allowlist to
+- `rewrite-tree.mts final` protects the completed language boundary. Do not weaken its allowlist to
   make a stale runtime, workflow, generated artifact, or transition tool pass.
 - This repository does not SSH to production. Deployment rollout, reverse
   proxy, bind mounts, and production `.env` live in `junak.eu`.

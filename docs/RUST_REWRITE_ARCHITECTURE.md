@@ -115,7 +115,7 @@ music-server      -> all internal crates
 music-output      -> music-protocol
 ```
 
-The permanent `rust-architecture.mjs` gate reads locked Cargo metadata and source, rejecting a ninth
+The permanent `rust-architecture.mts` gate reads locked Cargo metadata and source, rejecting a ninth
 workspace crate, a moved crate manifest, an internal registry stand-in or alias, an unapproved path
 dependency, every direct internal edge outside this graph, new module-global Rust statics,
 unbounded production channels, and drift in the reviewed `tokio::spawn`/`spawn_blocking` sites.
@@ -390,7 +390,7 @@ immutable compatibility oracle. After the accepted Linux semantic, performance, 
 and container run—and the owner's decision to move private-library and physical-device checks after
 cutover—the oracle and transition harness were removed from the production branch.
 
-`.github/scripts/rewrite-tree.mjs final` is now a permanent clean-checkout gate. It requires the
+`.github/scripts/rewrite-tree.mts final` is now a permanent clean-checkout gate. It requires the
 canonical `Dockerfile`, rejects backend and common Python project artifacts, rejects former
 transition-only paths, scans active workflows/operator instructions for stale runtime commands, and
 rejects tracked build output, databases, audio, environments, or key material. Historical ADR prose

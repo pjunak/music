@@ -95,7 +95,9 @@ export function Modal({
   );
 
   return (
+    /* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- The backdrop click dismisses the modal; the close button and Escape key provide keyboard access. */
     <div className="modal-backdrop" onMouseDown={onClose}>
+      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- This handler only prevents backdrop bubbling; the dialog is not a standalone control. */}
       <div
         ref={cardRef}
         className={["modal", className].filter(Boolean).join(" ")}

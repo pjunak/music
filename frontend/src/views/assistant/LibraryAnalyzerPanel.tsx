@@ -22,22 +22,27 @@ interface AnalysisPerformance {
   stages: Array<{ id: string; seconds: number; sharePercent: number | null }>;
 }
 
-function numberProperty(value: object, key: string): number | null {
-  const property = Reflect.get(value, key);
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function numberProperty(value: Record<string, unknown>, key: string): number | null {
+  const property = value[key];
   return typeof property === "number" && Number.isFinite(property) ? property : null;
 }
 
 function analysisPerformance(job: BackgroundJob): AnalysisPerformance | null {
-  const value = job.result?.performance;
-  if (typeof value !== "object" || value === null) return null;
+  const value = record(job.result?.performance);
+  if (value === null) return null;
   const tracksProfiled = numberProperty(value, "tracks_profiled");
   const wallSeconds = numberProperty(value, "wall_seconds");
-  const rawStages = Reflect.get(value, "stage_seconds");
-  const rawShares = Reflect.get(value, "stage_share_percent");
+  const rawStages = record(value.stage_seconds);
+  const rawShares = record(value.stage_share_percent);
   if (
     tracksProfiled === null ||
     wallSeconds === null ||
-    typeof rawStages !== "object" ||
     rawStages === null
   ) {
     return null;
@@ -46,9 +51,7 @@ function analysisPerformance(job: BackgroundJob): AnalysisPerformance | null {
     .flatMap(([id, seconds]) => {
       if (typeof seconds !== "number" || !Number.isFinite(seconds)) return [];
       const share =
-        typeof rawShares === "object" && rawShares !== null
-          ? Reflect.get(rawShares, id)
-          : null;
+        rawShares !== null ? rawShares[id] : null;
       return [
         {
           id,
@@ -59,7 +62,7 @@ function analysisPerformance(job: BackgroundJob): AnalysisPerformance | null {
       ];
     })
     .sort((left, right) => right.seconds - left.seconds);
-  const dominantStage = Reflect.get(value, "dominant_stage");
+  const dominantStage = value.dominant_stage;
   return {
     tracksProfiled,
     wallSeconds,
@@ -98,9 +101,10 @@ function resultFailureSamples(job: BackgroundJob): AnalysisFailureSample[] {
   const value = job.result?.failure_samples;
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    if (typeof item !== "object" || item === null) return [];
-    const path = Reflect.get(item, "path");
-    const error = Reflect.get(item, "error");
+    const sample = record(item);
+    if (sample === null) return [];
+    const path = sample.path;
+    const error = sample.error;
     return typeof path === "string" && typeof error === "string"
       ? [{ path, error }]
       : [];
@@ -134,7 +138,7 @@ interface ContextPassProgress {
 
 type ContextPassId = "audio_context" | "voice_detection";
 
-function nonNegativeNumber(value: object, key: string): number | null {
+function nonNegativeNumber(value: Record<string, unknown>, key: string): number | null {
   const number = numberProperty(value, key);
   return number !== null && number >= 0 ? number : null;
 }
@@ -143,15 +147,15 @@ function jobPassProgress(
   job: BackgroundJob | undefined,
   id: ContextPassId,
 ): ContextPassProgress | null {
-  const passes = job?.result?.passes;
-  if (typeof passes !== "object" || passes === null) return null;
-  const pass = Reflect.get(passes, id);
-  if (typeof pass !== "object" || pass === null) return null;
+  const passes = record(job?.result?.passes);
+  if (passes === null) return null;
+  const pass = record(passes[id]);
+  if (pass === null) return null;
   const completedTracks = nonNegativeNumber(pass, "completed_tracks");
   const failedTracks = nonNegativeNumber(pass, "failed_tracks");
   const skippedTracks = nonNegativeNumber(pass, "skipped_tracks");
   const totalTracks = nonNegativeNumber(pass, "total_tracks");
-  const status = Reflect.get(pass, "status");
+  const status = pass.status;
   if (
     completedTracks === null ||
     failedTracks === null ||

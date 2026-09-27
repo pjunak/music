@@ -46,11 +46,11 @@ describe("useDebouncedValue", () => {
       { initialProps: { value: "a" } },
     );
     rerender({ value: "b" });
-    act(() => vi.advanceTimersByTime(100));
+    act(() => { vi.advanceTimersByTime(100); });
     rerender({ value: "c" });
-    act(() => vi.advanceTimersByTime(100));
+    act(() => { vi.advanceTimersByTime(100); });
     rerender({ value: "d" });
-    act(() => vi.advanceTimersByTime(199));
+    act(() => { vi.advanceTimersByTime(199); });
     expect(result.current).toBe("a"); // every keystroke reset the timer
 
     act(() => {

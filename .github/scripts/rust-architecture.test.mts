@@ -5,9 +5,28 @@ import {
   architectureViolations,
   sourceConcurrencyViolations,
   sourceStateViolations,
-} from "./rust-architecture.mjs";
+} from "./rust-architecture.mts";
 
-const ALLOWED_DEPENDENCIES = new Map([
+interface FixtureDependency {
+  name: string;
+  path: string | null;
+  rename: string | null;
+  source: string | null;
+}
+
+interface FixturePackage {
+  id: string;
+  name: string;
+  manifest_path: string;
+  dependencies: FixtureDependency[];
+}
+
+interface FixtureMetadata {
+  packages: FixturePackage[];
+  workspace_members: string[];
+}
+
+const ALLOWED_DEPENDENCIES: ReadonlyMap<string, readonly string[]> = new Map([
   ["music-domain", []],
   ["music-application", ["music-domain"]],
   ["music-protocol", []],
@@ -25,7 +44,7 @@ const ALLOWED_DEPENDENCIES = new Map([
   ["music-output", ["music-protocol"]],
 ]);
 
-function dependency(name, overrides = {}) {
+function dependency(name: string, overrides: Partial<FixtureDependency> = {}): FixtureDependency {
   return {
     name,
     path: `/repo/crates/${name}`,
@@ -35,7 +54,7 @@ function dependency(name, overrides = {}) {
   };
 }
 
-function metadata(overrides = {}) {
+function metadata(overrides: Partial<FixtureMetadata> = {}): FixtureMetadata {
   const packages = [...ALLOWED_DEPENDENCIES].map(([name, dependencies]) => ({
     id: `path+file:///repo/crates/${name}#0.1.0`,
     name,
@@ -49,13 +68,14 @@ function metadata(overrides = {}) {
   };
 }
 
-test("accepted eight-crate dependency graph passes", () => {
+await test("accepted eight-crate dependency graph passes", () => {
   assert.deepEqual(architectureViolations(metadata()), []);
 });
 
-test("reverse dependencies and internal aliases fail", () => {
+await test("reverse dependencies and internal aliases fail", () => {
   const fixture = metadata();
   const domain = fixture.packages.find((candidate) => candidate.name === "music-domain");
+  assert.ok(domain);
   domain.dependencies.push(dependency("music-server", { rename: "runtime" }));
   assert.deepEqual(architectureViolations(fixture), [
     "music-domain aliases internal crate music-server as runtime",
@@ -63,10 +83,12 @@ test("reverse dependencies and internal aliases fail", () => {
   ]);
 });
 
-test("registry stand-ins and unapproved path crates fail", () => {
+await test("registry stand-ins and unapproved path crates fail", () => {
   const fixture = metadata();
   const application = fixture.packages.find((candidate) => candidate.name === "music-application");
   const output = fixture.packages.find((candidate) => candidate.name === "music-output");
+  assert.ok(application);
+  assert.ok(output);
   application.dependencies = [
     dependency("music-domain", { path: null, source: "registry+https://example.invalid/index" }),
     dependency("local-helper"),
@@ -79,7 +101,7 @@ test("registry stand-ins and unapproved path crates fail", () => {
   ]);
 });
 
-test("workspace shape and crate locations are fixed architecture decisions", () => {
+await test("workspace shape and crate locations are fixed architecture decisions", () => {
   const fixture = metadata();
   fixture.packages = fixture.packages.filter((candidate) => candidate.name !== "music-output");
   fixture.workspace_members = fixture.packages.map((candidate) => candidate.id);
@@ -89,8 +111,11 @@ test("workspace shape and crate locations are fixed architecture decisions", () 
     manifest_path: "/repo/elsewhere/music-extra/Cargo.toml",
     dependencies: [],
   });
-  fixture.workspace_members.push(fixture.packages.at(-1).id);
+  const extra = fixture.packages.at(-1);
+  assert.ok(extra);
+  fixture.workspace_members.push(extra.id);
   const domain = fixture.packages.find((candidate) => candidate.name === "music-domain");
+  assert.ok(domain);
   domain.manifest_path = "/repo/elsewhere/music-domain/Cargo.toml";
   assert.deepEqual(architectureViolations(fixture), [
     "music-domain has an unexpected manifest path: /repo/elsewhere/music-domain/Cargo.toml",
@@ -99,7 +124,7 @@ test("workspace shape and crate locations are fixed architecture decisions", () 
   ]);
 });
 
-test("runtime module globals fail while the isolated fuzz caches remain explicit", () => {
+await test("runtime module globals fail while the isolated fuzz caches remain explicit", () => {
   assert.deepEqual(sourceStateViolations([{
     path: "crates/music-server/src/runtime.rs",
     content: "static RUNTIME: OnceLock<AppRuntime> = OnceLock::new();\n",
@@ -123,7 +148,7 @@ test("runtime module globals fail while the isolated fuzz caches remain explicit
   ]);
 });
 
-test("unbounded channels and new detached task sites fail", () => {
+await test("unbounded channels and new detached task sites fail", () => {
   assert.deepEqual(sourceConcurrencyViolations([{
     path: "crates/music-server/src/new_owner.rs",
     content: [
@@ -138,7 +163,7 @@ test("unbounded channels and new detached task sites fail", () => {
   ]);
 });
 
-test("reviewed task sites pass and test-only spawns are ignored", () => {
+await test("reviewed task sites pass and test-only spawns are ignored", () => {
   assert.deepEqual(sourceConcurrencyViolations([{
     path: "crates/music-application/src/jobs.rs",
     content: [

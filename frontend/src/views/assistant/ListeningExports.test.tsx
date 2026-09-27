@@ -107,7 +107,7 @@ it("consumes real UI exports in the pilot CLI without dropping a failed cohort",
     await writeFile(inventoryPath, JSON.stringify(inventory));
     await writeFile(vocabularyPath, JSON.stringify({ groups: [{ key: "mood", tags: [{ id: "mood.calm", name: "calm" }] }] }));
     const command = promisify(execFile);
-    const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tools/mood-pilot.mjs");
+    const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../tools/mood-pilot.mts");
     await command(process.execPath, [cli, "init", inventoryPath, vocabularyPath, draftPath]);
     const rows = (await readFile(draftPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(rows.slice(1).map((row) => row.track_id)).toEqual([2, 5]);

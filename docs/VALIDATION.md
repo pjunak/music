@@ -8,15 +8,15 @@ Read the relevant rows before choosing checks. CI/release coverage is unchanged.
 | Prose or agent guidance only | Review the diff and local links; verify changed command/contract claims against their owner. Run contract documentation checks when inventory values or generated contracts change. No runtime rebuild solely for prose. |
 | Rust behavior | Focused regression tests while iterating; formatting, architecture checks, workspace check/Clippy/nextest/doc tests and contracts check below on the final change. |
 | Frontend behavior | Frontend lint, typecheck, tests and build; inspect affected visible flows. Rust gates apply when a server/wire contract also changes. |
-| Development audio references | `node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
-| Offline mood pilot | `node --test tools/mood-pilot.test.mjs`; affected frontend gates for exported files and controls. Exercise changed CLI operations, including prediction-free readiness and export handling. Private listening judgments remain separate acceptance evidence. |
+| Development audio references | `node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
+| Offline mood pilot | `node --test tools/mood-pilot.test.mts`; affected frontend gates for exported files and controls. Exercise changed CLI operations, including prediction-free readiness and export handling. Private listening judgments remain separate acceptance evidence. |
 | Jev experiment tooling | `cargo test --locked -p music-server --example jev-compare`; inspect offline plans. Paid runs require an explicit reviewed plan and budget, never an automatic test or retry. |
 | HTTP/WS, schema, persistence, auth or shared playback | Affected Rust/frontend gates plus relevant client serialization, reconnect, failure and compatibility tests; coordinate Baton when its wire behavior changes. |
 | Dependencies, licenses or toolchains | Affected runtime gates plus deny/audit/machete for each changed dependency graph; preserve separate fuzz lockfile coverage. |
 | Fuzz sources/configuration | Fuzz formatting, Clippy and applicable dependency checks below. |
 | Packaging, release image or runtime-language boundary | Full applicable gates, final-tree checks, headless release binary and image verification on a Docker host. |
 
-Workflow changes also run `node --test .github/scripts/workflow-policy.test.mjs`.
+Workflow changes also run `node --test .github/scripts/workflow-policy.test.mts`.
 It covers pull requests, direct manual verification and reusable release calls.
 The release caller disables the reusable image job because publication already
 builds and smoke-tests the image; GitHub retains the caller's event name inside
@@ -46,11 +46,11 @@ From the repository root:
 
 ```powershell
 cargo fmt --all --check
-node --test .github/scripts/rust-architecture.test.mjs
-node --test tools/mood-pilot.test.mjs
-node --test tools/cleanup-pilot.test.mjs
-node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs
-node .github/scripts/rust-architecture.mjs
+node --test .github/scripts/rust-architecture.test.mts
+node --test tools/mood-pilot.test.mts
+node --test tools/cleanup-pilot.test.mts
+node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts
+node .github/scripts/rust-architecture.mts
 cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo nextest run --workspace --all-features
@@ -65,8 +65,8 @@ cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo audit --file fuzz/Cargo.lock --deny warnings
 cargo machete .
 cargo machete fuzz
-node --test .github/scripts/rewrite-tree.test.mjs
-node .github/scripts/rewrite-tree.mjs final
+node --test .github/scripts/rewrite-tree.test.mts
+node .github/scripts/rewrite-tree.mts final
 # After building the release image on a Docker host:
 bash .github/scripts/verify-rust-image.sh music:test
 ```
@@ -141,9 +141,36 @@ npm run test
 npm run build
 ```
 
-The frontend uses the native TypeScript 7 compiler and Oxlint. The local
-`local/stable-store-selector` rule is an Oxlint JS plugin under
-`frontend/lint-rules/`; keep its real-binary fixture test when changing it.
+All maintained browser, test, and Node tooling source is TypeScript. Node 26 runs
+the `.mts` tools directly. `npm run typecheck` checks the frontend and the root
+`tsconfig.tools.json`; `npm run lint` first rejects tracked or newly added
+JavaScript source, then runs repository-wide, type-aware Oxlint. Generated browser
+JavaScript belongs in ignored build output. Do not add unchecked JavaScript helpers
+or bypass these gates with `@ts-nocheck`.
+
+The root `.oxlintrc.json` owns the common correctness and promise rules, separate
+browser/Node environments, React compiler checks, and accessibility checks. The
+TypeScript `local/stable-store-selector` plugin lives under `frontend/lint-rules/`.
+Its real-binary tests and configuration probes verify the source directories,
+type-aware promise checks, React purity/dependencies, and unused suppressions.
+Keep these tests when changing lint configuration or plugin loading.
+
+Intentional exceptions are narrow: compatibility sources retain ES5 `var` and
+function syntax; compiler `set-state-in-effect` remains off for editor state that
+mirrors canonical external state; autofocus is permitted for dialogs; semantic
+ARIA status roles need not be replaced with form output elements; instrumental
+audio does not require caption tracks. Tests may reference mock methods without
+binding `this`, and only the three compatibility behavior suites may execute
+generated local scripts using `Function`. Inline accessibility exceptions explain
+dialog event bubbling and native draggable list rows at the affected elements.
+
+The old-TV player and boot watchdog are authored in `frontend/compat/`. The Vite
+plugin strips their types and parses both outputs as ES5 before serving/emitting
+`/compat-mode.js` and inserting the inline watchdog. `tsconfig.compat.json` checks
+their types against ES5/DOM APIs; TypeScript 7's minimum supported target is ES2015,
+so the Acorn parse is the enforced runtime syntax boundary. Behavior tests use
+the same generator as development and production. A frontend-only Docker build
+checks frontend projects locally; repository tools are checked by CI before release.
 
 ## Local development
 

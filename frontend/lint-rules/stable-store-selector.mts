@@ -1,3 +1,6 @@
+import type { Rule } from "eslint";
+import type { Expression, Super } from "estree";
+
 /**
  * Custom lint rule: `local/stable-store-selector`.
  *
@@ -11,7 +14,7 @@
  * The rule uses the ESLint-compatible plugin API implemented by Oxlint.
  */
 
-function unstableReturn(node) {
+function unstableReturn(node: Expression | Super | null | undefined): "array" | "object" | null {
   if (node === null || node === undefined) return null;
   if (node.type === "ArrayExpression") return "array";
   if (node.type === "ObjectExpression") return "object";
@@ -25,7 +28,7 @@ function unstableReturn(node) {
   return null;
 }
 
-export default {
+const stableStoreSelector: Rule.RuleModule = {
   meta: {
     type: "problem",
     docs: {
@@ -39,7 +42,8 @@ export default {
     },
   },
   create(context) {
-    function report(expr) {
+    function report(expr: Expression | Super | null | undefined) {
+      if (expr == null) return;
       const kind = unstableReturn(expr);
       if (kind !== null) {
         context.report({ node: expr, messageId: "unstable", data: { kind } });
@@ -73,3 +77,5 @@ export default {
     };
   },
 };
+
+export default stableStoreSelector;

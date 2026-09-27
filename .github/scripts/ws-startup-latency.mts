@@ -5,7 +5,7 @@ const iterations = Number.parseInt(rawIterations, 10);
 const warmups = Number.parseInt(rawWarmups, 10);
 
 if (!url || !Number.isInteger(iterations) || iterations < 1 || iterations > 10_000) {
-  throw new Error("usage: node ws-startup-latency.mjs <ws-url> <iterations> [warmups]");
+  throw new Error("usage: node ws-startup-latency.mts <ws-url> <iterations> [warmups]");
 }
 if (!Number.isInteger(warmups) || warmups < 0 || warmups > 1_000) {
   throw new Error("warmups must be an integer from 0 through 1000");
@@ -13,18 +13,19 @@ if (!Number.isInteger(warmups) || warmups < 0 || warmups > 1_000) {
 if (typeof WebSocket !== "function") {
   throw new Error("this benchmark requires Node.js with the global WebSocket API");
 }
+const endpoint = url;
 
-async function connectionToSnapshot(sample) {
-  return new Promise((resolve, reject) => {
+async function connectionToSnapshot(sample: string | number): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
     const startedAt = performance.now();
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(endpoint);
     let settled = false;
-    let measuredElapsedMs;
+    let measuredElapsedMs: number | undefined;
     const timeout = setTimeout(() => {
       fail(new Error(`WebSocket sample ${sample} timed out`));
     }, 5_000);
 
-    function fail(error) {
+    function fail(error: Error): void {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -32,7 +33,7 @@ async function connectionToSnapshot(sample) {
       reject(error);
     }
 
-    function succeed() {
+    function succeed(): void {
       if (settled || measuredElapsedMs === undefined) return;
       settled = true;
       clearTimeout(timeout);
@@ -50,13 +51,16 @@ async function connectionToSnapshot(sample) {
       );
     });
     socket.addEventListener("message", (event) => {
-      let message;
+      let message: unknown;
       try {
         message = JSON.parse(String(event.data));
       } catch {
         return;
       }
-      if (message?.type === "state_snapshot" || message?.type === "state_changed") {
+      const type = message && typeof message === "object"
+        ? (message as { type?: unknown }).type
+        : undefined;
+      if (type === "state_snapshot" || type === "state_changed") {
         if (measuredElapsedMs === undefined) {
           measuredElapsedMs = performance.now() - startedAt;
           socket.close(1000);

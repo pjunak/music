@@ -4,14 +4,15 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function strings(value: unknown, minimum: number, maximum: number, length: number): boolean {
+  // Wire limits count Unicode scalar values, matching Rust's chars().count().
   return Array.isArray(value) && value.length >= minimum && value.length <= maximum
-    && value.every((item) => typeof item === "string" && item.trim().length > 0 && [...item].length <= length);
+    && value.every((item) => typeof item === "string" && item.trim().length > 0 && Array.from(item).length <= length);
 }
 function currentSuggestion(value: unknown): boolean {
   if (!record(value)) return false;
   const fields = ["tag", "analyzer_id", "source_signature", "support", "evidence", "evidence_ids", "contradiction_ids", "status"];
   return Object.keys(value).length === fields.length && Object.keys(value).every((key) => fields.includes(key))
-    && typeof value.tag === "string" && value.tag.length > 0 && [...value.tag].length <= 64
+    && typeof value.tag === "string" && value.tag.length > 0 && Array.from(value.tag).length <= 64
     && (value.analyzer_id === "model-context-tagger/v8" || value.analyzer_id === "catalog-tags/v1")
     && typeof value.source_signature === "string" && /^[a-f0-9]{64}$/.test(value.source_signature)
     && (value.support === "supported" || value.support === "tentative")

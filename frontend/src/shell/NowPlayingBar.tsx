@@ -319,8 +319,9 @@ export function NowPlayingBar() {
           className={`seek-bar seek-bar-large${seekable ? "" : " seek-bar-disabled"}`}
           onClick={seekable ? onSeek : undefined}
           onKeyDown={seekable ? onSeekKey : undefined}
-          role={seekable ? "slider" : undefined}
-          aria-label={seekable ? "Seek" : undefined}
+          role="slider"
+          aria-label="Seek"
+          aria-disabled={!seekable}
           aria-valuemin={0}
           aria-valuemax={totalMs}
           aria-valuenow={Math.min(positionMs, totalMs)}

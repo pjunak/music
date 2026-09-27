@@ -294,7 +294,7 @@ describe("AssistantAiSetupView", () => {
     const astraRole: ModelRole = { ...role, connection_id: connection.id, connection_name: connection.name, model_id: "gpt-6-astra", thinking_mode: "disabled", verification_status: "verified" };
     vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({
       ...frameworkStatus,
-      adapters: [{ ...frameworkStatus.adapters[0]!, id: "openai-responses/v1", model_profiles: [{
+      adapters: [{ ...frameworkStatus.adapters[0], id: "openai-responses/v1", model_profiles: [{
         id: "openai-astra", revision: "fixture", model_ids: ["gpt-6-astra"],
         reasoning_modes: ["provider_default", "low", "medium", "high", "xhigh", "max"],
         max_output_tokens: 128000, documented: true, notice: "Astra requires reasoning. Thinking cannot be turned off.", source_url: "https://developers.openai.com/api/docs/models/gpt-6-astra",
@@ -318,7 +318,7 @@ describe("AssistantAiSetupView", () => {
   it("takes DeepSeek effort options from the server and labels unreviewed models", async () => {
     vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({
       ...frameworkStatus,
-      adapters: [{ ...frameworkStatus.adapters[0]!, id: "deepseek-chat/v1", default_model_profile: {
+      adapters: [{ ...frameworkStatus.adapters[0], id: "deepseek-chat/v1", default_model_profile: {
         id: "deepseek-unverified", revision: "fixture", model_ids: [],
         reasoning_modes: ["provider_default", "disabled", "low", "high", "max"],
         max_output_tokens: null, documented: false, notice: "This model has no reviewed settings profile.", source_url: "",
@@ -448,7 +448,7 @@ describe("AssistantAiSetupView", () => {
     expect(within(screen.getByRole("log")).getByText(/Configuration and test runs are not available yet/)).toBeVisible();
     expect(within(screen.getByRole("log")).getByText(/separate consent/)).toBeVisible();
     expect(within(screen.getByRole("log")).queryByText(/Choose a verified connection|No task-quality suite|test has not run/)).not.toBeInTheDocument();
-    const diagnostics = JSON.parse(screen.getByLabelText("Selected model task diagnostics JSON").textContent!);
+    const diagnostics = JSON.parse(screen.getByLabelText("Selected model task diagnostics JSON").textContent);
     expect(diagnostics).toMatchObject({ task: { role_id: "audio_analyzer" }, request: null, quality: { evaluation: null } });
     expect(assistantProvidersApi.listRoleEvaluations).not.toHaveBeenCalledWith("audio_analyzer");
     expect(assistantProvidersApi.testRole).not.toHaveBeenCalled();

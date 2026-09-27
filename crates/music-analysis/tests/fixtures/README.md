@@ -42,10 +42,10 @@ the reference under ignored research output, outside application dependencies:
 
 ```powershell
 npm install --prefix target/essentia-reference --ignore-scripts --no-audit --no-fund --save-exact essentia.js@0.1.3
-node tools/musicnn-reference.mjs --essentia target/essentia-reference/node_modules/essentia.js --check crates/music-analysis/tests/fixtures/musicnn-reference-v1.json
+node tools/musicnn-reference.mts --essentia target/essentia-reference/node_modules/essentia.js --check crates/music-analysis/tests/fixtures/musicnn-reference-v1.json
 ```
 
-The [generator](../../../../tools/musicnn-reference.mjs) can instead write
+The [generator](../../../../tools/musicnn-reference.mts) can instead write
 `--output target/musicnn-reference-new.json`. It refuses to overwrite an existing
 file. Inspect changes before replacing the tracked fixture; never relax the numerical
 tolerance to conceal a mismatch. Essentia.js is a separately licensed AGPL reference
@@ -100,7 +100,7 @@ deliberately skips silent frames. It dropped 1-59 frames in 20 of the 22 approve
 recordings. Its frame index therefore cannot be used as an absolute timeline index.
 The earlier constant/synthetic checks did not expose this real-file behavior.
 
-The development-only [exporter](../../../../tools/effnet-reference.mjs) preserves
+The development-only [exporter](../../../../tools/effnet-reference.mts) preserves
 explicit centered 512-sample frames with 256-sample hops, including silence and
 zero padding at either boundary. It selects the beginning, a middle patch on the
 62-frame grid, and one full 128-frame patch anchored at the final centered frame.
@@ -125,8 +125,8 @@ ONNX artifacts pinned in the [plan](../../../../docs/SONG_EVIDENCE_IMPLEMENTATIO
 These packages and model files are not application or CI dependencies:
 
 ```powershell
-node tools/effnet-reference.mjs --inputs private-pcm-paths.json --essentia ./reference/node_modules/essentia.js --ort ./reference/node_modules/onnxruntime-web --models ./private-models --output private-effnet-reference.jsonl
-node --test tools/effnet-reference.test.mjs
+node tools/effnet-reference.mts --inputs private-pcm-paths.json --essentia ./reference/node_modules/essentia.js --ort ./reference/node_modules/onnxruntime-web --models ./private-models --output private-effnet-reference.jsonl
+node --test tools/effnet-reference.test.mts
 ```
 
 The tool also pins the WASM loader `ort-wasm-simd-threaded.mjs` to SHA-256
@@ -176,7 +176,7 @@ Independent owner listening and the complete-path gates still determine adoption
 
 ## Whole-track stream reference, 25 September 2026
 
-The offline [stream exporter](../../../../tools/effnet-stream.mjs) uses the same
+The offline [stream exporter](../../../../tools/effnet-stream.mts) uses the same
 pinned local packages and exact owned model snapshots as the patch exporter.
 It runs each centered frame once and one graph batch at a time. Its data buffers
 retain 512 PCM samples, a 1,024-byte read buffer, 128 by 96 mel values and one
@@ -185,8 +185,8 @@ tensors; session cleanup is attempted on success, failure and cancellation.
 It neither installs models nor changes the application dependency graph.
 
 ```powershell
-node tools/effnet-stream.mjs --inputs private-pcm-paths.json --essentia ./reference/node_modules/essentia.js --ort ./reference/node_modules/onnxruntime-web --models ./private-models --output private-effnet-stream.jsonl
-node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs
+node tools/effnet-stream.mts --inputs private-pcm-paths.json --essentia ./reference/node_modules/essentia.js --ort ./reference/node_modules/onnxruntime-web --models ./private-models --output private-effnet-stream.jsonl
+node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts
 ```
 
 Limits remain 1-32 explicit PCM files, 16 kHz mono float32-le, at most 15 minutes

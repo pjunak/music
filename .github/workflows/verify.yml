@@ -83,15 +83,15 @@ jobs:
 
       - name: Check architecture and final repository tree
         run: |
-          node --test tools/mood-pilot.test.mjs
-          node --test tools/cleanup-pilot.test.mjs
-          node --test tools/effnet-reference.test.mjs tools/effnet-stream.test.mjs
-          node --test .github/scripts/workflow-policy.test.mjs
-          node --test .github/scripts/publish-output.test.mjs
-          node --test .github/scripts/rust-architecture.test.mjs
-          node .github/scripts/rust-architecture.mjs
-          node --test .github/scripts/rewrite-tree.test.mjs
-          node .github/scripts/rewrite-tree.mjs final
+          node --test tools/mood-pilot.test.mts
+          node --test tools/cleanup-pilot.test.mts
+          node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts
+          node --test .github/scripts/workflow-policy.test.mts
+          node --test .github/scripts/publish-output.test.mts
+          node --test .github/scripts/rust-architecture.test.mts
+          node .github/scripts/rust-architecture.mts
+          node --test .github/scripts/rewrite-tree.test.mts
+          node .github/scripts/rewrite-tree.mts final
 
       - name: Check formatting and generated contracts
         run: |

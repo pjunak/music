@@ -581,7 +581,7 @@ needs are met. The conditional backlog is not a commitment.
 ## 1. Define useful outcomes and establish a small honest baseline
 
 **Owners:** [vocabulary](../crates/music-application/src/assistant/vocabulary.rs),
-[pilot tooling](../tools/mood-pilot.mjs), existing Mood Library review.
+[pilot tooling](../tools/mood-pilot.mts), existing Mood Library review.
 
 - Record a small fixed set of real listening/session requests and current failures.
   Measure useful candidates found, auditioning time, rejected suggestions and review

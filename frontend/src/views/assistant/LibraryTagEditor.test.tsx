@@ -162,7 +162,9 @@ describe("LibraryTagEditor", () => {
     expect(screen.getByText(expected, { selector: ".assistant-track-model-status" })).toBeInTheDocument();
     expect(screen.getByText(expected, { selector: ".assistant-model-review-status > strong" })).toBeInTheDocument();
     expect(screen.queryByText(/older result/)).not.toBeInTheDocument();
-    if (status === "stale") expect(screen.getByText(/old suggestions cannot be accepted/)).toBeInTheDocument();
+    expect(screen.queryAllByText(/old suggestions cannot be accepted/)).toHaveLength(
+      status === "stale" ? 1 : 0,
+    );
   });
 
   it("shows tentative catalog support separately from accepted tags", async () => {

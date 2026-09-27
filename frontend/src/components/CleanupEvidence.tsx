@@ -42,20 +42,22 @@ export function CleanupEvidenceImport({ imports, onChange }: {
   }
   return <div>
     <label className="cleanup-evidence-input">Import metadata evidence (JSON)
-      <input type="file" accept="application/json,.json" onChange={async (event) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        try {
-          if (file.size > 1_000_000) throw new Error("The evidence file must be smaller than 1 MB.");
-          const parsed: unknown = JSON.parse(await file.text());
-          if (!parsed || typeof parsed !== "object" || !("tracks" in parsed) || !Array.isArray(parsed.tracks) || parsed.tracks.length > 500) throw new Error("Expected a JSON object containing a tracks array (at most 500 tracks).");
-          for (const item of parsed.tracks as unknown[]) {
-            if (!item || typeof item !== "object" || !("track_id" in item) || !Number.isSafeInteger(item.track_id) || !("fields" in item) || !item.fields || typeof item.fields !== "object" || Array.isArray(item.fields) || Object.values(item.fields).some((v) => typeof v !== "string" || v.length > 512)) throw new Error("Each track needs a numeric track_id and a fields object containing text values.");
-            if ("source" in item && (typeof item.source !== "string" || !item.source.trim() || new TextEncoder().encode(item.source).length > 512 || Array.from(item.source).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) >= 127 && c.charCodeAt(0) <= 159))) throw new Error("The source reference must be nonempty text up to 512 bytes.");
-            if ("propose" in item && (typeof item.propose !== "boolean" || item.propose && !("source" in item))) throw new Error("Review proposals require a source reference and a boolean propose value.");
-          }
-          onChange(parsed.tracks as CleanupImportedEvidence[]);
-        } catch (error) { toast.error("Evidence import failed", error instanceof Error ? error.message : undefined); }
+      <input type="file" accept="application/json,.json" onChange={(event) => {
+        void (async () => {
+          const file = event.target.files?.[0];
+          if (!file) return;
+          try {
+            if (file.size > 1_000_000) throw new Error("The evidence file must be smaller than 1 MB.");
+            const parsed: unknown = JSON.parse(await file.text());
+            if (!parsed || typeof parsed !== "object" || !("tracks" in parsed) || !Array.isArray(parsed.tracks) || parsed.tracks.length > 500) throw new Error("Expected a JSON object containing a tracks array (at most 500 tracks).");
+            for (const item of parsed.tracks as unknown[]) {
+              if (!item || typeof item !== "object" || !("track_id" in item) || !Number.isSafeInteger(item.track_id) || !("fields" in item) || !item.fields || typeof item.fields !== "object" || Array.isArray(item.fields) || Object.values(item.fields).some((v) => typeof v !== "string" || v.length > 512)) throw new Error("Each track needs a numeric track_id and a fields object containing text values.");
+              if ("source" in item && (typeof item.source !== "string" || !item.source.trim() || new TextEncoder().encode(item.source).length > 512 || Array.from(item.source).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) >= 127 && c.charCodeAt(0) <= 159))) throw new Error("The source reference must be nonempty text up to 512 bytes.");
+              if ("propose" in item && (typeof item.propose !== "boolean" || item.propose && !("source" in item))) throw new Error("Review proposals require a source reference and a boolean propose value.");
+            }
+            onChange(parsed.tracks as CleanupImportedEvidence[]);
+          } catch (error) { toast.error("Evidence import failed", error instanceof Error ? error.message : undefined); }
+        })();
       }} />
     </label>
     <p className="muted small">Selected data only; no scripts or audio processing. Format: {`{"tracks":[{"track_id":7,"fields":{"recording_mbid":"…","release_mbid":"…"}}]}`}. Track IDs appear in review evidence. Imported tracks must belong to the selected scope.</p>

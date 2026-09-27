@@ -118,7 +118,7 @@ export function TransportSection() {
             setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
           }
           onBlur={(e) =>
-            setCrossfadeMs(parseInt((e.target as HTMLInputElement).value, 10))
+            setCrossfadeMs(parseInt(e.target.value, 10))
           }
         />
         <span className="small num-readout">{(localCrossfade / 1000).toFixed(1)}s</span>

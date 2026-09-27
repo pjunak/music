@@ -27,6 +27,7 @@ import { wsClient } from "@/core/ws";
  *  Space in the search box still types a space.
  */
 export function useKeyboardShortcuts(): void {
+  // BrowserRouter navigation is synchronous; its shared API also permits promises.
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -77,7 +78,7 @@ export function useKeyboardShortcuts(): void {
             // Selector targets the library toolbar's always-visible search
             // input. We navigate first (in case the user is on a different
             // tab) and focus on the next tick, after the route render.
-            navigate("/library");
+            void navigate("/library");
             window.setTimeout(() => {
               const el = document.querySelector<HTMLInputElement>(
                 ".library-toolbar-search input[type=search]",
@@ -96,19 +97,19 @@ export function useKeyboardShortcuts(): void {
           return;
         case "1":
           e.preventDefault();
-          navigate("/console");
+          void navigate("/console");
           return;
         case "2":
           e.preventDefault();
-          navigate("/library");
+          void navigate("/library");
           return;
         case "3":
           e.preventDefault();
-          navigate("/authoring");
+          void navigate("/authoring");
           return;
         case "4":
           e.preventDefault();
-          navigate("/settings");
+          void navigate("/settings");
           return;
       }
     }

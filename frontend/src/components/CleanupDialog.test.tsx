@@ -226,7 +226,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
   it("leaves imported source corrections unchecked and keeps conflicting values out of bulk selection", async () => {
     const sourceJob = structuredClone(catalogJob);
     const result = sourceJob.result as unknown as CleanupEnrichmentResult;
-    result.plans[0]!.ops = [{ op_id: "source-title", track_id: 7, kind: "tag", field: "title", old: "", new: "Creator title", rules: ["imported_metadata"], confidence: "low", verified: false }];
+    result.plans[0].ops = [{ op_id: "source-title", track_id: 7, kind: "tag", field: "title", old: "", new: "Creator title", rules: ["imported_metadata"], confidence: "low", verified: false }];
     vi.mocked(cleanupApi.enrich).mockResolvedValue(sourceJob);
     const user = userEvent.setup();
     renderWorkflow();
@@ -259,10 +259,16 @@ describe("CleanupWorkflow catalog enrichment", () => {
     await user.click(screen.getByRole("button", { name: "None" }));
     await user.click(screen.getByRole("button", { name: "Download catalog results" }));
 
-    const blob = createObjectURL.mock.calls[0]![0];
+    const blob = createObjectURL.mock.calls[0][0];
     const text = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
+      reader.onload = () => {
+        if (typeof reader.result === "string") {
+          resolve(reader.result);
+        } else {
+          reject(new Error("Expected cleanup export to contain text."));
+        }
+      };
       reader.onerror = () => reject(reader.error);
       reader.readAsText(blob);
     });
@@ -327,7 +333,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
 
   it("distinguishes incomplete identified and unmatched results without selecting catalog edits", async () => {
     const result = catalogJob.result as unknown as CleanupEnrichmentResult;
-    const plan = result.plans[0]!;
+    const plan = result.plans[0];
     vi.mocked(cleanupApi.enrich).mockResolvedValue({ ...catalogJob, result: {
       ...result, scanned: 3, unmatched: 2,
       plans: [
@@ -352,7 +358,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
     const result = catalogJob.result as unknown as CleanupEnrichmentResult;
     vi.mocked(cleanupApi.enrich).mockResolvedValue({ ...catalogJob, result: {
       ...result, identified: 0, unmatched: 1,
-      plans: [{ ...result.plans[0]!, status: "unmatched", identity: null, partial: true, tag_suggestions: [] }],
+      plans: [{ ...result.plans[0], status: "unmatched", identity: null, partial: true, tag_suggestions: [] }],
     } });
     const user = userEvent.setup();
     renderWorkflow();
@@ -410,7 +416,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
 
   it("keeps explicit rejections in the pool and restores them unchecked before applying", async () => {
     vi.mocked(cleanupApi.analyze).mockResolvedValue({ ...localResult, scanned: 501 });
-    const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
+    const proposal: CleanupReviewProposal = { ...localResult.plans[0].ops[0], path: "Album/01_song.mp3", evidence: null, evidence_context: null };
     const item = { id: 12, proposal, current: true, rejected_at: 1_800_000_000 };
     vi.mocked(cleanupApi.reject).mockResolvedValue(item);
     vi.mocked(cleanupApi.rejected).mockResolvedValue({ items: [item], next_before: null });
@@ -450,7 +456,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
   });
 
   it("keeps stale pool entries searchable and starts a selected-track recheck", async () => {
-    const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
+    const proposal: CleanupReviewProposal = { ...localResult.plans[0].ops[0], path: "Album/01_song.mp3", evidence: null, evidence_context: null };
     vi.mocked(cleanupApi.rejected).mockResolvedValue({ items: [{ id: 12, proposal, current: false, rejected_at: 1_800_000_000 }], next_before: 12 });
     const user = userEvent.setup(); renderWorkflow();
     await user.click(screen.getByRole("button", { name: "Rejected suggestions" }));
@@ -468,7 +474,7 @@ describe("CleanupWorkflow catalog enrichment", () => {
   });
 
   it("keeps a failed restore visible without applying or losing the pool entry", async () => {
-    const proposal: CleanupReviewProposal = { ...localResult.plans[0]!.ops[0]!, path: "Album/01_song.mp3", evidence: null, evidence_context: null };
+    const proposal: CleanupReviewProposal = { ...localResult.plans[0].ops[0], path: "Album/01_song.mp3", evidence: null, evidence_context: null };
     vi.mocked(cleanupApi.rejected).mockResolvedValue({ items: [{ id: 12, proposal, current: true, rejected_at: 1_800_000_000 }], next_before: null });
     vi.mocked(cleanupApi.restoreRejected).mockRejectedValue(new Error("The evidence changed. Check again."));
     const user = userEvent.setup(); renderWorkflow();

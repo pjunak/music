@@ -109,7 +109,7 @@ export function Tabs() {
           <span className="tabs-mobile-label">{activeLabel}</span>
         </button>
         {open ? (
-          <nav className="tabs-mobile-menu" role="menu">
+          <nav className="tabs-mobile-menu">
             {TABS.map((t) => (
               <NavLink
                 key={t.to}
@@ -118,7 +118,6 @@ export function Tabs() {
                 className={({ isActive }) =>
                   `tabs-mobile-item${isActive ? " tabs-mobile-item-active" : ""}`
                 }
-                role="menuitem"
               >
                 {t.label}
               </NavLink>

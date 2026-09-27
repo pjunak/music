@@ -416,7 +416,7 @@ function AddItemForm({
   }
 
   return (
-    <form className="soundboard-add-item" onSubmit={submit}>
+    <form className="soundboard-add-item" onSubmit={(event) => void submit(event)}>
       <select
         value={file}
         onChange={(e) => {

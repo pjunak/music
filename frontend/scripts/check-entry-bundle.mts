@@ -2,8 +2,16 @@ import { readFileSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
 const manifestUrl = new URL("../dist/.vite/manifest.json", import.meta.url);
-const manifest = JSON.parse(readFileSync(manifestUrl, "utf8"));
-const entries = Object.values(manifest).filter((chunk) => chunk.isEntry);
+const manifest: unknown = JSON.parse(readFileSync(manifestUrl, "utf8"));
+if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
+  throw new Error("frontend build manifest must be an object");
+}
+const entries = Object.values(manifest).filter(
+  (chunk: unknown): chunk is { isEntry: true; file: string } =>
+    typeof chunk === "object" && chunk !== null &&
+    "isEntry" in chunk && chunk.isEntry === true &&
+    "file" in chunk && typeof chunk.file === "string",
+);
 
 if (entries.length !== 1) {
   throw new Error(`expected one frontend entry chunk, found ${entries.length}`);

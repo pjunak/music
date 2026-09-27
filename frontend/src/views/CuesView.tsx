@@ -161,7 +161,7 @@ function CueCreateForm({
   }
 
   return (
-    <form onSubmit={submit} className="inline-create-row">
+    <form onSubmit={(event) => void submit(event)} className="inline-create-row">
       <input
         type="text"
         value={name}

@@ -169,7 +169,7 @@ jobs:
           name: music-output-linux-x86_64
           path: dist/music-output
       - name: Publish the verified commit without replacing existing downloads
-        run: node .github/scripts/publish-output.mjs
+        run: node .github/scripts/publish-output.mts
         env:
           GH_TOKEN: ${{ github.token }}
 

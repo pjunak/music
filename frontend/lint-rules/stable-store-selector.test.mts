@@ -17,7 +17,7 @@ const frontendRoot = path.resolve(ruleDirectory, "..");
 const oxlintBin = path.join(frontendRoot, "node_modules", "oxlint", "bin", "oxlint");
 const config = path.join(ruleDirectory, "test.oxlintrc.json");
 
-function lintFixture(name) {
+function lintFixture(name: string) {
   const source = readFileSync(
     path.join(ruleDirectory, "fixtures", `${name}.txt`),
     "utf8",
@@ -26,13 +26,16 @@ function lintFixture(name) {
   const fixture = path.join(temporaryDirectory, `${name}.ts`);
   writeFileSync(fixture, source);
 
-  const result = spawnSync(process.execPath, [oxlintBin, "--config", config, fixture], {
-    cwd: frontendRoot,
-    encoding: "utf8",
-  });
-
-  unlinkSync(fixture);
-  rmdirSync(temporaryDirectory);
+  let result;
+  try {
+    result = spawnSync(process.execPath, [oxlintBin, "--config", config, fixture], {
+      cwd: frontendRoot,
+      encoding: "utf8",
+    });
+  } finally {
+    unlinkSync(fixture);
+    rmdirSync(temporaryDirectory);
+  }
 
   if (result.error) throw result.error;
   return {

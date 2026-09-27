@@ -1,23 +1,28 @@
-/** Reconciliation tests for the real public/compat-mode.js: drive it over a
+/** Reconciliation tests for the generated compat-mode.js: drive it over a
  *  fake WebSocket and assert the position_epoch contract on its <audio>
  *  elements. The bug class under guard: volume changes / queue edits used to
  *  restart the song (or re-seek every poll), because the old code inferred
  *  seeks by comparing positions. Now: same epoch → never touch the element;
  *  epoch changed → seek to the broadcast position. */
-import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-function readProjectFile(relPath: string): string {
+import { generateCompatAssets } from "../../scripts/compat-build.mts";
+
+function findFrontendRoot(): string {
   for (const root of [process.cwd(), resolve(process.cwd(), "frontend")]) {
-    const p = resolve(root, relPath);
-    if (existsSync(p)) return readFileSync(p, "utf8");
+    try {
+      generateCompatAssets(root);
+      return root;
+    } catch {
+      // Try the repo-root fallback when Vitest was launched above frontend.
+    }
   }
-  throw new Error(`could not locate ${relPath} from cwd ${process.cwd()}`);
+  throw new Error(`could not locate compatibility sources from cwd ${process.cwd()}`);
 }
 
-const COMPAT_MODE_SOURCE = readProjectFile("public/compat-mode.js");
+const COMPAT_MODE_SOURCE = generateCompatAssets(findFrontendRoot()).compatMode;
 
 interface SentAction {
   type: string;

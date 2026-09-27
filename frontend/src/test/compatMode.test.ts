@@ -1,4 +1,4 @@
-/** Tests for the activation guard in the real public/compat-mode.js.
+/** Tests for the activation guard in the generated compat-mode.js.
  *
  *  We execute the actual shipped IIFE against the jsdom globals (its
  *  whenReady() runs synchronously because readyState is "complete" in the test
@@ -6,10 +6,11 @@
  *  only when the SPA bundle genuinely isn't running — and must never clobber a
  *  booted or already-painted SPA, the regression that the old paint-timer
  *  caused. The `?compat` preview is the one deliberate exception. */
-import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { generateCompatAssets } from "../../scripts/compat-build.mts";
 
 declare global {
   interface Window {
@@ -17,18 +18,19 @@ declare global {
   }
 }
 
-/** Resolves from the vitest cwd (the frontend dir under `npm run test`) with a
- *  fallback for a repo-root cwd — import.meta.url isn't a file: URL once vitest
- *  transforms the module. */
-function readProjectFile(relPath: string): string {
+function findFrontendRoot(): string {
   for (const root of [process.cwd(), resolve(process.cwd(), "frontend")]) {
-    const p = resolve(root, relPath);
-    if (existsSync(p)) return readFileSync(p, "utf8");
+    try {
+      generateCompatAssets(root);
+      return root;
+    } catch {
+      // Try the repo-root fallback when Vitest was launched above frontend.
+    }
   }
-  throw new Error(`could not locate ${relPath} from cwd ${process.cwd()}`);
+  throw new Error(`could not locate compatibility sources from cwd ${process.cwd()}`);
 }
 
-const COMPAT_MODE_SOURCE = readProjectFile("public/compat-mode.js");
+const COMPAT_MODE_SOURCE = generateCompatAssets(findFrontendRoot()).compatMode;
 
 /** Run the real compat-mode.js IIFE against the jsdom globals. A trailing
  *  DOMContentLoaded is dispatched in case the env reported readyState

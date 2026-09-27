@@ -7,7 +7,7 @@
 **Decider:** Project owner
 
 **Implemented:** 2026-08-29 as the eight-crate Rust workspace described by the production
-architecture and enforced by `.github/scripts/rust-architecture.mjs`.
+architecture and enforced by `.github/scripts/rust-architecture.mts`.
 
 **Implementation update (2026-08-29):** The checksum-pinned MusiCNN TensorFlow graph runs directly
 through tract 0.23.5 after a checksum-specific, in-memory compatibility normalization for four fixed

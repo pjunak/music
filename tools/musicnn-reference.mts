@@ -7,12 +7,24 @@ import path from 'node:path';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
-export function loadEssentiaReference(packageDirectory) {
+interface Deletable { delete(): void }
+interface MusiCnnResult { bands: Deletable }
+export interface EssentiaReference {
+  version: string;
+  arrayToVector(input: Float32Array): Deletable;
+  TensorflowInputMusiCNN(frame: Deletable): MusiCnnResult;
+  vectorToArray(vector: Deletable): ArrayLike<number>;
+  shutdown(): void;
+  delete(): void;
+}
+type ReferenceArtifact = readonly [file: string, sha256: string];
+
+export function loadEssentiaReference(packageDirectory: string): { essentia: EssentiaReference; artifacts: ReferenceArtifact[] } {
   const root = path.resolve(packageDirectory);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.equal(manifest.name, 'essentia.js', 'Wrong reference package');
   assert.equal(manifest.version, '0.1.3', 'Reference version changed; review before regenerating');
-  const artifacts = [
+  const artifacts: ReferenceArtifact[] = [
     ['essentia-wasm.umd.js', '7e0a2b5507199e8162c4ed090d38518de0c7faa070ce35d1593e7631b201014d'],
     ['essentia.js-core.umd.js', 'e3958a89ca0d3e1f95f67de627a383cdbbd8058f24fd53c6749758ff78b5e337'],
   ];
@@ -21,12 +33,12 @@ export function loadEssentiaReference(packageDirectory) {
     assert.equal(actual, expected, 'Reference artifact changed: ' + file);
   }
   const require = createRequire(import.meta.url);
-  const EssentiaWASM = require(path.join(root, 'dist', artifacts[0][0]));
-  const Essentia = require(path.join(root, 'dist', artifacts[1][0]));
+  const EssentiaWASM: unknown = require(path.join(root, 'dist', artifacts[0][0]));
+  const Essentia: new (wasm: unknown) => EssentiaReference = require(path.join(root, 'dist', artifacts[1][0]));
   return { essentia: new Essentia(EssentiaWASM), artifacts };
 }
 
-function main() {
+function main(): void {
   const { values } = parseArgs({
     options: {
       essentia: { type: 'string' },
@@ -35,11 +47,11 @@ function main() {
     },
   });
   if (!values.essentia || Boolean(values.output) === Boolean(values.check)) {
-    throw new Error('Usage: node tools/musicnn-reference.mjs --essentia PACKAGE_DIRECTORY (--check FIXTURE | --output NEW_FIXTURE)');
+    throw new Error('Usage: node tools/musicnn-reference.mts --essentia PACKAGE_DIRECTORY (--check FIXTURE | --output NEW_FIXTURE)');
   }
   const { essentia, artifacts } = loadEssentiaReference(values.essentia);
   const tau = 2 * Math.PI;
-  const signals = [
+  const signals: Array<[name: string, signal: (index: number) => number]> = [
     ['silence', () => 0],
     ['first_impulse', i => i === 0 ? 1 : 0],
     ['center_impulse', i => i === 256 ? 1 : 0],
@@ -59,7 +71,7 @@ function main() {
       // Store the exact float32 input, avoiding host-language sine differences in Rust tests.
       const input = Float32Array.from({ length: 512 }, (_, i) => signal(i));
       const frame = essentia.arrayToVector(input);
-      let result;
+      let result: MusiCnnResult | undefined;
       try {
         result = essentia.TensorflowInputMusiCNN(frame);
         const bands = Array.from(essentia.vectorToArray(result.bands));
@@ -94,6 +106,7 @@ function main() {
         'Reference fixture differs; inspect differences before replacing it');
       console.log('Verified ' + cases.length + ' synthetic frames and ' + cases.length * 96 + ' reference features.');
     } else {
+      assert(values.output);
       const header = JSON.stringify({ ...fixture, cases: [] }, null, 2);
       const text = header.replace('"cases": []',
         '"cases": [\n' + cases.map(item => '    ' + JSON.stringify(item)).join(',\n') + '\n  ]') + '\n';

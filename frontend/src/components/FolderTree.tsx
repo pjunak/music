@@ -335,7 +335,7 @@ export function FolderTree({
         ) : null}
       </div>
       {error !== null ? <p className="error small tree-root-error">{error}</p> : null}
-      <div className="tree-scroll" onKeyDown={onTreeKeyDown}>
+      <div className="tree-scroll">
         <div role="tree" aria-label="Folders">
           {visibleRows.map(({ node, depth }) => {
             const hasKids = (index.childrenOf.get(node.path)?.length ?? 0) > 0;
@@ -360,6 +360,7 @@ export function FolderTree({
                 style={{ "--depth": depth } as React.CSSProperties}
                 title={node.path}
                 onClick={() => selectRow(node)}
+                onKeyDown={onTreeKeyDown}
                 onFocus={() => setFocusedPath(node.path)}
                 {...dropProps(node.path)}
               >

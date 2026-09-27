@@ -168,8 +168,12 @@ class WsClient {
       this.sendRegister();
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (event: MessageEvent<unknown>) => {
       if (this.ws !== ws) return; // superseded socket flushing its last frames
+      if (typeof event.data !== "string") {
+        console.warn("[ws] rejected non-text frame");
+        return;
+      }
       let raw: unknown;
       try {
         raw = JSON.parse(event.data);

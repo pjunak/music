@@ -6,7 +6,41 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(SCRIPT_DIRECTORY, "..", "..");
 
-const CRATE_RULES = new Map([
+interface CrateRule {
+  allowed: readonly string[];
+  manifest: string;
+}
+
+interface CargoDependency {
+  name?: unknown;
+  path?: unknown;
+  rename?: unknown;
+  source?: unknown;
+}
+
+interface CargoPackage {
+  id?: unknown;
+  name?: unknown;
+  manifest_path?: unknown;
+  dependencies?: unknown;
+}
+
+interface CargoMetadata {
+  packages?: unknown;
+  workspace_members?: unknown;
+}
+
+export interface SourceFile {
+  path: string;
+  content: string;
+}
+
+interface ArchitectureOptions {
+  cargo: string;
+  toolchain: string | null;
+}
+
+const CRATE_RULES: ReadonlyMap<string, CrateRule> = new Map([
   ["music-domain", { allowed: [], manifest: "crates/music-domain/Cargo.toml" }],
   ["music-application", {
     allowed: ["music-domain"],
@@ -41,13 +75,13 @@ const CRATE_RULES = new Map([
     manifest: "crates/music-output/Cargo.toml",
   }],
 ]);
-const FUZZ_STATIC_ALLOWLIST = new Map([
+const FUZZ_STATIC_ALLOWLIST: ReadonlyMap<string, string> = new Map([
   ["crates/music-application/src/assistant/fuzzing.rs:EQ_TASK", "OnceLock<Option<EqDraftTask>>"],
   ["crates/music-application/src/assistant/fuzzing.rs:PLAYLIST_TASK", "OnceLock<Option<ModelPlaylistTask>>"],
   ["crates/music-application/src/assistant/fuzzing.rs:TAGGER_TASK", "OnceLock<Option<ModelTaggerBatch>>"],
   ["crates/music-application/src/assistant/fuzzing.rs:VOCABULARY", "OnceLock<Option<super::TagVocabularySnapshot>>"],
 ]);
-const APPROVED_TOKIO_SPAWN_COUNTS = new Map([
+const APPROVED_TOKIO_SPAWN_COUNTS: ReadonlyMap<string, number> = new Map([
   ["crates/music-application/src/jobs.rs", 2],
   ["crates/music-application/src/library.rs", 1],
   ["crates/music-application/src/modes.rs", 1],
@@ -55,7 +89,7 @@ const APPROVED_TOKIO_SPAWN_COUNTS = new Map([
   ["crates/music-server/src/supervisor.rs", 1],
   ["crates/music-server/src/websocket.rs", 1],
 ]);
-const APPROVED_SPAWN_BLOCKING_COUNTS = new Map([
+const APPROVED_SPAWN_BLOCKING_COUNTS: ReadonlyMap<string, number> = new Map([
   // Awaited one file at a time by the serialized provider job lane; bounded Lofty parsing.
   ["crates/music-server/src/cleanup_enrichment.rs", 1],
   ["crates/music-application/src/auth.rs", 1],
@@ -72,23 +106,34 @@ const APPROVED_SPAWN_BLOCKING_COUNTS = new Map([
   ["crates/music-storage/src/migration.rs", 2],
 ]);
 
-function portablePath(path) {
+function portablePath(path: unknown): string {
   return String(path).replaceAll("\\", "/").replace(/\/+$/u, "");
 }
 
-function workspacePackages(metadata, violations) {
-  if (!metadata || !Array.isArray(metadata.packages) || !Array.isArray(metadata.workspace_members)) {
+function formatMetadataValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  const serialized = JSON.stringify(value);
+  return serialized ?? typeof value;
+}
+
+function workspacePackages(metadata: unknown, violations: string[]): CargoPackage[] {
+  if (!metadata || typeof metadata !== "object") {
     violations.push("cargo metadata did not contain packages and workspace_members arrays");
     return [];
   }
-  const memberIds = new Set(metadata.workspace_members);
-  return metadata.packages.filter((candidate) => memberIds.has(candidate.id));
+  const candidateMetadata = metadata as CargoMetadata;
+  if (!Array.isArray(candidateMetadata.packages) || !Array.isArray(candidateMetadata.workspace_members)) {
+    violations.push("cargo metadata did not contain packages and workspace_members arrays");
+    return [];
+  }
+  const memberIds = new Set<unknown>(candidateMetadata.workspace_members);
+  return (candidateMetadata.packages as CargoPackage[]).filter((candidate) => memberIds.has(candidate?.id));
 }
 
-export function architectureViolations(metadata) {
-  const violations = [];
+export function architectureViolations(metadata: unknown): string[] {
+  const violations: string[] = [];
   const packages = workspacePackages(metadata, violations);
-  const packagesByName = new Map();
+  const packagesByName = new Map<string, CargoPackage>();
 
   for (const candidate of packages) {
     if (!candidate || typeof candidate.name !== "string") {
@@ -117,8 +162,10 @@ export function architectureViolations(metadata) {
       violations.push(`${name} has an unexpected manifest path: ${manifestPath}`);
     }
 
-    const dependencies = Array.isArray(candidate.dependencies) ? candidate.dependencies : [];
-    for (const dependency of dependencies) {
+    const dependencies: unknown[] = Array.isArray(candidate.dependencies) ? candidate.dependencies : [];
+    for (const value of dependencies) {
+      if (!value || typeof value !== "object") continue;
+      const dependency = value as CargoDependency;
       const dependencyName = dependency?.name;
       if (typeof dependencyName !== "string") continue;
       const isKnownInternal = CRATE_RULES.has(dependencyName);
@@ -132,14 +179,16 @@ export function architectureViolations(metadata) {
       if (!isPathDependency || dependency.source !== null) {
         violations.push(`${name} does not resolve ${dependencyName} as a local path dependency`);
       } else {
-        const dependencyRoot = CRATE_RULES.get(dependencyName).manifest.replace(/\/Cargo\.toml$/u, "");
+        const dependencyRule = CRATE_RULES.get(dependencyName);
+        if (!dependencyRule) continue;
+        const dependencyRoot = dependencyRule.manifest.replace(/\/Cargo\.toml$/u, "");
         const dependencyPath = portablePath(dependency.path);
         if (!dependencyPath.endsWith(`/${dependencyRoot}`) && dependencyPath !== dependencyRoot) {
           violations.push(`${name} resolves ${dependencyName} from an unexpected path: ${dependencyPath}`);
         }
       }
       if (dependency.rename !== null && dependency.rename !== undefined) {
-        violations.push(`${name} aliases internal crate ${dependencyName} as ${dependency.rename}`);
+        violations.push(`${name} aliases internal crate ${dependencyName} as ${formatMetadataValue(dependency.rename)}`);
       }
       if (!rule.allowed.includes(dependencyName)) {
         violations.push(`${name} has forbidden dependency on ${dependencyName}`);
@@ -150,15 +199,17 @@ export function architectureViolations(metadata) {
   return [...new Set(violations)].sort();
 }
 
-export function sourceStateViolations(files) {
-  const violations = [];
+export function sourceStateViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
   const declaration = /^\s*(?:pub(?:\s*\([^\r\n)]*\))?\s+)?static\s+(?:mut\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=;]+?)(?:=|;)/gmu;
   for (const file of files) {
     const path = portablePath(file.path);
     for (const match of String(file.content).matchAll(declaration)) {
       const name = match[1];
+      const declaredType = match[2];
+      if (!name || !declaredType) continue;
       const expectedType = FUZZ_STATIC_ALLOWLIST.get(`${path}:${name}`);
-      const actualType = match[2].replace(/\s+/gu, "");
+      const actualType = declaredType.replace(/\s+/gu, "");
       if (!expectedType || actualType !== expectedType.replace(/\s+/gu, "")) {
         violations.push(`${path}: module-global static ${name} is not approved; inject owned state through AppRuntime`);
       }
@@ -167,18 +218,18 @@ export function sourceStateViolations(files) {
   return [...new Set(violations)].sort();
 }
 
-function productionSource(content) {
+function productionSource(content: string): string {
   const source = String(content);
   const testModule = /^\s*#\[cfg\(test\)\]\s*\r?\n\s*mod\s+tests\s*\{/mu.exec(source);
   return testModule ? source.slice(0, testModule.index) : source;
 }
 
-function occurrenceCount(source, pattern) {
+function occurrenceCount(source: string, pattern: RegExp): number {
   return [...source.matchAll(pattern)].length;
 }
 
-export function sourceConcurrencyViolations(files) {
-  const violations = [];
+export function sourceConcurrencyViolations(files: readonly SourceFile[]): string[] {
+  const violations: string[] = [];
   const unboundedChannel = /\bmpsc::unbounded_channel\s*\(|\bmpsc::channel\s*\(\s*\)|\b(?:async_channel|crossbeam_channel|flume)::unbounded\s*\(/gu;
   for (const file of files) {
     const path = portablePath(file.path);
@@ -206,8 +257,8 @@ export function sourceConcurrencyViolations(files) {
   return [...new Set(violations)].sort();
 }
 
-function rustSourceFiles(directory = resolve(REPOSITORY_ROOT, "crates")) {
-  const files = [];
+function rustSourceFiles(directory = resolve(REPOSITORY_ROOT, "crates")): SourceFile[] {
+  const files: SourceFile[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) files.push(...rustSourceFiles(path));
@@ -221,16 +272,16 @@ function rustSourceFiles(directory = resolve(REPOSITORY_ROOT, "crates")) {
   return files;
 }
 
-function usage() {
+function usage(): string {
   return [
-    "usage: node .github/scripts/rust-architecture.mjs [--cargo <path>] [--toolchain <name>]",
+    "usage: node .github/scripts/rust-architecture.mts [--cargo <path>] [--toolchain <name>]",
     "",
     "Checks the locked Cargo metadata and source against the accepted architecture boundaries.",
   ].join("\n");
 }
 
-function parseArguments(arguments_) {
-  const options = { cargo: "cargo", toolchain: null };
+function parseArguments(arguments_: readonly string[]): ArchitectureOptions | null {
+  const options: ArchitectureOptions = { cargo: "cargo", toolchain: null };
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === "--help" || argument === "-h") return null;
@@ -244,8 +295,8 @@ function parseArguments(arguments_) {
   return options;
 }
 
-function loadMetadata(options) {
-  const arguments_ = [];
+function loadMetadata(options: ArchitectureOptions): unknown {
+  const arguments_: string[] = [];
   if (options.toolchain) arguments_.push(`+${options.toolchain}`);
   arguments_.push("metadata", "--locked", "--no-deps", "--format-version", "1");
   const result = spawnSync(options.cargo, arguments_, {
@@ -265,7 +316,7 @@ function loadMetadata(options) {
   }
 }
 
-function main() {
+function main(): void {
   const options = parseArguments(process.argv.slice(2));
   if (!options) {
     process.stdout.write(`${usage()}\n`);

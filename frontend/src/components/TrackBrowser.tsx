@@ -153,6 +153,7 @@ export function TrackBrowser({
             <li className="muted small track-browser-empty">No tracks here.</li>
           ) : (
             visible.map((t) => (
+              /* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Native drag behavior belongs to the list row; its Add button remains keyboard accessible. */
               <li
                 key={t.id}
                 className="track-browser-row"

@@ -199,7 +199,7 @@ function CueEditorForm({
   }
 
   return (
-    <form onSubmit={submit} className="cue-editor">
+    <form onSubmit={(event) => void submit(event)} className="cue-editor">
       <Breadcrumb items={breadcrumb} />
       <header className="cue-editor-head">
         <h2>{cue.name || cue.id}</h2>

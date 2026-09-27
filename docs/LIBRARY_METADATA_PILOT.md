@@ -30,7 +30,7 @@ shared recordings for you. A `stratum` describes the case type. For example:
 Keep private manifests, labels and exports outside source control. From the repository root:
 
 ```powershell
-node tools/cleanup-pilot.mjs init manifest.json cohort.json
+node tools/cleanup-pilot.mts init manifest.json cohort.json
 ```
 
 Preparation refuses to overwrite an existing cohort. It assigns approximately one fifth of
@@ -275,8 +275,8 @@ Independent recording/edition judgments and assisted-review acceptance remain ou
 ### Score saved results
 
 ```powershell
-node tools/cleanup-pilot.mjs score cohort.json baseline-run.json > baseline-score.json
-node tools/cleanup-pilot.mjs score cohort.json changed-run.json > changed-score.json
+node tools/cleanup-pilot.mts score cohort.json baseline-run.json > baseline-score.json
+node tools/cleanup-pilot.mts score cohort.json changed-run.json > changed-score.json
 ```
 
 Scores include cohort and run fingerprints, overall counts, separate development/holdout
@@ -304,9 +304,9 @@ changes separately; current catalog exports do not provide all of those measurem
 Engineering can compare the same fixed cohort against two retained runs:
 
 ```powershell
-node tools/cleanup-pilot.mjs compare cohort.json baseline-run.json changed-run.json > development-comparison.json
+node tools/cleanup-pilot.mts compare cohort.json baseline-run.json changed-run.json > development-comparison.json
 # Only after development decisions are fixed:
-node tools/cleanup-pilot.mjs compare cohort.json baseline-run.json changed-run.json holdout > holdout-comparison.json
+node tools/cleanup-pilot.mts compare cohort.json baseline-run.json changed-run.json holdout > holdout-comparison.json
 ```
 
 Comparison defaults to the development split. It requires independent judgments and evidence

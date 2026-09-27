@@ -63,7 +63,7 @@ export function AuthoringImportModal({
   const [modes, setModes] = useState<ModeSummary[]>([]);
   const [sourceKind, setSourceKind] = useState<ImportSourceKind>("mode");
   const [sourceModeId, setSourceModeId] = useState("");
-  const [document, setDocument] = useState<unknown | null>(null);
+  const [document, setDocument] = useState<unknown>(null);
   const [documentSourceName, setDocumentSourceName] = useState<string>();
   const [fileName, setFileName] = useState("");
   const [pasteText, setPasteText] = useState("");
@@ -381,7 +381,10 @@ export function AuthoringImportModal({
       <fieldset className="authoring-import-source-picker">
         <legend>Choose a source</legend>
         <div className="authoring-import-source-options">
-          <label className={sourceKind === "mode" ? "is-active" : undefined}>
+          <label
+            className={sourceKind === "mode" ? "is-active" : undefined}
+            aria-label="Another mode"
+          >
             <input
               data-autofocus
               type="radio"
@@ -396,7 +399,10 @@ export function AuthoringImportModal({
               <small>Copy existing authored resources</small>
             </span>
           </label>
-          <label className={sourceKind === "file" ? "is-active" : undefined}>
+          <label
+            className={sourceKind === "file" ? "is-active" : undefined}
+            aria-label="JSON file"
+          >
             <input
               type="radio"
               name="authoring-import-source"
@@ -410,7 +416,10 @@ export function AuthoringImportModal({
               <small>Review a prepared import document</small>
             </span>
           </label>
-          <label className={sourceKind === "paste" ? "is-active" : undefined}>
+          <label
+            className={sourceKind === "paste" ? "is-active" : undefined}
+            aria-label="Paste JSON"
+          >
             <input
               type="radio"
               name="authoring-import-source"

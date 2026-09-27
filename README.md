@@ -36,7 +36,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   it auto-activates when it reconnects.
 - **TV / room display** — a read-only now-playing view at `/` for a screen in the room, usable
   **without logging in** (guest access), with cover art, up-next, and recently-played.
-- **Compatibility mode** — a dependency-free ES5 fallback player (`compat-mode.js`) for browsers
+- **Compatibility mode** — a dependency-free ES5 fallback player (`compat-mode.js`, built from TypeScript in `frontend/compat/`) for browsers
   that can't run the SPA (old smart TVs). Loads via `<script nomodule>` or a boot watchdog when
   the bundle fails to run; previewable on any browser with `?compat`. Same output protocol,
   plain `<audio>` + XHR/WebSocket.

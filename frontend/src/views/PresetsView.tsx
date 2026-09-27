@@ -154,8 +154,8 @@ function composeEffectChain(
 ): PresetEffect[] {
   const ordered = ADDABLE.filter((a) => activeTypes.has(a.type)).map((a) =>
     a.type === "eq"
-      ? ({ type: "eq", bands: effectState.eq.bands as EqBand[] } as PresetEffect)
-      : ({ type: a.type, ...effectState[a.type] } as PresetEffect),
+      ? ({ type: "eq", bands: effectState.eq.bands as EqBand[] })
+      : ({ type: a.type, ...effectState[a.type] }),
   );
   return [...ordered, ...extraEffects];
 }
@@ -586,7 +586,7 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
   }
 
   return (
-    <form onSubmit={submit} className="preset-form">
+    <form onSubmit={(event) => void submit(event)} className="preset-form">
       <header className="playlist-detail-header">
         <h2>{mode === "create" ? "New preset" : preset?.name}</h2>
         {mode === "edit" ? (
@@ -799,7 +799,7 @@ function PresetForm({ modeId, mode, preset, existingIds, onClose, onSaved, onDel
               </header>
               <div className="rack-body">
                 <GraphicEqModule
-                  bands={normalizeEqBands(effectState.eq.bands as EqBand[])}
+                  bands={normalizeEqBands(effectState.eq.bands)}
                   active={eqActive}
                   onChange={(b) => setBands("eq", b)}
                 />

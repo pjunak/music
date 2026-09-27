@@ -121,8 +121,8 @@ export function AnalysisTagReview({
       ) : (
         <div className="assistant-analysis-review-list">
           {groups.map((group) => (
-            <section key={group.source} className="assistant-review-source-group" aria-label={suggestionSourceLabel(group.items[0]!.analyzer_id)}>
-              <h3>{suggestionSourceLabel(group.items[0]!.analyzer_id)}</h3>
+            <section key={group.source} className="assistant-review-source-group" aria-label={suggestionSourceLabel(group.items[0].analyzer_id)}>
+              <h3>{suggestionSourceLabel(group.items[0].analyzer_id)}</h3>
               {group.source === "model" ? <p className="muted small">Mood tags describe an impression. Scene and setting tags propose session uses; they do not claim the song depicts a literal event. Accept only tags you find useful for this music.</p> : null}
               {group.items.map((suggestion) => {
                 const key = analysisTagSuggestionKey(trackId, suggestion);

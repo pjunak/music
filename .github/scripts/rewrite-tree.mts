@@ -27,7 +27,7 @@ const PYTHON_BASENAMES = new Set([
   "tox.ini",
   "uv.lock",
 ]);
-const ACTIVE_REFERENCE_PATTERNS = [
+const ACTIVE_REFERENCE_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/actions\/setup-python@/iu, "Python setup action"],
   [/package-ecosystem:\s*["']?pip/iu, "pip dependency ecosystem"],
   [/^\s*FROM\s+python(?::|\s)/imu, "Python container base"],
@@ -36,7 +36,14 @@ const ACTIVE_REFERENCE_PATTERNS = [
   [/Dockerfile\.rust|music_output\.py|requirements\.txt/iu, "removed transition path"],
 ];
 
-function runGit(arguments_) {
+export interface GitTreeEntry {
+  mode: string;
+  type: string;
+  oid: string;
+  path: string;
+}
+
+function runGit(arguments_: readonly string[]): string {
   const result = spawnSync("git", arguments_, {
     cwd: REPOSITORY_ROOT,
     encoding: "utf8",
@@ -49,13 +56,13 @@ function runGit(arguments_) {
   return String(result.stdout);
 }
 
-function assertCleanWorktree() {
+function assertCleanWorktree(): void {
   if (runGit(["status", "--porcelain=v1", "--untracked-files=all"]).trim()) {
     throw new Error("rewrite-tree verification requires a clean Git worktree");
   }
 }
 
-function trackedEntries() {
+function trackedEntries(): GitTreeEntry[] {
   const output = runGit(["ls-tree", "-r", "-z", "--full-tree", "HEAD"]);
   return output
     .split("\0")
@@ -63,12 +70,16 @@ function trackedEntries() {
     .map((record) => {
       const separator = record.indexOf("\t");
       if (separator < 0) throw new Error("git ls-tree returned an invalid record");
-      const [mode, type, oid] = record.slice(0, separator).split(" ");
+      const metadata = record.slice(0, separator).split(" ");
+      if (metadata.length !== 3 || metadata.some((field) => !field)) {
+        throw new Error("git ls-tree returned invalid metadata");
+      }
+      const [mode, type, oid] = metadata as [string, string, string];
       return { mode, type, oid, path: record.slice(separator + 1) };
     });
 }
 
-export function isPythonArtifact(path) {
+export function isPythonArtifact(path: string): boolean {
   const name = basename(path);
   return path.toLowerCase().endsWith(".py")
     || path.toLowerCase().endsWith(".pyi")
@@ -76,8 +87,8 @@ export function isPythonArtifact(path) {
     || PYTHON_BASENAMES.has(name);
 }
 
-function isActiveSurface(path) {
-  if (path === ".github/scripts/rewrite-tree.mjs" || path === ".github/scripts/rewrite-tree.test.mjs") {
+function isActiveSurface(path: string): boolean {
+  if (path === ".github/scripts/rewrite-tree.mts" || path === ".github/scripts/rewrite-tree.test.mts") {
     return false;
   }
   return path === "Dockerfile"
@@ -87,7 +98,7 @@ function isActiveSurface(path) {
     || (!path.includes("/") && /\.(?:md|toml|yml|yaml)$/iu.test(path));
 }
 
-function isGeneratedOrSensitiveArtifact(path) {
+function isGeneratedOrSensitiveArtifact(path: string): boolean {
   if (/(^|\/)(?:target|node_modules|\.venv|__pycache__|fuzz\/artifacts|fuzz\/coverage)(\/|$)/iu.test(path)) {
     return true;
   }
@@ -95,7 +106,10 @@ function isGeneratedOrSensitiveArtifact(path) {
   return /\.(?:aac|db|flac|key|m4a|mp3|ogg|opus|p12|pem|pfx|profraw|pyc|pyo|sqlite|sqlite3|wav|wma)$/iu.test(path);
 }
 
-export function finalTreeViolations(entries, readText) {
+export function finalTreeViolations(
+  entries: readonly GitTreeEntry[],
+  readText: (path: string) => string,
+): string[] {
   const paths = entries.filter((entry) => entry.type === "blob").map((entry) => entry.path);
   const violations = [];
   if (!paths.includes("Dockerfile")) violations.push("Dockerfile: final Rust image definition is missing");
@@ -126,7 +140,7 @@ export function finalTreeViolations(entries, readText) {
   return [...new Set(violations)].sort();
 }
 
-function checkFinal(entries) {
+function checkFinal(entries: readonly GitTreeEntry[]): void {
   assertCleanWorktree();
   const violations = finalTreeViolations(
     entries,
@@ -138,10 +152,10 @@ function checkFinal(entries) {
   process.stdout.write("final tracked tree is Rust-only and contains no transition or generated artifacts\n");
 }
 
-function main() {
+function main(): void {
   const arguments_ = process.argv.slice(2);
   if (arguments_.length > 1 || (arguments_.length === 1 && arguments_[0] !== "final")) {
-    throw new Error("usage: node .github/scripts/rewrite-tree.mjs [final]");
+    throw new Error("usage: node .github/scripts/rewrite-tree.mts [final]");
   }
   checkFinal(trackedEntries());
 }
