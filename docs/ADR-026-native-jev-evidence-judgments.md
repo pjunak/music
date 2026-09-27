@@ -1,6 +1,6 @@
 # ADR-026: Native Jev applicability and evidence judgments
 
-Reviewed 27 September 2026 against the owner's latest Jev quality export and the official API/SDK contracts.
+Reviewed 28 September 2026 against the owner's latest Jev quality export and the official API/SDK contracts.
 
 ## Initial v3 failure
 
@@ -133,10 +133,27 @@ The developer-only `jev-compare` example creates offline, hash-bound plans and
 uses synthetic fixtures without application configuration or library access.
 Paid runs are explicit, bounded, checkpointed before I/O and never retried.
 Full evaluation reuses the native executor, durable SQLite jobs and shared scorer;
-it never publishes application acceptance. Initial-match variants identical to
-the current engine are omitted instead of spending requests on adopted changes.
+it never publishes application acceptance. Variants identical to the current engine
+are omitted instead of spending requests on adopted changes.
 The v5 experiment's exact requests remain in its original local journal; there
 is no legacy production engine or replay of old generated analysis.
+
+### Descriptive support repair: engine v7
+
+A subsequent v6 run reached 45/66, retaining the same fixture, observation-support,
+custom-purpose and acoustic-proxy failures. Suite v29 corrects only the four
+positive settings previously supplied through excluded provenance. Required labels,
+safety controls and quality thresholds are unchanged.
+
+An authorized thirty-call comparison over fifteen fixed cases isolated question
+wording while preserving state, definitions and conflicts. Direct semantic support
+recovered explicit calm, ritual, majestic and defiant descriptions, and rejected
+quiet focus when only warm low-light ambience was described. It did not improve
+general first-pass or numeric-acoustic matching. V7 therefore adopts exactly the
+measured question only for album/genre support; all other question types retain
+v6 behavior. Inference identity changes and invalidates old proposals/certification.
+The [dated results](AI_ACCEPTANCE.md#jev-metadata-support-repair-2026-09-28) preserve
+the measured scores, rejected broader variant, usage and acceptance limitations.
 
 ### Shared inference rules
 

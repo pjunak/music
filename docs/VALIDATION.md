@@ -112,9 +112,11 @@ cargo run --locked -p music-server --example jev-compare -- plan target/jev-fram
 cargo run --locked -p music-server --example jev-compare -- quality-plan target/jev-quality-plan.json
 ```
 
-Both commands are offline and refuse to overwrite their output. Initial-match
-plans omit variants identical to the current contract; the original 30-call v5
-comparison is a dated result, not the current plan. Full plans include conformance,
+Both commands are offline and refuse to overwrite their output. Comparison plans
+cover initial matching and selected observation support for fifteen fixed cases,
+including negative controls, with unchanged state and conflict questions. They
+omit identical variants; prior experiments remain dated results in their journals,
+not the current plan. Full plans include conformance,
 the entire current quality suite, safety repeats, inference identity, scoring
 expectations and conservative total request/input bounds.
 

@@ -17,7 +17,7 @@ use super::{
 pub const MODEL_TAGGER_INPUT_CONTRACT: &str = "assistant-music-tagger-input/v25";
 pub const MODEL_TAGGER_OUTPUT_CONTRACT: &str = "assistant-music-tagger-output/v5";
 pub const MODEL_TAGGING_EVALUATION_CONTRACT: &str = "assistant-music-tagger-evaluation/v10";
-pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v28";
+pub const TAGGING_QUALITY_SUITE_ID: &str = "controlled-vocabulary-tagging-baseline-v29";
 pub const MODEL_TAG_BATCH_SIZE: usize = 20;
 pub const MAX_MODEL_TAGS_PER_TRACK: usize = 8;
 pub const MAX_MODEL_EVIDENCE_ITEMS: usize = 4;
@@ -1776,7 +1776,7 @@ mod tests {
                 .iter()
                 .find(|case| case.id == case_id)
                 .ok_or("expected title-removal regression case")?;
-            let supplied_metadata = ["artist", "album", "origin", "genre"]
+            let supplied_metadata = ["album", "genre"]
                 .into_iter()
                 .filter_map(|field| case.track.get(field).and_then(|value| value.as_str()))
                 .collect::<Vec<_>>()
@@ -1870,7 +1870,9 @@ mod tests {
             track_id: 6,
             tags: case.required_tags.clone(),
             decisions: Vec::new(),
-            evidence: vec!["The origin describes an inn and the genre a lullaby.".to_owned()],
+            evidence: vec![
+                "The album describes rest at a tavern and the genre a lullaby.".to_owned(),
+            ],
         };
         let results = super::merge_safety_repeats(
             vec![case.assess(Ok(&first), &vocabulary)],

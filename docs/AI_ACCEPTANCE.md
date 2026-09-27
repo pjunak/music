@@ -19,6 +19,88 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev metadata support repair: 2026-09-28
+
+The owner's subsequent v6/v28 export (`dad2a539b42b419a8fa47cc727952fa2`)
+passed **45/66** scenarios, **16/16** safety checks and **6/9** context-only
+cases. All 288 quality requests received responses: 3,249,908 input and 215,769
+output tokens. It missed 22 required assignments: 16 at matching and six at
+grounding, with no candidate-limit loss. The custom low-light case also returned
+`quiet focus` without evidence of reading or study. This confirms the previous
+run's failure pattern rather than a provider or transport outage.
+
+Corrected four proven fixture contradictions in suite **v29**: positive tavern,
+ruins, village and temple cases now describe their settings in the supplied album
+field. Previously only the excluded `origin` field established those settings.
+All required/forbidden labels, 66 cases, 16 safety repeats, vocabulary/context
+subgates and the 90% threshold remain. The injection prefix and provenance-only
+negative remain; paired native regressions prove retained artist/source names
+cannot trigger inference after album and genre descriptions are cleared.
+
+An explicitly authorized **30-request** comparison held fifteen synthetic inputs,
+two tags per case, observation content and conflict questions fixed. It compared
+current versus direct-semantic fit/support questions and used **119,096 input**
+and **6,160 output** tokens, within 475,872 conservative reserved input units.
+All requests completed without retries. Selected album-support observations:
+
+| Case/tag | Current support | Direct semantic support |
+|---|---:|---:|
+| Calm travel / calm | 0.64 | 0.85 |
+| Demonic rituals / ritual | 0.66 | 0.90 |
+| Solemn coronation / majestic | 0.41 | 0.73 |
+| Rebellion / defiant | 0.62 | 0.93 |
+| Warm low light / unsupported quiet focus | 0.71 | 0.52 |
+| Warm low light / correctly redefined dark | 0.94 | 0.98 |
+
+The same broad rewrite worsened initial Arctic matching (0.67 to 0.45) and
+acoustic calm matching (0.66 to 0.34). **Only album/genre support adopts the
+measured wording in engine v7.** First-pass matching, acoustic/catalog support,
+conflict judgments and thresholds retain their existing contracts. Assertions
+bind the production metadata question exactly to the measured variant. The
+experiment tests selected judgments, not full candidate competition or certification.
+
+The separately authorized full v7/v29 validation completed fresh conformance and
+all 82 scenario executions. It used **289 requests**, all with responses, and
+13,905,901 reserved input units within the 818-request/19,746,130-unit plan.
+Provider usage was **3,258,585 input** and **216,690 output** tokens, with no
+retries, uncertain requests or missing usage.
+
+| Result | Supplied v6/v28 | Measured v7/v29 |
+|---|---:|---:|
+| Passed scenarios | 45/66 (68.2%) | 55/66 (83.3%) |
+| Required assignments returned | 137/159 | 148/159 |
+| Safety, including repeats | 16/16 | 16/16 |
+| Default vocabulary | 40/60 | 49/60 |
+| Custom vocabulary | 4/5 | 5/5 |
+| Maximum vocabulary | 1/1 | 1/1 |
+| Context-only | 6/9 | 6/9 |
+| Full quality gate | Failed | Failed |
+
+Ten scenarios improved and none that previously passed regressed. This comparison
+includes four corrected inputs, so it is not a pure engine comparison; their old
+outcomes remain failed in the historical report. The targeted controlled experiment
+above separately establishes the support wording effect.
+
+All eleven remaining missing assignments fail initial matching; none fails
+grounding or candidate capacity. Required-tag recall is not the scenario pass rate.
+Remaining first-pass scores are Arctic 0.66, city 0.22, shopping 0.55, festival 0.64,
+storytelling 0.41, festive dance 0.67, temple 0.66, Renaissance festive 0.43,
+acoustic calm 0.65/0.66 and acoustic urgent 0.31. The custom over-tag is resolved.
+Next investigate the semantic first-pass question and how the complete definition
+is applied to short descriptions. Do not automatically reuse the failed broader
+rewrite. Three acoustic positives still require independent listening qualification;
+numeric proxies must not be rewritten into guaranteed emotion labels to pass.
+
+Engineering validation passes: 580 Rust tests with no skips, using real FFmpeg and
+the pinned optional voice artifact; four developer-example tests; formatting,
+architecture, workspace check, strict workspace/fuzz Clippy, doc tests and generated
+contracts. No frontend behavior changed. These checks do not certify Jev quality.
+
+Local evidence: `target/jev-support-results-20260928.jsonl` and
+`target/jev-quality-v7-20260928/result.json`. Credentials and generated run artifacts
+remain outside source control. This repair neither analyzes library audio nor
+updates application certification or accepted tags.
+
 ## Jev controlled comparison and full validation: 2026-09-27
 
 Pinned `jev-1.13.0` was tested with explicitly authorized synthetic inputs only.

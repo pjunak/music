@@ -148,7 +148,7 @@ per-measurement context reliability. Full membership is validated before resolvi
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v6`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v7`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. Jev receives one song's actual observation cards without a track ID.
 Each question includes group meaning, the tag definition and its synonyms. Initial
@@ -158,6 +158,10 @@ descriptions without treating unverified provenance as semantic absence. Groundi
 and tentative support remain separate. Mood asks about musical impression; setting/scene ask
 about a specific reason for tabletop use. Descriptive metadata can support a tag
 without proving how the recording sounds; isolated identity words cannot.
+Engine v7 asks album/genre support as direct semantic questions, explicitly requiring
+the concept's purpose and properties rather than a merely compatible attribute.
+The measured repair preserves first-pass matching, acoustic/catalog support, conflict
+questions, evidence views, candidate limits and every acceptance threshold.
 Display labels stay in the application; changing a label does not change its semantic
 question. Vocabulary context cues remain available to playlist retrieval but are excluded
 from Jev tag meanings. Mood grounding asks about musical character, while setting/scene
@@ -241,10 +245,10 @@ before retaining an unbounded request plan. No generated-output allowance is sen
 fallback or remote Batch is supported. A native execution failure stops further
 quality calls, including safety reruns. Subsequent cases report not-run with the original
 error, retain their failed certification outcome and are counted separately in progress.
-The quality report identifies the native v6 engine; successful synthetic checks still do not
+The quality report identifies the native v7 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
-not local context or accepted tags. The [dated live validation](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27)
+not local context or accepted tags. The [dated live validation](AI_ACCEPTANCE.md#jev-metadata-support-repair-2026-09-28)
 improves recall but still fails the quality gate. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
 
 The context implementation is `local-context/v3+rustfft/v2+loudness/v2`.
@@ -746,7 +750,7 @@ disclosure limit. Canonical display titles override conflicting raw scanner titl
 and filesystem paths remain searchable evidence but cannot create mood axes. Candidate percentages
 shown after model ranking are explicitly labeled as local evidence, not model confidence.
 
-Tagging suite `controlled-vocabulary-tagging-baseline-v28` uses 60 bundled-vocabulary,
+Tagging suite `controlled-vocabulary-tagging-baseline-v29` uses 60 bundled-vocabulary,
 five custom-vocabulary, and one 200-tag scenario. `tagging_evaluation.rs` isolates
 vocabularies during batching and validates fixed fixture identities for retests.
 Each vocabulary group and the context-only subset (no descriptive metadata) must independently
@@ -766,6 +770,11 @@ and adds a provenance-name-only negative control. Its urgent-context description
 longer claims a verified fast pulse, which the input projection withholds. All prior
 required tags and the nine-case acoustic gate remain; the positive acoustic labels
 still need independent listening qualification, not fabricated stronger measurements.
+Suite v29 supplies explicit album descriptions for tavern, ruins, village and temple
+positives whose settings previously existed only in excluded source provenance.
+Required/forbidden tags and all scoring thresholds are unchanged. Paired planner
+regressions clear those descriptions and prove retained source/artist names trigger
+no inference; the provenance-only safety scenario is also retained.
 Dedicated regressions check gain-invariant relative dynamics, later climaxes, withheld
 coarse tempo, source-bound catalog projection, missing/cross-track references and explicit
 abstention. The evaluation report is v10. These changes require fresh matching conformance

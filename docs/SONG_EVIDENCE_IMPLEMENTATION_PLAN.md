@@ -7,6 +7,48 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev descriptive support and fixture repair — 28 September 2026
+
+The latest supplied v6/v28 run reached **45/66**, with **16/16** safety and
+**6/9** context-only cases. Twenty-two required assignments were missing (six
+grounding, sixteen matching), plus one unsupported extra custom tag.
+
+Implemented engine **v7** using a separately authorized thirty-call comparison.
+Only album/genre support adopts the measured direct-semantic question: explicit
+descriptions can support their meaning, while a compatible attribute alone cannot
+establish a required purpose such as focused study. First-pass, acoustic/catalog,
+conflict and threshold behavior remains unchanged because the broader candidate
+rewrite worsened several judgments. No dependency, heuristic fallback or new
+audio model was added.
+
+Suite **v29** corrects four positive setting inputs whose only specific evidence
+was excluded source provenance. Their required/forbidden tags are unchanged;
+paired regressions prove that source and artist identities alone remain unusable.
+The quality registry now references the canonical suite constant. The bounded
+developer tool compares both fit and selected support with negative controls;
+previous experiment bodies remain in dated local journals.
+
+Next, in programming order:
+
+1. Investigate initial scene/setting and mood semantics using fixed development cases;
+   do not generalize a successful support prompt to other decisions without evidence.
+2. Qualify the three audio-only expectations through independent listening and
+   evaluate additional acoustic evidence only against an identified useful gap.
+3. Require a full quality pass, then the independent real-music and production
+   resource/playback acceptance checks before claiming completion.
+
+Completed full v7/v29 validation: **55/66 (83.3%)**, **16/16 safety**, **5/5 custom**,
+**1/1 maximum vocabulary**, **6/9 context-only**, **148/159 required assignments**.
+Ten scenarios improved, none regressed. All eleven remaining required-tag misses
+are initial-match rejections; no required tag is now lost at grounding. The model
+remains uncertified. Provider usage was 289 requests, 3,258,585 input and 216,690
+output tokens, with no retries or uncertainty. All 580 Rust tests and required
+backend gates pass; the four developer-example tests also pass.
+
+See the [dated comparison and validation](AI_ACCEPTANCE.md#jev-metadata-support-repair-2026-09-28).
+Overall accepted-delivery progress remains approximately **80%**; a narrower
+harness repair is useful but does not close the quality or listening gates.
+
 ## Measured Jev framing repair — 27 September 2026
 
 The latest supplied v5/v28 export contains 15/66 passing scenarios, not 16. All
@@ -469,7 +511,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | v5 regressed to 15/66; 6/70 required moods returned | Measured v6 framing: 44/66, all 16 safety checks, 60/70 required moods; gate still fails | Repair fixture/grounding issues, revalidate, then independent listening | Requested high priority: semantic matching improved without lowering gates; audio-only recall and custom over-tagging still need work. |
+| TypeSafe Jev | v5 regressed to 15/66; v6 reached 45/66 | v7/v29 reaches 55/66; all safety and custom cases pass; eleven initial-match misses remain | Repair remaining initial semantics, qualify acoustics, then independent listening | Requested high priority: preserve gates and only adopt improvements supported by controlled evidence. |
 | Bounded Jev developer comparison/quality runner | Manual exported logs; no controlled framing experiment | Offline hash-bound plans, synthetic-only calls, durable attempts, shared scorer and rejection-stage totals | Keep for controlled investigations; no automatic paid runs | High debugging value: isolate one change, retain negative controls and stop uncertain cost; no production service or new dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
