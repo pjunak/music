@@ -316,11 +316,12 @@ Use a small, representative sample before running across the whole library.
 After the application's deployment finishes successfully, refresh the page. If
 **TypeSafe Jev** is missing from the connection types, the deployed build does not
 contain the native adapter yet. The dedicated applicability/grounding strategy requires
-Jev engine v7; updating it makes old model/quality checks stale. Its full v29
-validation reached 55/66, with all safety and custom-vocabulary checks passing,
-but still failed the overall and acoustic quality gates. V7 repairs descriptive
-support; v29 corrects four inputs whose settings were previously hidden. See the
-[dated result and remaining work](docs/AI_ACCEPTANCE.md#jev-metadata-support-repair-2026-09-28)
+Jev engine v8; updating it makes old model/quality checks stale. V8 uses measured
+setting/activity questions, while retaining the previous mood questions. Full v8
+validation is pending. The preceding v7/v29 run reached 55/66 with all safety and
+custom-vocabulary checks passing, but failed overall and acoustic quality gates.
+No quality requirement has been relaxed. See the
+[dated result and remaining work](docs/AI_ACCEPTANCE.md#jev-first-pass-investigation-2026-09-28)
 before paying to repeat the unchanged configuration.
 
 1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following

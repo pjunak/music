@@ -155,6 +155,27 @@ v6 behavior. Inference identity changes and invalidates old proposals/certificat
 The [dated results](AI_ACCEPTANCE.md#jev-metadata-support-repair-2026-09-28) preserve
 the measured scores, rejected broader variant, usage and acceptance limitations.
 
+### Dimension-specific use judgments: engine v8
+
+The owner's v7/v29 result reproduced all eleven first-pass omissions. V7 supplied
+setting/scene questions with mood-oriented criteria despite their tabletop-use
+scope. An authorized 28-call comparison isolated place/activity/character predicates
+with fixed definitions, evidence, scopes, custom semantics and conflicts. Setting
+and activity matching improved or held, with Arctic and temple reaching 0.70;
+their selected metadata support independently improved or held. The changed
+questions promoted no selected negative across the threshold; unchanged custom
+judgments still rely on their existing grounding. The mood variant worsened both
+acoustic positives.
+
+V8 adopts exactly the measured setting/scene predicates only for initial matching
+and album/genre support. Other question families remain, including v7 mood/custom
+metadata support. Inference identity now includes every group-specific question
+family; there is no previous-engine fallback. Full v29 validation is still required.
+The [acceptance record](AI_ACCEPTANCE.md#jev-first-pass-investigation-2026-09-28)
+distinguishes the limited measured gain from remaining vocabulary/evidence questions
+and unqualified acoustic expectations. Neither definition aliases nor thresholds
+are changed to force required tags through the suite.
+
 ### Shared inference rules
 
 1. Keep a dedicated native engine behind the existing tagger interface. Share
@@ -199,7 +220,7 @@ are uncalibrated operating points, not measured music-tagging accuracy.
 
 ## Validation and adoption
 
-Engine `music-jev-decisions/v6` replaces v5 without a compatibility path. Local
+Engine `music-jev-decisions/v8` replaces prior engines without a compatibility path. Local
 regressions cover rounded Choice totals on both sides of one, ties, malformed
 scores/options/winners, threshold preservation, HTTP handling and durable multi-song
 execution. Additional regressions cover optional usage, discarded extensions, malformed
@@ -212,7 +233,8 @@ the unchanged quality gate.
 
 After a subsequent measured repair and deployment, refresh AI setup, rerun
 **Test and make available**, then run the complete current quality suite with
-pinned jev-1.13.0. V6/v28 is known to fail; repeating it unchanged is not a repair.
+pinned jev-1.13.0. The preceding v7/v29 run reached 55/66 and failed quality;
+repeating that configuration unchanged is not a repair.
 An old or partial report cannot certify a new engine/suite. Inspect the recorded
 outcomes before further prompt changes. Adjust thresholds only with a separate
 judged development cohort, not to fit this acceptance suite. Independent listening

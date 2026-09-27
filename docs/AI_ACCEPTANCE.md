@@ -19,6 +19,93 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev first-pass investigation: 2026-09-28
+
+The owner's v7/v29 export (`07c24222ba4c4e6d8425c3aeb4bb3346`) reproduces the
+previous local result: **55/66 scenarios**, **148/159 required assignments**,
+**16/16 safety**, **5/5 custom**, **1/1 maximum vocabulary**, and **6/9 context-only**.
+All eleven omissions fail initial matching; none fails grounding or candidate
+capacity. All 288 quality requests received responses, using 3,253,887 input and
+216,455 output tokens. Separate conformance used 476 input and 147 output tokens.
+
+| Missing required assignment | Initial fit | Boundary to investigate |
+|---|---:|---|
+| Arctic escape / arctic | 0.67 | Explicit setting description |
+| Court intrigue / city | 0.22 | Explicit setting description |
+| Market day / shopping | 0.56 | Activity implied by a market description |
+| Bard competition / festival | 0.68 | Described festival, not literal combat |
+| Campfire story / storytelling | 0.42 | Explicit activity description |
+| Modern devotions / temple | 0.65 | Explicit setting description |
+| Light market dance / festive | 0.68 | Musical merriment versus event association |
+| Renaissance masquerade / festive | 0.39 | Event description does not clearly establish musical mood |
+| Settled acoustic texture / calm | 0.67 | Broad character inferred from numerical proxies |
+| Same texture, louder master / calm | 0.64 | Same musical evidence; gain must not determine mood |
+| Sustained acoustic drive / urgent | 0.31 | Broad character inferred from numerical proxies |
+
+The v7 first-pass builder gives setting and scene questions a mood-oriented
+positive criterion and an emotion-specific rejection rule. Their group scope says
+to judge tabletop use, so these instructions disagree about what is being judged.
+An authorized, hash-bound comparison isolated dimension-specific predicates for
+setting, scene and mood, and made disjunctive definitions explicit without dropping
+required qualifiers. Definitions, synonyms, evidence, scopes, conflicts and custom
+predicates stayed fixed. Fifteen cases included metaphor, geography-to-emotion,
+injection, redefined-label and contradictory-ending controls. Identical custom
+variants were deduplicated: **28 requests**, reserving **469,750 conservative input
+units** within the approved 470,610-unit cap. Every request received a response;
+reported usage was **119,043 input** and **5,896 output tokens**, without retries.
+
+| Initial matching | Current v7 | Dimension predicate |
+|---|---:|---:|
+| Arctic | 0.66 | 0.70 |
+| City | 0.21 | 0.30 |
+| Shopping | 0.59 | 0.65 |
+| Storytelling | 0.43 | 0.53 |
+| Festival | 0.67 | 0.67 |
+| Temple | 0.62 | 0.70 |
+| Acoustic calm | 0.67 | 0.57 |
+| Acoustic urgent | 0.35 | 0.28 |
+
+Selected metadata support independently improved or held: Arctic album 0.74 to
+0.89, city 0.37 to 0.45, shopping 0.77 unchanged, storytelling 0.67 to 0.84,
+festival 0.74 to 0.81 and temple 0.86 to 0.88. Combat metaphor fell from 0.26 to
+0.14 at matching; injected combat remained 0.08/0.09 and geography-to-cold remained
+0.24/0.29. The rewrite promoted no selected negative across the 0.70 threshold.
+The unchanged custom low-light control still needs grounding to reject `quiet focus`:
+its fit is 0.77 but album support is 0.53. These are selected judgments in a
+controlled diagnostic, not full scenario outcomes.
+
+**Engine v8 adopts only the measured setting/scene predicates for initial fit and
+album/genre support.** The mood rewrite is rejected because it worsened acoustic
+matching. Mood, period, custom, acoustic/catalog support, conflict questions,
+evidence and all thresholds retain their preceding behavior. The inference identity
+now includes each group-specific question family, invalidating stale checks/results.
+Regression checks bind production use questions to the exact measured variant.
+An offline comparison against the paid journal confirmed 33 exact measured
+replacements, 113 unchanged questions and identical evidence for all fifteen cases.
+Already adopted variants are omitted from future comparison plans.
+
+The Renaissance fixture's event-to-mood ambiguity and the three acoustic expectations
+remain unresolved. City's definition concerns dense urban/metropolitan life, while
+its album describes a royal city; whether the broad location alone satisfies that
+definition needs a vocabulary decision. Do not silently inject display labels,
+weaken thresholds, or rewrite evidence to satisfy the expected tag. All v29 inputs,
+required/forbidden tags and quality gates remain unchanged.
+
+Fresh v8 full validation is prepared: conformance plus all 66 scenarios and 16
+safety repeats, capped at **818 requests / 20,172,234 conservative input units**.
+Execution awaits separate approval. The developer runner's hard input ceiling is
+21 million to accommodate the longer measured prompts; caller caps must equal
+the reviewed plan's exact totals, and its hash remains mandatory. Tests reject
+both smaller and larger caps, over-ceiling and changed-plan calls before credentials are read. This does not
+authorize another run. Full quality and independent listening remain open.
+
+Local comparison evidence: `target/jev-dimension-results-20260928.jsonl`.
+
+Engineering validation passes: **581 Rust tests**, no skips, with real FFmpeg and
+the pinned optional voice artifact; four developer-example tests; formatting,
+architecture, workspace check, strict workspace/fuzz Clippy, doc tests and generated
+contracts. No frontend behavior changed. These checks do not certify model quality.
+
 ## Jev metadata support repair: 2026-09-28
 
 The owner's subsequent v6/v28 export (`dad2a539b42b419a8fa47cc727952fa2`)

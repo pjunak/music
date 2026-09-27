@@ -114,7 +114,10 @@ cargo run --locked -p music-server --example jev-compare -- quality-plan target/
 
 Both commands are offline and refuse to overwrite their output. Comparison plans
 cover initial matching and selected observation support for fifteen fixed cases,
-including negative controls, with unchanged state and conflict questions. They
+including negative controls, with unchanged state, definitions, scopes and conflict
+questions. The current comparison tests dimension-specific predicates for setting,
+scene and mood; custom predicates remain unchanged. Interpret matching and support
+as separate outcomes, and do not adopt a support rewrite from matching results. Plans
 omit identical variants; prior experiments remain dated results in their journals,
 not the current plan. Full plans include conformance,
 the entire current quality suite, safety repeats, inference identity, scoring
@@ -124,7 +127,8 @@ After separate paid-run authorization, `run` or `quality-run` requires
 `--key-file` (a temporary secret outside source control), `--plan-sha256`,
 `--max-requests` and `--max-input-units`, plus a new `--output` journal or
 `--output-directory`. Use `--help` for the exact arguments. The full runner uses
-an isolated SQLite job database and the production planner/executor/scorer. A
+the plan's exact total request/input bounds, an isolated SQLite job database and
+the production planner/executor/scorer. A
 successfully completed job can still have `evaluation.passed: false`; neither
 command writes application acceptance. Stop after any uncertain request and
 inspect the saved journal; existing runs are never resumed or retried. See the

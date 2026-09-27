@@ -7,6 +7,37 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev setting/activity repair — 28 September 2026
+
+The owner's new v7/v29 report confirms **55/66** with exactly the same eleven
+initial-match omissions as the preceding local run. Grounding, custom vocabulary
+and all safety checks retain their improvements. A bounded experiment separated
+setting, activity and mood predicates: v7's shared first-pass criteria ask
+setting/activity questions to satisfy an emotion-oriented rule.
+
+The authorized comparison used fifteen synthetic cases with paired controls,
+including negative controls, unchanged evidence/definitions/scopes/conflicts and
+unchanged custom predicates. All 28 requests completed: 119,043 input and 5,896
+output tokens, within 469,750 reserved units. Setting/activity fit improved or held
+in all six target cases, with Arctic and temple reaching 0.70. Metadata support
+independently improved or held. The mood rewrite worsened acoustic calm and urgency.
+
+Implemented **v8** with only the measured setting/activity first-pass and album/genre
+support changes. All other judgment families and thresholds remain; no legacy
+fallback, audio feature or dependency was added. Inference identity now covers every
+group-specific question family. Focused regressions pass. The unchanged v29 full
+suite is prepared at 818 requests / 20,172,234 conservative units, awaiting separate
+paid-run approval. Several known misses remain, so this is not a certification claim.
+
+All **581 Rust tests** and the backend gates pass, plus four example tests. An
+offline payload comparison confirms exactly 33 measured question replacements,
+113 unchanged questions and unchanged evidence across all fifteen selected cases.
+
+The [acceptance investigation](AI_ACCEPTANCE.md#jev-first-pass-investigation-2026-09-28)
+records all eleven scores and distinguishes the question mismatch from ambiguous
+event-to-emotion and unqualified acoustic expectations. Overall accepted-delivery
+progress remains approximately **80%** until quality and independent listening pass.
+
 ## Jev descriptive support and fixture repair — 28 September 2026
 
 The latest supplied v6/v28 run reached **45/66**, with **16/16** safety and
@@ -511,7 +542,7 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | v5 regressed to 15/66; v6 reached 45/66 | v7/v29 reaches 55/66; all safety and custom cases pass; eleven initial-match misses remain | Repair remaining initial semantics, qualify acoustics, then independent listening | Requested high priority: preserve gates and only adopt improvements supported by controlled evidence. |
+| TypeSafe Jev | v5 regressed to 15/66; v6 reached 45/66 | v7/v29 reached 55/66; v8 adds measured setting/activity predicates, full validation pending | Resolve definition/evidence gaps, qualify acoustics, then independent listening | Requested high priority: preserve gates and only adopt improvements supported by controlled evidence. |
 | Bounded Jev developer comparison/quality runner | Manual exported logs; no controlled framing experiment | Offline hash-bound plans, synthetic-only calls, durable attempts, shared scorer and rejection-stage totals | Keep for controlled investigations; no automatic paid runs | High debugging value: isolate one change, retain negative controls and stop uncertain cost; no production service or new dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |

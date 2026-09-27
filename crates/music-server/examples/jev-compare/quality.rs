@@ -18,6 +18,9 @@ use music_storage::{SqliteStorage, SqliteStorageOptions};
 use serde_json::Map;
 use std::sync::Arc;
 
+const MAX_QUALITY_REQUESTS: usize = 818;
+const MAX_QUALITY_INPUT_UNITS: u64 = 21_000_000;
+
 #[derive(Debug)]
 struct Transport(reqwest::Client);
 
@@ -231,10 +234,10 @@ fn authorize(plan: &Value, expected: &str, calls: usize, units: u64) -> Result<(
         0,
     );
     if fingerprint(plan)? != expected
-        || calls > 818
-        || units > 20_000_000
-        || quality_calls + 1 > calls as u64
-        || quality_units + conformance_units > units
+        || calls > MAX_QUALITY_REQUESTS
+        || units > MAX_QUALITY_INPUT_UNITS
+        || quality_calls + 1 != calls as u64
+        || quality_units + conformance_units != units
     {
         return Err("full suite exceeds authorization or its reviewed plan changed".into());
     }
@@ -353,13 +356,21 @@ mod tests {
             plan["max_quality_requests"].as_u64().map(|count| count + 1)
         );
         assert!(plan["max_total_input_units"].as_u64() > plan["max_input_units"].as_u64());
-        authorize(&plan, &expected, 818, 20_000_000)?;
-        assert!(authorize(&plan, &expected, 1, 20_000_000).is_err());
-        assert!(authorize(&plan, &expected, 818, 1).is_err());
-        assert!(authorize(&plan, "unreviewed", 818, 20_000_000).is_err());
+        let calls = plan["max_total_requests"].as_u64().ok_or("request bound")? as usize;
+        let units = plan["max_total_input_units"]
+            .as_u64()
+            .ok_or("input bound")?;
+        authorize(&plan, &expected, calls, units)?;
+        assert!(authorize(&plan, &expected, calls - 1, units).is_err());
+        assert!(authorize(&plan, &expected, calls, units - 1).is_err());
+        assert!(authorize(&plan, &expected, calls + 1, units).is_err());
+        assert!(authorize(&plan, &expected, calls, units + 1).is_err());
+        assert!(authorize(&plan, &expected, MAX_QUALITY_REQUESTS + 1, units).is_err());
+        assert!(authorize(&plan, &expected, calls, MAX_QUALITY_INPUT_UNITS + 1).is_err());
+        assert!(authorize(&plan, "unreviewed", calls, units).is_err());
         let mut changed = plan.clone();
         changed["inference_identity"] = json!("changed grounding contract");
-        assert!(authorize(&changed, &expected, 818, 20_000_000).is_err());
+        assert!(authorize(&changed, &expected, calls, units).is_err());
         let cases = plan["cases"].as_array().ok_or("cases")?;
         assert_eq!(cases.len(), 66);
         assert_eq!(
