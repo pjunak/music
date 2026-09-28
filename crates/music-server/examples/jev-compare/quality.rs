@@ -22,7 +22,7 @@ const MAX_QUALITY_REQUESTS: usize = 818;
 const MAX_QUALITY_INPUT_UNITS: u64 = 21_000_000;
 
 #[derive(Debug)]
-struct Transport(reqwest::Client);
+pub(super) struct Transport(reqwest::Client);
 
 impl TypedDecisionTransport for Transport {
     fn validate_typed_request(
@@ -255,6 +255,27 @@ pub(super) async fn run(
     authorize(&plan, expected, calls, units)?;
     std::fs::create_dir(output)?;
     serde_json::to_writer_pretty(new_file(&output.join("plan.json"))?, &plan)?;
+    let (role, transport) = execution(key_file, expected)?;
+    let handler = Arc::new(Handler {
+        role,
+        transport,
+        max_requests: calls,
+        max_units: units,
+    });
+    let job = run_job(handler, output, "jev-quality", 82).await?;
+    if let Some(evaluation) = job.as_ref().and_then(|result| result.get("evaluation")) {
+        println!(
+            "Quality: {}/{} scenarios; gate passed: {}. This run does not update app acceptance.",
+            evaluation["passed_cases"], evaluation["total_cases"], evaluation["passed"]
+        );
+    }
+    Ok(())
+}
+
+pub(super) fn execution(
+    key_file: &Path,
+    expected: &str,
+) -> Result<(ResolvedRoleExecution, Transport)> {
     let mut bytes = Zeroizing::new(Vec::new());
     File::open(key_file)?.take(4097).read_to_end(&mut bytes)?;
     let secret = std::str::from_utf8(&bytes)?.trim();
@@ -288,17 +309,20 @@ pub(super) async fn run(
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
         .build()?;
-    let handler = Arc::new(Handler {
-        role,
-        transport: Transport(client),
-        max_requests: calls,
-        max_units: units,
-    });
+    Ok((role, Transport(client)))
+}
+
+pub(super) async fn run_job(
+    handler: Arc<dyn JobHandler>,
+    output: &Path,
+    id: &str,
+    total: usize,
+) -> Result<Option<Value>> {
     let storage =
         Arc::new(SqliteStorage::open(SqliteStorageOptions::new(output.join("jobs.sqlite"))).await?);
     storage
         .create(&NewJob {
-            id: "jev-quality".to_owned(),
+            id: id.to_owned(),
             definition: handler.definition(),
             parameters: Map::new(),
             retry_of_id: None,
@@ -307,9 +331,12 @@ pub(super) async fn run(
     let coordinator = start_job_coordinator(storage.clone(), vec![handler]).await?;
     let mut previous = 0;
     let job = loop {
-        let job = storage.get("jev-quality").await?.ok_or("job disappeared")?;
+        let job = storage.get(id).await?.ok_or("job disappeared")?;
         if job.progress_current != previous {
-            println!("{}/82 {}", job.progress_current, job.progress_message);
+            println!(
+                "{}/{} {}",
+                job.progress_current, total, job.progress_message
+            );
             previous = job.progress_current;
         }
         if matches!(
@@ -327,20 +354,10 @@ pub(super) async fn run(
         new_file(&output.join("result.json"))?,
         &json!({"status":job.status,"error":job.error,"result":job.result}),
     )?;
-    if let Some(evaluation) = job
-        .result
-        .as_ref()
-        .and_then(|result| result.get("evaluation"))
-    {
-        println!(
-            "Quality: {}/{} scenarios; gate passed: {}. This run does not update app acceptance.",
-            evaluation["passed_cases"], evaluation["total_cases"], evaluation["passed"]
-        );
-    }
     if job.status != JobStatus::Succeeded {
         return Err("isolated job stopped; inspect the saved result; no automatic retry".into());
     }
-    Ok(())
+    Ok(job.result.map(Value::Object))
 }
 
 #[cfg(test)]

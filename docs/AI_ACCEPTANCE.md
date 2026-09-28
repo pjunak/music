@@ -19,6 +19,52 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Private Jev input-minimization pilot prepared: 2026-09-28
+
+Following the completed synthetic screen, the owner authorized read-only use of two
+local album folders and requested actual suggestions to rate. All **22 recordings**
+were analyzed locally, covering **91.16 minutes** of audio in **110.5 seconds** of
+reported analyzer work. The native metadata reader and ffprobe both found no embedded
+artist, album or genre descriptions. Filenames and collection names remain local
+listening aids and are excluded from provider input; no catalog/voice model was added.
+
+Six recordings were frozen before predictions: three per collection, selecting the
+lowest and highest typical rhythmic-drive proxy and a third with greatest minimum
+distance on range-normalized drive, brightness, density and spectral-flux values.
+Ties use local track ID. This intentionally contrasting development sample is not
+representative accuracy evidence; sixteen recordings remain unexposed. The selection
+and content hashes are recorded privately under `target/jev-listening-20260928/`.
+
+| Initial-assessment input | Requests, six recordings | Repeated state bytes | Question bytes |
+|---|---:|---:|---:|
+| Current v9 | 23 | 240,344 | 950,099 |
+| Lossless compaction | 23 | 181,647 | 950,099 |
+| Compaction with section observations omitted | 18 | 49,056 | 950,094 |
+
+These are serialized bytes, not measured provider tokens or quality gains. Questions
+account for **79.8%** of baseline assessment bytes. Compaction reduces combined
+assessment state/question bytes by **4.9%**. Omitting sections reduces that measure
+by **16.1%**, changes native packing, and also removes section grounding work; its
+full-pipeline reservation is **50.8% lower** before model-dependent follow-ups.
+Required tag coverage remains all 138 default vocabulary entries. No label or
+criterion was shortened or removed. The five-byte question-total difference is
+serialization overhead from different partitions, not changed question content.
+
+The bounded developer pilot reuses native selection, independent support/conflict,
+period applicability and output validation. It adds initial-state compaction only in
+the experiment transport; the omission arm removes sections from both matching and
+grounding while retaining trajectories, endings, coverage and reliability. The source
+corpus and production implementation remain intact. Fresh synthetic conformance and
+two deliberate identical-input repeats are included. Output is assisted development
+feedback, not blind listening, a new full-suite result or application certification.
+
+Prepared cap: **329 requests / 14,721,150 conservative input units**, pinned
+`jev-1.13.0`, no retries; approximately **US$0.62** at the published input rate.
+Plan SHA-256: `7c9fa155e3a0e25447fe20e5cacb8eddc5e105e85d729cd69e58ec4a6f3c901d`.
+No paid call is implied by offline preparation. The prior synthetic allowance was
+consumed; this private run needs its own explicit reviewed budget. See the
+[developer pilot procedure](MOOD_PILOT.md#developer-jev-input-comparison).
+
 ## Jev evidence-source and amount results: 2026-09-28
 
 The approved experiment completed **1,616/1,616 requests** from `d8c590c` against

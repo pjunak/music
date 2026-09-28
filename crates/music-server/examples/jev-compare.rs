@@ -1,4 +1,4 @@
-//! Bounded synthetic, non-certifying experiment. Never reads library data or app credentials.
+//! Bounded, non-certifying experiments. Private audio requires explicit local pilot input.
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -23,6 +23,8 @@ mod comparison;
 mod evidence;
 #[path = "jev-compare/journal.rs"]
 mod journal;
+#[path = "jev-compare/pilot.rs"]
+mod pilot;
 #[path = "jev-compare/quality.rs"]
 mod quality;
 #[path = "jev-compare/report.rs"]
@@ -32,7 +34,7 @@ const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Parser)]
 #[command(
-    about = "Compare Jev questions and evidence on synthetic examples; never certifies a model"
+    about = "Compare Jev evidence on synthetic cases or explicitly selected private audio; never certifies a model"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -41,6 +43,36 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Analyze an explicit JSON array of local audio paths, offline and read-only.
+    PilotAnalyze {
+        paths: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        ffmpeg: PathBuf,
+        #[arg(long)]
+        ffprobe: PathBuf,
+    },
+    /// Freeze a small full-pipeline comparison and disclose its worst-case budget.
+    PilotPlan {
+        corpus: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<i64>,
+    },
+    /// Execute only an explicitly authorized private pilot, without updating app acceptance.
+    PilotRun {
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output_directory: PathBuf,
+    },
     /// Prepare data-source, representation and amount contrasts offline.
     EvidencePlan { output: PathBuf },
     /// Summarize a data experiment offline, preserving missing pairs and controls.
@@ -247,6 +279,46 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::PilotAnalyze {
+            paths,
+            output,
+            ffmpeg,
+            ffprobe,
+        } => {
+            pilot::analyze(&paths, &output, &ffmpeg, &ffprobe)?;
+        }
+        Command::PilotPlan {
+            corpus,
+            output,
+            tracks,
+        } => {
+            let plan = pilot::plan(&corpus, &tracks)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan)?;
+            println!(
+                "Private pilot: {} requests; {} conservative input units; SHA-256 {}",
+                plan["max_requests"],
+                plan["max_input_units"],
+                fingerprint(&plan)?
+            );
+        }
+        Command::PilotRun {
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output_directory,
+        } => {
+            pilot::run(
+                &plan,
+                &key_file,
+                &output_directory,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )
+            .await?;
+        }
         Command::EvidencePlan { output } => {
             let plan = evidence::build_plan()?;
             let document = plan.document();

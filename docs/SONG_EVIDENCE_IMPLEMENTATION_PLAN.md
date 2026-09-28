@@ -7,6 +7,19 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Real-music input minimization — 28 September 2026
+
+The next developer pilot is prepared: 22 authorized recordings analyzed locally,
+six frozen before predictions, three complete native-engine input variants and two
+repeat controls. None of the files has embedded artist/album/genre descriptions;
+this isolates the current acoustic evidence without inventing metadata from names.
+Questions occupy 79.8% of baseline assessment bytes, so smaller evidence alone has
+limited cost savings unless it also reduces repeated grounding work. The exact
+329-request / 14,721,150-input-unit plan needs separate paid approval. User ratings
+will be assisted development feedback; no production engine or quality gate changed.
+See the [preparation record](AI_ACCEPTANCE.md#private-jev-input-minimization-pilot-prepared-2026-09-28).
+Overall accepted progress remains approximately **80%**.
+
 ## Jev evidence inputs experiment — 28 September 2026
 
 **Completed: 1,616/1,616 approved requests**, 19,158,055 input tokens and an estimated
@@ -639,7 +652,7 @@ options survey; this plan determines the narrower implementation scope.
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
 | TypeSafe Jev | v5 reached 15/66; v6 45/66; v7 55/66 | V9 restores v7 questions; 14-arm data screen favors lossless compaction but acoustic-only misses remain | Keep explicit criteria; qualify exact compaction with full native validation, then independent listening | Requested high priority: 142/151 first-pass assignments is not fresh certification; preserve quality and safety gates. |
-| Bounded Jev developer comparison/quality runner | Manual logs, then limited question comparisons | Completed the approved 1,616-request source/amount screen with deduplicated usage and repeat controls | Keep for separately approved controlled investigations and complete native validation | High debugging value: reject redundant evidence and preserve useful source/trajectory content without adding a production service/dependency. |
+| Bounded Jev developer comparison/quality runner | Manual logs, then limited question comparisons | Completed the 1,616-request synthetic screen; explicit private-audio preparation and full-engine comparison now available | Run the reviewed six-recording input-minimization pilot after separate paid approval; keep complete native validation separate | High debugging value: measure final suggestions and cost with actual owner feedback, preserving useful evidence without a new production service/dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

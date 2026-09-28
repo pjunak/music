@@ -112,7 +112,9 @@ record which tests actually exercised those tools and their remaining acceptance
 ## Offline Jev investigation plans
 
 The developer-only [example](../crates/music-server/examples/jev-compare.rs) uses
-built-in synthetic cases and never loads application configuration or library data:
+built-in synthetic cases by default. Its explicit `pilot-*` commands accept a
+private file selection through the [assisted pilot](MOOD_PILOT.md#developer-jev-input-comparison).
+No command loads application configuration or app credentials:
 
 ```powershell
 cargo run --locked -p music-server --example jev-compare -- plan target/jev-framing-plan.json

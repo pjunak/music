@@ -1,7 +1,7 @@
-//! Pure transformations of known synthetic data; never consult expectations.
+//! Pure transformations of disclosed observations; never consult expectations.
 use super::*;
 
-pub(super) fn transform(name: &str, baseline: &Value, track: &Value) -> Result<Value> {
+pub(crate) fn transform(name: &str, baseline: &Value, track: &Value) -> Result<Value> {
     let mut state = baseline.clone();
     let observations = state["observations"]
         .as_object_mut()

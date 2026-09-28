@@ -214,6 +214,65 @@ listening/session requests to record auditioning time, corrections and disruptiv
 false positives alongside the numbers. Repeated confirmation-guided changes require
 new independent confirmation recordings.
 
+## Developer Jev input comparison
+
+When the owner explicitly requests suggestions to rate, the developer-only
+`jev-compare` example can run a small, separately authorized private-audio pilot.
+This is assisted development feedback. Showing predictions before judgments means
+these recordings cannot later be called a blind confirmation cohort. It does not
+certify the model, update app acceptance, or write library tags.
+
+Create a private JSON array of 1..32 explicitly authorized audio paths. Keep all
+inputs, plans, source hashes, journals and outputs outside source control. Preparation
+reads embedded metadata through the native reader, analyzes the complete recording
+with the current local analyzer, and checks content hashes before and after analysis.
+It does not invent descriptions from filenames or folders. Voice is explicitly
+not configured and catalog evidence is not retrieved. This is an isolated native
+baseline, not an export of the operator's configured production library.
+
+```powershell
+cargo run --locked -p music-server --example jev-compare -- pilot-analyze private-paths.json private-corpus.json --ffmpeg ffmpeg --ffprobe ffprobe
+cargo run --locked -p music-server --example jev-compare -- pilot-plan private-corpus.json private-plan.json --tracks 1,2,3
+```
+
+Select 1..8 distinct recordings before inspecting predictions. Freeze and record
+the sampling rule; preserve unexposed recordings for later independent work. The plan
+uses the shipped default vocabulary and three arms: current production input;
+lossless compaction of initial assessment cards; and that same compaction with section
+observations omitted from both initial matching and subsequent grounding. Trajectories,
+endings, reliability and coverage remain. Original local section data stays in the
+corpus. All tag definitions, questions, candidate limits, period checks and thresholds
+stay fixed. Native request packing can differ when omissions allow smaller requests;
+this tests complete input recipes and their cost, not only a constant-packing effect.
+
+The first and last selected recordings receive deliberate current-input repeats
+(one repeat for a single-recording pilot). Arm order rotates by recording. The plan
+includes synthetic native conformance, all initial request bodies, full-pipeline
+worst-case bounds, vocabulary, engine identity and the exact disclosure. Review the
+plan and obtain a separate explicit paid-run budget before using `pilot-run`:
+
+```powershell
+cargo run --locked -p music-server --example jev-compare -- pilot-run private-plan.json --key-file temporary-key.txt --plan-sha256 REVIEWED_HASH --max-requests REVIEWED_COUNT --max-input-units REVIEWED_UNITS --output-directory NEW_PRIVATE_DIRECTORY
+```
+
+The runner rebuilds and verifies the plan, exact caps and selected file hashes before
+reading the supplied key. It uses an isolated, non-restartable SQLite job and the
+production native task, with durable attempts before cost, no automatic retry, and
+the existing strict response parser. Actual transformed wire requests and responses
+are additionally journalled with assessment/grounding phases. Native diagnostics
+retain the original planned assessment state; consult `requests.jsonl` for the exact
+compacted wire state. Compaction reserves the conservative original native bound.
+An uncertain attempt stops the entire run; existing output directories cannot resume
+or replay. No production connection, acceptance record or library database is read.
+
+Use `result.json` for final profiles, including explicit abstentions; missing or failed
+cases remain unavailable. Compare actual reported input tokens by arm and phase,
+including both repeats and conformance in total spend. Do not turn absent usage into
+zero or initial-fit scores into final accepted tags. Report each suggested mood or
+session-use tag for the owner to mark useful, wrong or uncertain, and solicit missing
+tags separately. More tags alone do not establish improvement. The existing JSONL
+listening protocol remains the authority for later independent qualification.
+
 ## Assisted or excerpt diagnostics
 
 Assisted corrections and partial listening can help investigate failures. To inspect

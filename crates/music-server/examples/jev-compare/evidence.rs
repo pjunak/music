@@ -11,7 +11,7 @@ pub mod report;
 #[path = "evidence_tests.rs"]
 mod tests;
 #[path = "evidence_variants.rs"]
-mod variants;
+pub(super) mod variants;
 
 const MAX_REQUESTS: usize = 2_500;
 const MAX_INPUT_UNITS: u64 = 140_000_000;
