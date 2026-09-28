@@ -36,7 +36,7 @@ const VOICE_ANALYSIS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 // The only supported graph is about 3.1 MiB; bound input before protobuf parsing.
 const MAX_VOICE_MODEL_BYTES: u64 = 4 * 1_024 * 1_024;
 const TRACT_RUNTIME_ID: &str =
-    "tract-tensorflow/0.23.7+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2+artifact/v2";
+    "tract-tensorflow/0.23.8+musicnn-compat/v1+preprocess/v1+decode/v2+windows/v2+artifact/v2";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoiceAnalysisDocument {
@@ -802,14 +802,14 @@ fn validate_musicnn_padding(
     let expected = [0_i64, 0, 3, 3, 0, 0, 0, 0];
     let values = if tensor.datum_type() == DatumType::I32 {
         tensor
-            .try_as_plain()?
+            .try_as_plain_ram()?
             .to_array_view::<i32>()?
             .iter()
             .map(|value| i64::from(*value))
             .collect::<Vec<_>>()
     } else if tensor.datum_type() == DatumType::I64 {
         tensor
-            .try_as_plain()?
+            .try_as_plain_ram()?
             .to_array_view::<i64>()?
             .iter()
             .copied()

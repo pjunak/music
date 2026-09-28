@@ -31,6 +31,13 @@ edits, check both workspaces before longer builds with `cargo metadata --locked
 --format-version 1` and `cargo metadata --manifest-path fuzz/Cargo.toml --locked
 --format-version 1`. Include the fuzz Clippy and dependency checks below in validation.
 
+[Dependabot](../.github/dependabot.yml) covers both Cargo directories in one entry.
+The Utoipa family is grouped first so `utoipa` and `utoipa-axum` stay compatible;
+remaining dependencies use `group-by: dependency-name` to update each dependency
+across both lockfiles in one pull request. Major Utoipa upgrades also require
+inspection of generated OpenAPI changes: compilation alone does not establish
+schema compatibility. Keep that migration separate from unrelated patch updates.
+
 Use current fixtures and local service instances. Hardware/private-library and
 paid-provider evidence stays separately identified; a documentation edit or
 passing local suite does not authorize an external run. Probe available tools
