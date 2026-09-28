@@ -32,7 +32,7 @@ pub(super) const MODELS: [(&str, &str, &str, &str, &str, usize); 3] = [
     ),
 ];
 
-pub(super) fn attach(mut corpus: Value, export_json: &str) -> Result<Value> {
+pub(crate) fn attach(mut corpus: Value, export_json: &str) -> Result<Value> {
     // Validate JSON/depth before traversing RawValue. Export hashes use JavaScript's
     // number spelling, which must survive Rust parsing and float serialization.
     let export: Value = serde_json::from_str(export_json)?;
@@ -129,7 +129,7 @@ fn canonical_export_json(value: &RawValue) -> Result<String> {
     }
 }
 
-pub(super) fn validate_recording(recording: &Value) -> Result<()> {
+pub(crate) fn validate_recording(recording: &Value) -> Result<()> {
     let learned = &recording["learned"];
     if learned["file_sha256"] != recording["file_sha256"] {
         return Err("learned evidence belongs to different audio".into());

@@ -330,6 +330,7 @@ mod tests {
                 let failed = self.fail_at == Some(self.calls.fetch_add(1, Ordering::SeqCst));
                 let answers = request.questions.iter().map(|(id, question)| {
                     let answer = match question {
+                        TypedQuestion::Score { .. } => unreachable!("binary pilot fixture"),
                         TypedQuestion::Noul { .. } => json!({"type":"noul","noul":
                             if id.starts_with("yes_") || id == "fit_0" || id.starts_with("support_") { 0.99 } else { 0.01 }}),
                         TypedQuestion::Choice { criteria, .. } => {

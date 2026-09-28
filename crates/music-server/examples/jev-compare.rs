@@ -21,6 +21,8 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>
 mod comparison;
 #[path = "jev-compare/evidence.rs"]
 mod evidence;
+#[path = "jev-compare/graded.rs"]
+mod graded;
 #[path = "jev-compare/journal.rs"]
 mod journal;
 #[path = "jev-compare/pilot.rs"]
@@ -43,6 +45,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Freeze independent graded tag questions and four controlled audio evidence views.
+    GradedPlan { sources: PathBuf, output: PathBuf },
+    /// Run an exactly authorized graded listening experiment in a new isolated directory.
+    GradedRun {
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output_directory: PathBuf,
+    },
     /// Analyze an explicit JSON array of local audio paths, offline and read-only.
     PilotAnalyze {
         paths: PathBuf,
@@ -282,6 +300,34 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::GradedPlan { sources, output } => {
+            let plan = graded::prepare(&sources)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan)?;
+            println!(
+                "Graded pilot: {} requests; {} conservative input units; SHA-256 {}",
+                plan["max_requests"],
+                plan["max_input_units"],
+                fingerprint(&plan)?
+            );
+        }
+        Command::GradedRun {
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output_directory,
+        } => {
+            graded::execution::run(
+                &plan,
+                &key_file,
+                &output_directory,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )
+            .await?;
+        }
         Command::PilotAnalyze {
             paths,
             output,

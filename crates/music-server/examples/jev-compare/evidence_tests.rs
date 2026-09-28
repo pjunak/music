@@ -195,6 +195,7 @@ fn evidence_report_keeps_partial_pairs_and_missing_usage_unknown() -> Result<()>
         }
         let answers=item.request.questions.iter().map(|(id,q)|{
             let answer=match q {
+                TypedQuestion::Score {..}=>unreachable!("binary evidence fixture"),
                 TypedQuestion::Noul {..}=>json!({"type":"noul","noul":if item.tags[id].required {if item.variant==CURRENT {0.8}else{0.6}}else{0.1}}),
                 TypedQuestion::Choice {criteria,..}=>{
                     let choice=criteria.keys().next().cloned().unwrap_or_default();

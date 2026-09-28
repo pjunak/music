@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn recording() -> Result<Value> {
+pub(crate) fn recording() -> Result<Value> {
     let suite = tag_quality_suite()?;
     let mut input = suite
         .cases

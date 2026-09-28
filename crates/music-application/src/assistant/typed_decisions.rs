@@ -27,6 +27,10 @@ pub enum TypedQuestion {
         instructions: Value,
         criteria: BTreeMap<String, Value>,
     },
+    Score {
+        instructions: Value,
+        criteria: Vec<Value>,
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
@@ -58,7 +62,7 @@ impl TypedDecisionRequest {
         }
         let state_bytes = self.state.to_string().len();
         for (key, question) in &self.questions {
-            let (instructions, criteria) = match question {
+            let instructions = match question {
                 TypedQuestion::Noul {
                     instructions,
                     criteria,
@@ -72,7 +76,10 @@ impl TypedDecisionRequest {
                     if criteria.values().any(|value| !structured_value(value)) {
                         return Err(ModelTaskError::new("invalid_request"));
                     }
-                    (instructions, criteria)
+                    if criteria.keys().any(|key| key.is_empty() || key.len() > 128) {
+                        return Err(ModelTaskError::new("invalid_request"));
+                    }
+                    instructions
                 }
                 TypedQuestion::Choice {
                     instructions,
@@ -87,14 +94,24 @@ impl TypedDecisionRequest {
                     {
                         return Err(ModelTaskError::new("invalid_request"));
                     }
-                    (instructions, criteria)
+                    if criteria.keys().any(|key| key.is_empty() || key.len() > 128) {
+                        return Err(ModelTaskError::new("invalid_request"));
+                    }
+                    instructions
+                }
+                TypedQuestion::Score {
+                    instructions,
+                    criteria,
+                } => {
+                    if !(2..=10).contains(&criteria.len())
+                        || criteria.iter().any(|value| !structured_value(value))
+                    {
+                        return Err(ModelTaskError::new("invalid_request"));
+                    }
+                    instructions
                 }
             };
-            if key.is_empty()
-                || key.len() > 128
-                || !structured_value(instructions)
-                || criteria.keys().any(|key| key.is_empty() || key.len() > 128)
-            {
+            if key.is_empty() || key.len() > 128 || !structured_value(instructions) {
                 return Err(ModelTaskError::new("invalid_request"));
             }
             // UTF-8 bytes are deliberately conservative reservation units, not token estimates.
@@ -139,6 +156,11 @@ pub enum TypedAnswer {
     },
     Choice {
         choice: String,
+        probabilities: BTreeMap<String, f64>,
+        confidence: f64,
+    },
+    Score {
+        score: f64,
         probabilities: BTreeMap<String, f64>,
         confidence: f64,
     },
@@ -187,6 +209,33 @@ pub fn typed_answers(
                     *selected > 0.0 && probabilities.values().all(|value| value <= selected)
                 }) {
                     Some("typed_choice_selection_invalid")
+                } else {
+                    None
+                }
+            }
+            (
+                TypedQuestion::Score { criteria, .. },
+                TypedAnswer::Score {
+                    score,
+                    probabilities,
+                    confidence,
+                },
+            ) => {
+                if !(2..=10).contains(&criteria.len()) {
+                    Some("invalid_request")
+                } else if !probability(*confidence)
+                    || probabilities.values().any(|value| !probability(*value))
+                    || !probabilities.values().any(|value| *value > 0.0)
+                {
+                    Some("typed_probability_invalid")
+                } else if probabilities.len() != criteria.len()
+                    || !(0..criteria.len())
+                        .all(|level| probabilities.contains_key(&level.to_string()))
+                {
+                    Some("typed_score_levels_mismatch")
+                } else if !score.is_finite() || !(0.0..=(criteria.len() - 1) as f64).contains(score)
+                {
+                    Some("typed_score_invalid")
                 } else {
                     None
                 }
@@ -539,6 +588,164 @@ mod tests {
                 scores["solo_singing"].as_f64().ok_or("score")? >= 0.9
             );
         }
+        Ok(())
+    }
+
+    fn score_request() -> TypedDecisionRequest {
+        TypedDecisionRequest {
+            state: json!({"description":"A gentle, settled instrumental recording."}),
+            questions: BTreeMap::from([(
+                "calm_relevance".to_owned(),
+                TypedQuestion::Score {
+                    instructions: json!(
+                        "How strongly does the recording support a calm musical character?"
+                    ),
+                    criteria: vec![
+                        json!("The musical character conflicts with calm."),
+                        json!("Calm is a faint or brief secondary color."),
+                        json!("Calm is noticeable in parts or as a secondary character."),
+                        json!("Calm is a strong recurring character."),
+                        json!("Calm is the defining or dominant musical character."),
+                    ],
+                },
+            )]),
+        }
+    }
+
+    fn score_response() -> Value {
+        json!({"model":"jev-1.13.0","answers":{
+            "calm_relevance":{
+                "type":"score",
+                "score":2.5,
+                "confidence":0.4,
+                "legend":{"0":"conflicts","1":"faint","2":"secondary","3":"strong","4":"defining"},
+                "probabilities":{"0":0.0,"1":0.1,"2":0.3,"3":0.59,"4":0.0},
+                "provider_extension":"discard me"
+            }},"usage":{"input_tokens":100,"output_tokens":20}})
+    }
+
+    #[test]
+    fn typed_score_accepts_ordered_levels_and_strips_provider_legend_and_extensions()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = score_request();
+        request.validate()?;
+        let result = parse_typesafe_response("jev-1.13.0", &request, score_response())?;
+        assert_eq!(
+            result.payload,
+            Some(json!({"calm_relevance":{
+                "type":"score",
+                "score":2.5,
+                "probabilities":{"0":0.0,"1":0.1,"2":0.3,"3":0.59,"4":0.0},
+                "confidence":0.4
+            }}))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typed_score_questions_require_two_to_ten_structured_levels()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut request = score_request();
+        for count in [2, 10] {
+            request.questions.insert(
+                "calm_relevance".to_owned(),
+                TypedQuestion::Score {
+                    instructions: json!("How relevant is calm?"),
+                    criteria: (0..count).map(|level| json!({"level":level})).collect(),
+                },
+            );
+            request.validate()?;
+        }
+        for criteria in [
+            vec![json!("only one")],
+            (0..11)
+                .map(|level| json!(format!("level {level}")))
+                .collect(),
+            vec![json!("valid"), json!(true)],
+        ] {
+            request.questions.insert(
+                "calm_relevance".to_owned(),
+                TypedQuestion::Score {
+                    instructions: json!("How relevant is calm?"),
+                    criteria,
+                },
+            );
+            assert_eq!(
+                request
+                    .validate()
+                    .err()
+                    .ok_or("expected invalid score question")?
+                    .code,
+                "invalid_request"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn typed_score_validates_range_probability_fields_and_exact_level_keys()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let request = score_request();
+        let valid = score_response()["answers"].clone();
+        typed_answers(&request, valid.clone())?;
+        for (path, value, code) in [
+            ("/calm_relevance/score", json!(-0.1), "typed_score_invalid"),
+            ("/calm_relevance/score", json!(4.01), "typed_score_invalid"),
+            (
+                "/calm_relevance/confidence",
+                json!(1.01),
+                "typed_probability_invalid",
+            ),
+            (
+                "/calm_relevance/probabilities/2",
+                json!(-0.01),
+                "typed_probability_invalid",
+            ),
+            (
+                "/calm_relevance/probabilities",
+                json!({"0":0.0,"1":0.1,"2":0.3,"3":0.59}),
+                "typed_score_levels_mismatch",
+            ),
+            (
+                "/calm_relevance/probabilities",
+                json!({"0":0.0,"1":0.1,"2":0.3,"3":0.59,"wrong":0.0}),
+                "typed_score_levels_mismatch",
+            ),
+        ] {
+            let mut invalid = valid.clone();
+            *invalid.pointer_mut(path).ok_or("score answer path")? = value;
+            assert_eq!(
+                typed_answers(&request, invalid)
+                    .err()
+                    .ok_or("expected invalid score answer")?
+                    .code,
+                code,
+                "{path}"
+            );
+        }
+        let wrong_type = json!({"calm_relevance":{"type":"noul","noul":0.9}});
+        assert_eq!(
+            typed_answers(&request, wrong_type)
+                .err()
+                .ok_or("expected score type mismatch")?
+                .code,
+            "typed_answer_type_mismatch"
+        );
+        let mut empty = request.clone();
+        empty.questions.insert(
+            "calm_relevance".into(),
+            TypedQuestion::Score {
+                instructions: json!("Invalid missing levels"),
+                criteria: vec![],
+            },
+        );
+        assert_eq!(
+            typed_answers(&empty, valid)
+                .err()
+                .ok_or("invalid levels")?
+                .code,
+            "invalid_request"
+        );
         Ok(())
     }
 

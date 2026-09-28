@@ -119,6 +119,7 @@ mod tests {
         let item = &plan.comparisons[index];
         let answers = item.request.questions.iter().map(|(id, question)| {
             let answer = match question {
+                TypedQuestion::Score { .. } => unreachable!("binary comparison fixture"),
                 TypedQuestion::Noul { .. } => json!({"type":"noul","noul":if item.tags[id].required { required } else if item.tags[id].forbidden { forbidden } else { 0.1 }}),
                 TypedQuestion::Choice { criteria, .. } => {
                     let choice = criteria.keys().next().cloned().unwrap_or_default();

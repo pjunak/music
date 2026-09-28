@@ -237,6 +237,11 @@ challenges occur only in question IDs and are checked locally to reject mismatch
 answers; Jev is never asked to compare random strings. This follows its documented
 [semantic-versus-mechanical limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
 Strict parsing rejects missing/extra answers, invalid scores and model mismatches.
+The additive native Score primitive accepts 2..10 ordered descriptive levels and
+validates level membership, finite score range and confidence/probabilities. Its
+provider legend/extensions are discarded. Score is currently exercised only by
+the [isolated graded listening experiment](JEV_GRADED_TAGGING_PILOT.md); it does not
+change production binary tagging, its capabilities, conformance or acceptance.
 Choice validates every score in 0..1, exact option membership and a positive maximal
 winner. TypeSafe documents approximate probability sums without a rounding bound;
 we neither enforce an invented unit-sum tolerance nor normalize scores across a gate.

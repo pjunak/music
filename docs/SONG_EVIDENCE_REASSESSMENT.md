@@ -1,5 +1,8 @@
 # Audio evidence reassessment after the empty Jev pilot
 
+Next experiment: [graded musical fit and controlled audio inputs](JEV_GRADED_TAGGING_PILOT.md)
+uses native Jev Score and the existing 138-tag library after owner listening feedback.
+
 Research date: 28 September 2026. Source baseline: `fcc32a0`.
 The initial research changes the recommended next experiment. The implementation
 and offline follow-up below records work subsequently completed against that plan.

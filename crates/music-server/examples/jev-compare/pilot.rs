@@ -13,10 +13,10 @@ use std::sync::atomic::AtomicBool;
 mod execution;
 pub(super) use execution::run;
 #[path = "pilot_predictions.rs"]
-mod predictions;
+pub(super) mod predictions;
 #[cfg(test)]
 #[path = "pilot_tests.rs"]
-mod tests;
+pub(super) mod tests;
 
 const CORPUS_SCHEMA: &str = "jev-private-corpus/v1";
 const PLAN_SCHEMA: &str = "jev-private-pilot/v2";
@@ -33,14 +33,14 @@ const ARMS: [&str; 8] = [
 const MAX_REQUESTS: u64 = 1_200;
 const MAX_UNITS: u64 = 60_000_000;
 
-fn read_json(path: &Path) -> Result<Value> {
+pub(super) fn read_json(path: &Path) -> Result<Value> {
     if path.metadata()?.len() > 32 * 1024 * 1024 {
         return Err("pilot document exceeds 32 MiB".into());
     }
     Ok(serde_json::from_reader(File::open(path)?)?)
 }
 
-fn audio_hash(path: &Path) -> Result<String> {
+pub(super) fn audio_hash(path: &Path) -> Result<String> {
     let mut file = File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 65536];

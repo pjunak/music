@@ -570,6 +570,7 @@ impl music_application::assistant::TypedDecisionTransport for JevFixture {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let answers=request.questions.iter().map(|(key,question)| {
                 let value=match question {
+                    music_application::assistant::TypedQuestion::Score {..}=>unreachable!("binary provider fault fixture"),
                     music_application::assistant::TypedQuestion::Noul{instructions,..}=>{
                         let meaning = instructions.get("definition").unwrap_or(&instructions["tag"]);
                         let matching_tag = ["Active battle, confrontation, attack, or martial conflict.", "Pre-modern European courtly, folk, or feudal atmosphere."].iter().any(|definition| meaning["definition"] == *definition);
