@@ -167,14 +167,27 @@ questions promoted no selected negative across the threshold; unchanged custom
 judgments still rely on their existing grounding. The mood variant worsened both
 acoustic positives.
 
-V8 adopts exactly the measured setting/scene predicates only for initial matching
+V8 adopted exactly the measured setting/scene predicates only for initial matching
 and album/genre support. Other question families remain, including v7 mood/custom
 metadata support. Inference identity now includes every group-specific question
-family; there is no previous-engine fallback. Full v29 validation is still required.
+family; there was no previous-engine fallback. Full v29 validation subsequently
+regressed to 49/66 and rejected the candidate.
 The [acceptance record](AI_ACCEPTANCE.md#jev-first-pass-investigation-2026-09-28)
 distinguishes the limited measured gain from remaining vocabulary/evidence questions
 and unqualified acoustic expectations. Neither definition aliases nor thresholds
 are changed to force required tags through the suite.
+
+### Rejecting the dimension rewrite: engine v9
+
+The full v8 run lost eight required assignments, fixed none of the eleven previous
+omissions, and retained all safety/custom checks. The small diagnostic had not tested
+the previously passing judgments that regressed. V9 restores the v7 semantic questions
+and keeps group-aware fingerprinting and exact reviewed-budget enforcement. There is
+no v8 runtime path or compatibility fallback. The full suite and all 0.70 thresholds
+remain unchanged; restoring known prompts does not establish a fresh certification.
+See the [full results](AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28).
+Subsequent experiments need passing positives as regression controls, followed by full
+validation, before any new wording is adopted.
 
 ### Shared inference rules
 
@@ -220,7 +233,7 @@ are uncalibrated operating points, not measured music-tagging accuracy.
 
 ## Validation and adoption
 
-Engine `music-jev-decisions/v8` replaces prior engines without a compatibility path. Local
+Engine `music-jev-decisions/v9` replaces prior engines without a compatibility path. Local
 regressions cover rounded Choice totals on both sides of one, ties, malformed
 scores/options/winners, threshold preservation, HTTP handling and durable multi-song
 execution. Additional regressions cover optional usage, discarded extensions, malformed

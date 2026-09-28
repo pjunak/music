@@ -148,7 +148,7 @@ per-measurement context reliability. Full membership is validated before resolvi
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v8`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v9`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. Jev receives one song's actual observation cards without a track ID.
 Each question includes group meaning, the tag definition and its synonyms. Initial
@@ -158,12 +158,10 @@ descriptions without treating unverified provenance as semantic absence. Groundi
 and tentative support remain separate. Mood asks about musical impression; setting/scene ask
 about a specific reason for tabletop use. Descriptive metadata can support a tag
 without proving how the recording sounds; isolated identity words cannot.
-Engine v8 uses dedicated place/environment and activity predicates for setting/scene
-matching and album/genre support. Definition alternatives remain alternatives, with
-required qualifiers, negation and metaphor respected. Mood and custom metadata retain
-v7's direct semantic support, including required purpose/properties rather than a
-merely compatible attribute. Other fit/support paths, conflict questions, evidence
-views, candidate limits and every acceptance threshold remain. Inference identity
+Engine v9 restores v7's semantic questions after the v8 place/activity rewrite
+regressed in full validation. Album/genre support includes required purpose/properties
+rather than a merely compatible attribute. Conflict questions, evidence views,
+candidate limits and every acceptance threshold remain. Inference identity
 includes each group-specific question family so changes invalidate stale gates/results.
 Display labels stay in the application; changing a label does not change its semantic
 question. Vocabulary context cues remain available to playlist retrieval but are excluded
@@ -248,11 +246,11 @@ before retaining an unbounded request plan. No generated-output allowance is sen
 fallback or remote Batch is supported. A native execution failure stops further
 quality calls, including safety reruns. Subsequent cases report not-run with the original
 error, retain their failed certification outcome and are counted separately in progress.
-The quality report identifies the native v8 engine; successful synthetic checks still do not
+The quality report identifies the native v9 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
-not local context or accepted tags. The [dated live validation](AI_ACCEPTANCE.md#jev-metadata-support-repair-2026-09-28)
-improves recall but still fails the quality gate. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
+not local context or accepted tags. The [dated live validation](AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28)
+records the rejected rewrite and unresolved quality gate. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
 
 The context implementation is `local-context/v3+rustfft/v2+loudness/v2`.
 Loudness capture retains the bounded end of FFmpeg stderr so long embedded notes cannot

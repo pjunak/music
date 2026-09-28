@@ -115,8 +115,10 @@ cargo run --locked -p music-server --example jev-compare -- quality-plan target/
 Both commands are offline and refuse to overwrite their output. Comparison plans
 cover initial matching and selected observation support for fifteen fixed cases,
 including negative controls, with unchanged state, definitions, scopes and conflict
-questions. The current comparison tests dimension-specific predicates for setting,
-scene and mood; custom predicates remain unchanged. Interpret matching and support
+questions. The current comparison reproduces the historical dimension-specific
+candidate rejected by full v8 validation; it is not a recommended new paid run.
+New experiments must include previously passing positives as well as failures and
+negative controls. Custom predicates remain unchanged. Interpret matching and support
 as separate outcomes, and do not adopt a support rewrite from matching results. Plans
 omit identical variants; prior experiments remain dated results in their journals,
 not the current plan. Full plans include conformance,
@@ -132,7 +134,7 @@ the production planner/executor/scorer. A
 successfully completed job can still have `evaluation.passed: false`; neither
 command writes application acceptance. Stop after any uncertain request and
 inspect the saved journal; existing runs are never resumed or retried. See the
-[dated live results](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27).
+[dated live results](AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28).
 
 ## Frontend
 

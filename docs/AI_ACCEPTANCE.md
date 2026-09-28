@@ -19,6 +19,60 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev full v8 validation and rollback: 2026-09-28
+
+The authorized full run completed conformance, all unchanged v29 scenarios and
+all safety repeats. V8 regressed to **49/66 scenarios (74.2%)** and **140/159
+required assignments**, against v7's 55/66 and 148/159. Safety remained **16/16**,
+custom vocabulary **5/5**, maximum vocabulary **1/1**, and acoustic/context-only
+**6/9**. No previously failing scenario improved. All nineteen missing assignments
+were rejected at initial fit, before grounding or candidate capacity.
+
+| Previously retained assignment | V7 full-run fit | V8 full-run fit |
+|---|---:|---:|
+| Forest hunt / hunting | 0.79 | 0.67 |
+| Arctic escape / escape | 0.76 | 0.67 |
+| Infernal ritual / infernal realm | 0.89 | 0.55 |
+| Curious puzzle / puzzle | 0.73 | 0.69 |
+| Temple band-name control / city | 0.74 | 0.66 |
+| Quiet intro, urgent escape / escape | 0.70 | 0.60 |
+| Quiet intro, urgent escape / chase | 0.77 | 0.67 |
+| Slow, intense siege / combat | 0.74 | 0.63 |
+
+The 28-request diagnostic covered selected failures and negatives, but omitted
+these passing tag judgments. Its promising boundary scores also did not hold:
+Arctic reached only 0.69 and temple 0.68 in the full run. This is insufficient
+evidence to adopt the wording. The changed question family accounts for every new
+omission; the full run does not isolate which individual clause caused it. TypeSafe
+[documents independent questions](https://docs.typesafe.ai/primitives), so request
+batching is not an established explanation. Future comparisons must include
+previously passing positives, failures and negative controls, then pass the full suite.
+
+**Engine v9 removes the v8 place/activity rewrite and restores v7's questions.**
+The broader inference fingerprint and exact-budget runner checks remain. There is
+one current engine, with no legacy fallback. Definitions, evidence, thresholds,
+fixtures and review requirements are unchanged. The historical 55/66 result is
+not a fresh v9 certification; quality repair and independent listening remain open.
+The old developer comparison is explicitly marked as a rejected historical
+experiment, not a recommended new paid run.
+
+All **287 requests**, including conformance, received responses: **3,358,024 input**
+and **214,363 output tokens**, with **14,155,387 conservative units reserved**.
+This stayed within the approved 818-request / 20,172,234-unit plan, SHA-256
+`80498adc9cc093609cac0e62e663ed6c174ad540d711856efc7014f6ad812ef2`.
+There were no retries, uncertain requests or application acceptance writes.
+Local evidence: `target/jev-quality-v8-20260928/result.json`; comparison baseline:
+`target/jev-quality-v7-20260928/result.json`. No additional paid run is authorized.
+
+Rollback validation passes: **581 Rust tests**, with real FFmpeg and the pinned
+voice model, four developer-example tests and sixteen architecture/workflow policy
+tests. Formatting, architecture, workspace check, strict workspace/fuzz Clippy,
+doc tests, generated contracts and both graphs' deny/audit/machete checks pass.
+An offline comparison confirms all **66 assessment plans**, conformance, scoring
+expectations and request/input bounds match v7 exactly; only engine/fingerprint
+identity changes. The live request builders also match v7. All 165 local links in
+the edited references resolve. These checks establish restoration, not listening quality.
+
 ## Jev first-pass investigation: 2026-09-28
 
 The owner's v7/v29 export (`07c24222ba4c4e6d8425c3aeb4bb3346`) reproduces the
@@ -91,9 +145,10 @@ definition needs a vocabulary decision. Do not silently inject display labels,
 weaken thresholds, or rewrite evidence to satisfy the expected tag. All v29 inputs,
 required/forbidden tags and quality gates remain unchanged.
 
-Fresh v8 full validation is prepared: conformance plus all 66 scenarios and 16
-safety repeats, capped at **818 requests / 20,172,234 conservative input units**.
-Execution awaits separate approval. The developer runner's hard input ceiling is
+Fresh v8 full validation was prepared and subsequently authorized: conformance plus
+all 66 scenarios and 16 safety repeats, capped at **818 requests / 20,172,234
+conservative input units**. It regressed and was rejected, as recorded above.
+The developer runner's hard input ceiling is
 21 million to accommodate the longer measured prompts; caller caps must equal
 the reviewed plan's exact totals, and its hash remains mandatory. Tests reject
 both smaller and larger caps, over-ceiling and changed-plan calls before credentials are read. This does not

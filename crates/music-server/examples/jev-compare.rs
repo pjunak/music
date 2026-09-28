@@ -261,7 +261,7 @@ fn build_plan() -> Result<Vec<Comparison>> {
                 }
             }
         }
-        // Once a measured variant is adopted, do not pay to repeat identical bodies.
+        // Unchanged custom predicates do not need duplicate request bodies.
         let mut seen = BTreeSet::new();
         for variant in Variant::ALL {
             let request = apply_variant(selected.clone(), &dimensions, variant)?;
@@ -284,7 +284,7 @@ fn plan_document(plan: &[Comparison]) -> Value {
         "schema_version": "jev-framing-comparison/v3", "engine_id": JEV_TAGGER_CONTRACT,
         "model": MODEL, "endpoint": ENDPOINT, "certifies_model": false,
         "request_count": plan.len(), "max_input_units": reservation(plan),
-        "purpose": "Compare generic and dimension-specific predicates for initial matching and selected observation support. State, definitions, scopes, conflict questions and custom predicates stay identical. Fixed synthetic inputs and negative controls, two tags per case, no automatic retries, library data or acceptance updates. This diagnoses individual judgments, not full candidate selection or certification.",
+        "purpose": "Reproduce the historical dimension-predicate diagnostic. The candidate was rejected after full v8 validation regressed from 55/66 to 49/66; these selected cases missed positive regressions and do not justify re-adoption. State, definitions, scopes, conflict questions and custom predicates stay identical. Fixed synthetic inputs, two tags per case, no automatic retries, library data or acceptance updates. New investigations must cover previously passing positives as well as failures and negative controls.",
         "comparisons": plan,
     })
 }
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn variants_isolate_semantics_without_changing_evidence_or_conflicts() -> Result<()> {
         let plan = build_plan()?;
-        assert_eq!(plan.len(), 25);
+        assert_eq!(plan.len(), 28);
         let suite = tag_quality_suite()?;
         for (case_id, names) in CASES {
             let case = suite
@@ -541,15 +541,11 @@ mod tests {
                 .filter(|case| case.case_id == *case_id)
                 .collect::<Vec<_>>();
             if names.iter().all(|name| {
-                dimensions
-                    .iter()
-                    .any(|(group, tag)| *tag == name && group.as_str() != "mood")
+                dimensions.iter().any(|(group, tag)| {
+                    *tag == name && !matches!(group.as_str(), "mood" | "setting" | "scene")
+                })
             }) {
-                assert_eq!(
-                    cases.len(),
-                    1,
-                    "unchanged or adopted predicates cost no repeat"
-                );
+                assert_eq!(cases.len(), 1, "unchanged custom predicates cost no repeat");
                 continue;
             }
             assert_eq!(cases.len(), 2);
@@ -561,14 +557,7 @@ mod tests {
                 if id.starts_with("conflict_") {
                     assert_eq!(question, &variant.questions[id]);
                 } else {
-                    let index: usize = id.split('_').nth(1).ok_or("question index")?.parse()?;
-                    if matches!(dimensions[index].0.as_str(), "setting" | "scene") {
-                        // Only the measured use predicates are adopted. This also
-                        // binds their production metadata support to the experiment.
-                        assert_eq!(question, &variant.questions[id]);
-                    } else {
-                        assert_ne!(question, &variant.questions[id]);
-                    }
+                    assert_ne!(question, &variant.questions[id]);
                     let TypedQuestion::Noul { instructions, .. } = question else {
                         return Err("expected Noul".into());
                     };
