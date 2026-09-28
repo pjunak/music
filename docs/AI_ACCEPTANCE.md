@@ -19,32 +19,71 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
-## Jev optional-criteria investigation prepared: 2026-09-28
+## Jev optional-criteria comparison rejected: 2026-09-28
 
-No new provider result is claimed. Production remains v9, restoring the v7
-questions; historical v7 quality is **55/66**, and the v8 candidate was rejected
-at 49/66. The complete v9 quality-plan document remains identical after this batch,
-including requests, inference identity, fixtures, thresholds and budget.
+The separately authorized comparison completed **366/366 requests** against pinned
+`jev-1.13.0` from commit `9316158`. Removing initial-fit criteria recovered **no**
+required assignment, lost **four**, and introduced **one** forbidden first-pass
+candidate. Reject this variant; there is no reason to spend on its full validation.
+Production remains v9 with explicit criteria. Historical v7 quality is **55/66**;
+this first-pass comparison is not a new full-suite result or certification.
 
 The adapter previously required Noul criteria even though TypeSafe documents them
 as optional and recommends comparing questions with and without them
 ([Noul guidance](https://docs.typesafe.ai/primitives/noul)). It now accepts omission
 while rejecting incomplete explicit criteria; Choice still requires options.
-This enables an experiment, not a demonstrated explanation for the misses.
+Optional criteria remain a supported API form, not a recommended music-tagging
+configuration. The results do not support removing them as a repair for the misses.
 
 The new comparison changes **only initial-fit Noul criteria**, retaining exact
 production state, instructions, definitions, thresholds, Choice questions and
 partitioning. All 66 unchanged suite cases are accounted for: 64 have requests and
-two have no eligible evidence. It compares **7,760 Noul judgments**, including
+two have no eligible evidence. It compares **7,760 paired Noul judgments**, including
 **151 required assignments**, every previously passing positive lost in v8, custom
 definitions and all applicable safety controls. Period Choice is unchanged and
 not scored by this diagnostic. Grounding and safety repeats require the full run.
 
-Prepared offline plan: **366 requests / 17,016,148 conservative input units**, pinned
-`jev-1.13.0`, synthetic data only, no retries. SHA-256:
+Approved and executed plan: **366 requests / 17,016,148 conservative input units**,
+synthetic data only, no retries. SHA-256:
 `d8a3642bb41e4d264545183351af8786dfb59289835f4a7c7dcee69133666c0f`.
-Local artifact: `target/jev-criteria-plan-20260928.json`. Prior paid approvals do
-not cover this plan; it has **not been executed**.
+The rebuilt plan matched this exact identity before the key was read. All 183
+partitions have both responses, every response reports usage, and there are no
+unresolved attempts. Actual usage: **3,973,016 input / 311,830 output tokens**.
+
+| Initial Noul gate, before grounding | Current criteria | Without criteria |
+|---|---:|---:|
+| Required assignments at or above 0.70 | 139/151 | 135/151 |
+| Explicitly forbidden assignments at or above 0.70 | 0/976 | 1/976 |
+| Reported input tokens, 183 requests each | 2,273,628 | 1,699,388 |
+
+| Lost required assignment | Current fit | Without criteria |
+|---|---:|---:|
+| Quiet intro, urgent escape / chase | 0.75 | 0.54 |
+| Slow, intense siege / combat | 0.77 | 0.58 |
+| Fast, light market dance / dancing | 0.81 | 0.67 |
+| Volatile acoustic development / chaotic | 0.73 | 0.68 |
+
+The custom `dark` definition in `custom-vocabulary-alias` rose from **0.69 to 0.79**.
+Here it means dim, warm, reassuring ambience, not horror. The supplied lamplit-study
+description does not establish all of those properties. This is a forbidden
+candidate flag; grounding was not run, so it is not an observed final false tag.
+There are also 27 unscored crossings (18 up, nine down), which cannot be counted as
+either improvements or errors. The smaller input bill does not justify the losses.
+
+None of the twelve baseline misses was recovered. The clearer descriptive cases
+remain below the gate: Arctic **0.63 -> 0.67**, temple **0.67 -> 0.58**, festival
+**0.66 -> 0.65**, and storytelling **0.39 -> 0.26**. The current baseline also puts
+quiet-intro `escape` at **0.69**, compared with **0.70** in the historical v7 full
+run. A single paired run establishes the observed rejection decision, not a
+repeatability estimate or an explanation for every score change.
+
+Local evidence: `target/jev-criteria-plan-20260928.json`,
+`target/jev-criteria-results-20260928.jsonl`, and
+`target/jev-criteria-report-20260928.json`. Journal SHA-256:
+`2781408ac08a39a4fdf2ab999d0dcf56c87e98105e8f19026f910219ca57a2b5`;
+report SHA-256:
+`45e4ed40278aaa9b0d2b88baba47382a2df0c698bdc70e89a1b431fc9fa19dec`.
+The approved run is complete; its authorization does not cover another run.
 
 The offline journal report lists required gains/losses, new forbidden candidates,
 resolved forbidden candidates and unscored threshold crossings. An unlisted tag
@@ -63,12 +102,23 @@ sensitivity. High steady drive alone does not verify time-critical urgency.
 No vocabulary, fixture or threshold was changed to resolve those ambiguities;
 independent listening remains necessary.
 
-Local validation passes: **582 Rust tests** with real FFmpeg and the pinned voice
-model, **eight** developer-example tests, nine focused typed-adapter tests and
+Next, inspect the supplied propositions and evidence cards behind literal metadata
+misses before preparing another single-factor comparison. Retain passing positives,
+custom definitions and explicit negatives; resolve ambiguous expectations separately
+from acoustic listening acceptance. Do not lower thresholds, add a keyword fallback,
+or expand data collection to explain failures on already explicit descriptions.
+
+Run preflight: all **eight** experiment tests pass and the regenerated plan matches
+the approved hash and both caps. The completed journal passes the offline reporter;
+the dated-record diff and all **152** checked local links pass. No runtime code,
+fixture, vocabulary, threshold, production configuration or acceptance state changed.
+
+Preparation validation had passed **582 Rust tests** with real FFmpeg and the pinned
+voice model, **eight** developer-example tests, nine focused typed-adapter tests and
 seven architecture policy tests. Formatting, architecture, workspace check,
-strict workspace Clippy, doc tests and generated contracts pass. All 165 local
-links in the checked Assistant references resolve. No dependency or fuzz source
-changed; this batch does not add a provider, listening or production acceptance.
+strict workspace Clippy, doc tests and generated contracts passed. All 165 local
+links in that preparation's checked Assistant references resolved. No dependency or fuzz source
+changed in that preparation; neither batch establishes listening or production acceptance.
 
 ## Jev full v8 validation and rollback: 2026-09-28
 

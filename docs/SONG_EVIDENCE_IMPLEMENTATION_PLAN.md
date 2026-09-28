@@ -9,6 +9,14 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ## Jev criteria experiment and regression coverage — 28 September 2026
 
+**Paid comparison outcome: rejected.** All 366 approved requests completed with
+3,973,016 input and 311,830 output tokens, no retries or unresolved attempts.
+Removing optional initial-fit criteria recovered no required tags, lost four, and
+introduced one forbidden custom candidate before grounding. Required first-pass
+assignments fell from **139/151 to 135/151**; this is not a full-suite pass rate.
+V9 keeps explicit criteria, and no full validation of this candidate is warranted.
+See the [dated results](AI_ACCEPTANCE.md#jev-optional-criteria-comparison-rejected-2026-09-28).
+
 Implemented the documented optional-criteria form of Noul in the typed adapter.
 Missing criteria are omitted from requests; incomplete explicit criteria and empty
 Choice options remain invalid. Existing v9 requests are unchanged.
@@ -20,7 +28,8 @@ Previously passing positives, including every v8 regression, now participate.
 An offline journal report separates gains, lost positives, new forbidden candidates
 and unscored changes, and exposes incomplete pairs and missing usage. It cannot
 certify a model or change application acceptance. No new dependency or audio model
-was added, and no paid run was executed for this batch.
+was added. The separately approved run reproduced the exact prepared plan hash and
+17,016,148-unit cap; all eight runner tests passed before execution.
 
 The semantic audit confirms useful descriptive support for Arctic, temple,
 festival and storytelling, while city/shopping, court festivities and synthetic
@@ -28,10 +37,13 @@ acoustic-to-mood expectations retain genuine ambiguity. Do not optimize wording
 solely to push boundary probes over 0.70. Vocabulary, fixtures and thresholds stay
 unchanged; independent listening is still needed to qualify the audio assumptions.
 
-Next: separately authorize the prepared comparison, inspect regressions as well as
-gains, and require full native validation before adopting a measured candidate.
+Next: audit the propositions/evidence cards behind literal metadata misses before
+preparing another controlled comparison. Preserve regression and negative controls;
+keep ambiguous expectations and independent acoustic listening as separate work.
+Do not adopt criteria removal, lower thresholds or rerun this rejected candidate.
 Overall accepted-delivery progress remains approximately **80%**; improved
-investigation tooling is not a new quality result.
+investigation evidence is not a new quality acceptance. No fresh model certification
+or production rollout is claimed.
 
 ## Jev setting/activity repair — 28 September 2026
 
@@ -579,8 +591,8 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | v5 reached 15/66; v6 45/66; v7 55/66 | V8 regressed to 49/66 and was removed; v9 restores v7 questions without fresh certification | Resolve definition/evidence gaps with positive/negative controls, qualify acoustics, then independent listening | Requested high priority: preserve gates and require full validation before adoption. |
-| Bounded Jev developer comparison/quality runner | Manual logs, then a selected-case experiment that missed positive regressions | Full-suite first-pass criteria comparison; exact approved caps; offline paired regression/negative-control reports; durable attempts and shared full scorer | Keep for controlled investigations; no automatic paid runs | High debugging value: isolate one factor, expose lost positives and incomplete results, and stop uncertain cost; no production service or dependency. |
+| TypeSafe Jev | v5 reached 15/66; v6 45/66; v7 55/66 | V9 restores v7 questions; criteria removal rejected with zero gains, four losses and one forbidden candidate | Keep explicit criteria; audit literal metadata misses, qualify acoustics, then independent listening and full validation | Requested high priority: no fresh certification; preserve quality and safety gates. |
+| Bounded Jev developer comparison/quality runner | Manual logs, then a selected-case experiment that missed positive regressions | Completed 366-request paired comparison; exact caps, regression/negative-control reports, durable attempts and shared full scorer | Keep for controlled investigations; no automatic paid runs or repeats of the rejected candidate | High debugging value: broader controls exposed four lost positives; preserve evidence without adding a production service or dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

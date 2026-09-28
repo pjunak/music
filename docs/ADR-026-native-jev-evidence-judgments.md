@@ -189,6 +189,22 @@ See the [full results](AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026
 Subsequent experiments need passing positives as regression controls, followed by full
 validation, before any new wording is adopted.
 
+### Rejecting optional-criteria removal
+
+The typed adapter accepts omitted Noul criteria, as documented by TypeSafe, while
+rejecting incomplete explicit criteria and empty Choice options. Production v9
+continues to send explicit criteria. A separately authorized 366-request comparison
+removed only initial-fit criteria across the unchanged synthetic suite, preserving
+state, instructions, definitions, thresholds and production partitioning.
+
+All requests completed. Required first-pass assignments fell from 139/151 to
+135/151, with no recovered assignment and one new forbidden custom candidate.
+Grounding and final quality were not evaluated. Reject removal despite its lower
+input usage; do not promote it or spend on its full validation. Optional API support
+is retained without a production switch or compatibility engine. The
+[dated acceptance record](AI_ACCEPTANCE.md#jev-optional-criteria-comparison-rejected-2026-09-28)
+contains the exact plan identity, scores, usage and interpretation limits.
+
 ### Shared inference rules
 
 1. Keep a dedicated native engine behind the existing tagger interface. Share
