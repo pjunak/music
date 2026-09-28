@@ -7,6 +7,33 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Jev evidence inputs experiment — 28 September 2026
+
+Prepared a controlled data experiment with 14 variants, unchanged questions and
+all current synthetic cases. It separates source omissions/combinations, acoustic
+detail, numeric versus named bands, reversible compaction, repeated detail and
+source-attribution probes. Six identical-input controls expose variation. No-op
+and empty variants are skipped explicitly, and the report preserves incomplete
+pairs, per-group/source coverage and actual usage without selecting a winner.
+Exact provider bodies are deduplicated across cases/arms, saving 49 calls while
+preserving all case expectations. Shared answers cannot masquerade as independent
+observations, and total usage counts each physical response once.
+
+The complete offline plan is **1,616 requests / 82,194,553 conservative input
+units**. It needs a separate paid-run budget; no new Jev result is claimed.
+The [acceptance record](AI_ACCEPTANCE.md#jev-evidence-source-and-amount-experiment-prepared-2026-09-28)
+contains the exact hash, matrix, source limitations and conservative cost estimate.
+The current suite has only three mixed text/audio cases and no catalog cards;
+synthetic source relocation is not real catalog validation. Production v9 stays
+unchanged. Overall accepted progress remains approximately **80%** until quality,
+independent listening and production acceptance are complete.
+
+Local checks pass: **12** experiment tests, including shared-answer expectation and
+usage accounting, incomplete responses, exact approval and period-report regressions;
+strict example Clippy, formatting, seven architecture policy tests and the actual
+architecture check. The refactored journal reader reproduces the preceding live
+criteria report byte-for-byte. All **58** local links in the changed documents resolve.
+
 ## Jev criteria experiment and regression coverage — 28 September 2026
 
 **Paid comparison outcome: rejected.** All 366 approved requests completed with
@@ -592,7 +619,7 @@ options survey; this plan determines the narrower implementation scope.
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
 | TypeSafe Jev | v5 reached 15/66; v6 45/66; v7 55/66 | V9 restores v7 questions; criteria removal rejected with zero gains, four losses and one forbidden candidate | Keep explicit criteria; audit literal metadata misses, qualify acoustics, then independent listening and full validation | Requested high priority: no fresh certification; preserve quality and safety gates. |
-| Bounded Jev developer comparison/quality runner | Manual logs, then a selected-case experiment that missed positive regressions | Completed 366-request paired comparison; exact caps, regression/negative-control reports, durable attempts and shared full scorer | Keep for controlled investigations; no automatic paid runs or repeats of the rejected candidate | High debugging value: broader controls exposed four lost positives; preserve evidence without adding a production service or dependency. |
+| Bounded Jev developer comparison/quality runner | Manual logs, then limited question comparisons | Criteria-removal comparison rejected; source/amount experiment prepared with shared journal guards, skipped no-ops and repeat controls | Run only the separately approved data plan, inspect paired tradeoffs, then fully validate promising changes | High debugging value: determine useful evidence without changing questions or adding a production service/dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

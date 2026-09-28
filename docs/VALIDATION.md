@@ -117,8 +117,11 @@ built-in synthetic cases and never loads application configuration or library da
 ```powershell
 cargo run --locked -p music-server --example jev-compare -- plan target/jev-framing-plan.json
 cargo run --locked -p music-server --example jev-compare -- quality-plan target/jev-quality-plan.json
+cargo run --locked -p music-server --example jev-compare -- evidence-plan target/jev-evidence-plan.json
 # After a separately authorized comparison has produced this journal:
 cargo run --locked -p music-server --example jev-compare -- report target/jev-framing-run.jsonl target/jev-framing-report.json
+# After a separately authorized evidence experiment:
+cargo run --locked -p music-server --example jev-compare -- evidence-report target/jev-evidence-run.jsonl target/jev-evidence-report.json
 ```
 
 These commands are offline and refuse to overwrite their output. Comparison plans
@@ -142,10 +145,36 @@ reported and no production adoption follows automatically. Full plans include co
 the entire current quality suite, safety repeats, inference identity, scoring
 expectations and conservative total request/input bounds.
 
-After separate paid-run authorization, `run` or `quality-run` requires
+The evidence plan holds production question bodies, criteria, definitions and
+thresholds fixed while varying supplied data. It includes all existing cases and
+vocabulary entries, previous successes, explicit negatives, custom definitions and
+ending-conflict controls. Partitions are shared across arms and sized for the
+largest state; they may differ from normal production packing. Identical/no-op
+and empty-observation variants make no call and are explicitly reported. Six cases
+have one budgeted identical-input repeat to expose score variation. Arm order
+rotates deterministically; a repeat is not an automatic retry. All other identical
+provider bodies share one physical request across cases/arms. Logical scoring
+contexts retain their own expectations, and shared request IDs expose reuse and
+differing expectation sets. Physical request labels describe only the first use.
+
+Evidence reports compare each variant with its paired baseline within source cohort
+and tag group. They retain raw scores, required-tag retention, forbidden candidates,
+unscored crossings, separate period Choice snapshots, byte sizes, actual usage and
+repeat controls. Period applicability and grounding are not run. Different arm
+denominators cannot be ranked as comparable pass rates. Removing the only supporting
+fact can correctly cause abstention; copied genre text under catalog attribution
+does not establish the value of independently retrieved catalog facts. Empty arms,
+incomplete pairs and absent usage remain distinct. No automatic best variant or
+production adoption follows. The report shares the durable journal validator with
+the question comparison; the larger evidence journal has a 256 MiB read bound.
+Per-arm counts and paired usage describe logical comparisons, with separate distinct
+request sets; shared inputs are not independent samples. Only root usage counts
+each paid response once. Do not sum paired baseline or variant usage as total spend.
+
+After separate paid-run authorization, `run`, `evidence-run` or `quality-run` requires
 `--key-file` (a temporary secret outside source control), `--plan-sha256`,
 `--max-requests` and `--max-input-units`, plus a new `--output` journal or
-`--output-directory`. Use `--help` for the exact arguments. Both runners require
+`--output-directory`. Use `--help` for the exact arguments. All runners require
 the plan's exact total request/input bounds before reading credentials. The full
 runner uses an isolated SQLite job database and
 the production planner/executor/scorer. A

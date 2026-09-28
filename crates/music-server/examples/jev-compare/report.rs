@@ -1,7 +1,8 @@
 //! Read-only interpretation of a current journal. Missing answers are never zero scores.
 use super::*;
 use comparison::{BASELINE, CANDIDATE, Plan};
-use music_application::assistant::{TypedAnswer, typed_answers};
+use music_application::assistant::TypedAnswer;
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
@@ -18,79 +19,13 @@ pub fn read(plan: &Plan, path: &Path) -> Result<Value> {
 }
 
 fn analyze(plan: &Plan, journal: &str) -> Result<Value> {
-    let mut lines = journal.lines();
-    let header: Value = serde_json::from_str(lines.next().ok_or("missing journal plan")?)?;
-    if header["event"] != "plan" || header["plan"] != plan.document() {
-        return Err("journal does not match the current offline comparison plan".into());
-    }
-    let mut answers = BTreeMap::new();
-    let mut pending = None;
-    let mut next = 0;
-    let mut complete = false;
-    let mut terminal = false;
-    let mut tokens = [0_u64; 2];
-    let mut token_reports = [0_usize; 2];
-    for line in lines {
-        if terminal {
-            return Err("journal contains events after its terminal checkpoint".into());
-        }
-        let event: Value = serde_json::from_str(line)?;
-        let index = event["index"]
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok());
-        match event["event"].as_str() {
-            Some("attempt_started") => {
-                let item = plan.comparisons.get(next).ok_or("too many attempts")?;
-                if pending.is_some()
-                    || index != Some(next)
-                    || event["case_id"] != item.case_id
-                    || event["variant"] != item.variant
-                {
-                    return Err("invalid attempt checkpoint order or identity".into());
-                }
-                pending = Some(next);
-            }
-            Some("response") => {
-                if pending.is_none() || index != pending {
-                    return Err("response without its unique preceding attempt".into());
-                }
-                let result = &event["result"];
-                if result["model"] != MODEL {
-                    return Err("response model differs from pinned comparison model".into());
-                }
-                let parsed =
-                    typed_answers(&plan.comparisons[next].request, result["answers"].clone())?;
-                answers.insert(next, parsed);
-                for (i, key) in ["input_tokens", "output_tokens"].iter().enumerate() {
-                    if let Some(value) = result[*key].as_u64() {
-                        tokens[i] = tokens[i].checked_add(value).ok_or("token total overflow")?;
-                        token_reports[i] += 1;
-                    } else if !result[*key].is_null() {
-                        return Err("invalid token count".into());
-                    }
-                }
-                pending = None;
-                next += 1;
-            }
-            Some("stopped") => {
-                if pending.is_none() || index != pending {
-                    return Err("stop without its preceding attempt".into());
-                }
-                terminal = true;
-            }
-            Some("complete") => {
-                if pending.is_some()
-                    || next != plan.comparisons.len()
-                    || event["requests"].as_u64() != Some(next as u64)
-                {
-                    return Err("completion checkpoint does not cover the plan".into());
-                }
-                complete = true;
-                terminal = true;
-            }
-            _ => return Err("unknown journal event".into()),
-        }
-    }
+    let observed = super::journal::parse(&plan.document(), &plan.comparisons, journal)?;
+    let answers = &observed.answers;
+    let next = answers.len();
+    let pending = observed.pending;
+    let complete = observed.complete;
+    let tokens = observed.tokens;
+    let token_reports = observed.token_reports;
     let mut rows = Vec::new();
     let mut gains = Vec::new();
     let mut losses = Vec::new();

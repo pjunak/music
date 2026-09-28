@@ -19,6 +19,93 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev evidence-source and amount experiment prepared: 2026-09-28
+
+The owner requested controlled additions, omissions and input-size comparisons.
+The developer runner now prepares **14 data variants plus current input** across
+all 66 unchanged synthetic cases. Questions, explicit criteria, definitions,
+thresholds and expected tags stay fixed. The two cases with no eligible production
+evidence remain accounted for without calls. No provider run has been made for
+this experiment, and no best data combination is claimed.
+
+| Variant | Question investigated |
+|---|---|
+| Metadata only | Does adding the available audio context help or distract? |
+| Album only / genre only | Which description supplies support, and does combining them help? |
+| Audio only | What can the existing measurements support without descriptions? |
+| Without sections | Do local changes add value beyond trajectories, which still include their ending? |
+| Without trajectories | Do aggregate measurements add value beyond sections, which retain the ending? |
+| Without voice | Does the optional voice estimate affect non-vocal tagging? |
+| Numeric only | Do descriptive physical bands help beyond raw values? |
+| Bands only | Does replacing binned magnitudes with words help? Timing and reliability remain. |
+| Compact cards | Can redundant IDs and repeated scale explanations be removed without losing facts? |
+| Three copies of the same cards | Does additional, explicitly duplicated detail change judgments? |
+| Genre as catalog / community label | How does source presentation affect the same text? These are synthetic relocation probes, not newly verified facts. |
+| Add supplied identity context | Do artist/origin/duration/unverified BPM distract? Paths, filenames and new descriptions are never added. |
+
+All retained observation meanings, reliability, coverage, missingness and conflict
+values remain, except the explicitly named ablations. In particular, compact cards
+are reversible and preserve ending data; a shorter input is not an automatic win.
+Metadata-only variants retain the original coverage qualifiers. The source probes
+preserve the exact original genre phrase in production-shaped attributed cards;
+they cannot establish real MusicBrainz/Last.fm retrieval quality or independent
+corroboration. Ordinary catalog genres are not verified mood labels.
+
+Partitions are sized for the largest state and then shared across all arms for a
+case. This creates 194 logical current-input partitions instead of the normal 183;
+the question bodies themselves remain identical. Arm order rotates deterministically.
+Six cases receive one separately budgeted identical-input repeat, totaling 18
+control requests; this exposes observed variation but is not a significance test.
+There are 349 unchanged/inapplicable case variants and 80 empty-data variants with
+no calls. Empty variants are not successes or zero-valued model answers.
+
+Exact provider bodies are deduplicated across cases and variants, except the 18
+deliberate controls. This saves 49 requests and 2,114,805 reserved units without
+dropping any of the 1,665 logical uses or 1,471 paired comparisons. There are 46
+shared requests, exposed with their uses and distinct case-expectation sets.
+Removing distinguishing evidence can leave identical inputs with different
+expectations. One answer is then scored against each case's own expectations;
+these uses are not independent observations. Current input needs 190 physical
+requests after deduplication. The first draft was not executed.
+
+Prepared plan: **1,616 requests / 82,194,553 conservative input units**, pinned
+`jev-1.13.0`, synthetic text/JSON only, no retries. Plan SHA-256:
+`d539166ea17681eb404591b0aec65ba5ed0f4a285bbe3639b00a957b15defbee`.
+Local artifact: `target/jev-evidence-plan-deduplicated-20260928.json`. At the published
+[$0.042 per million input tokens](https://docs.typesafe.ai/models), treating every
+reserved unit as a billed token is approximately **US$3.45**; actual usage is
+expected to be lower and must be read from responses. Output is listed as free.
+This is a separately reviewable budget; previous completed-run approvals do not
+authorize it.
+
+Offline coverage inspection finds **52 metadata-only, nine audio-only and three
+mixed cases** among the 64 that make requests. None contains existing catalog
+cards. Consequently, text/audio interaction findings will initially cover only
+three synthetic cases, and source attribution probes cannot fill that dataset gap.
+In the preceding production-shaped baseline, evidence occupies roughly **0.58%,
+6.57% and 8.08%** of serialized state-plus-question bytes in those respective
+cohorts. These are byte measurements, not token/cost predictions; repeated questions
+and tag definitions dominate those inputs.
+
+The offline report separates required-tag retention, explicit forbidden candidates,
+unscored changes, paired coverage, tag groups, source cohorts, state bytes, actual
+usage and identical-input controls. Required-tag losses after removing useful data
+can represent appropriate abstention. Logical paired counts and usage are separate
+from distinct request sets; only root usage counts each paid response once. Neither
+paired baseline nor variant usage may be summed as total spend. Missing
+responses/counts remain unknown. No automatic
+winner, final scenario score or musical-accuracy claim is produced. Period Choice
+winners and scores are recorded separately from Nouls; their independent
+applicability check, grounding, candidate capacity, conformance and safety repeats
+are outside this screen. A promising combination requires full native validation and
+independently judged recordings, rather than tuning thresholds to this suite.
+
+Production remains v9, with no runtime, vocabulary, fixture, provider dependency,
+quality threshold or acceptance change. The existing no-criteria experiment and
+full native quality runner retain their exact contracts. The shared checkpoint
+validator now serves both developer comparisons. Local validation is recorded in
+the implementation plan; live evidence remains pending the separate budget.
+
 ## Jev optional-criteria comparison rejected: 2026-09-28
 
 The separately authorized comparison completed **366/366 requests** against pinned

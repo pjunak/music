@@ -19,6 +19,10 @@ use zeroize::Zeroizing;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[path = "jev-compare/comparison.rs"]
 mod comparison;
+#[path = "jev-compare/evidence.rs"]
+mod evidence;
+#[path = "jev-compare/journal.rs"]
+mod journal;
 #[path = "jev-compare/quality.rs"]
 mod quality;
 #[path = "jev-compare/report.rs"]
@@ -28,7 +32,7 @@ const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Parser)]
 #[command(
-    about = "Compare Jev question framing on fixed synthetic examples; never certifies a model"
+    about = "Compare Jev questions and evidence on synthetic examples; never certifies a model"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -37,6 +41,23 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Prepare data-source, representation and amount contrasts offline.
+    EvidencePlan { output: PathBuf },
+    /// Summarize a data experiment offline, preserving missing pairs and controls.
+    EvidenceReport { journal: PathBuf, output: PathBuf },
+    /// Execute only an exactly authorized synthetic data experiment, without retries.
+    EvidenceRun {
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Write the complete proposed requests without accessing a key or the network.
     Plan { output: PathBuf },
     /// Analyze a current comparison journal offline, including incomplete runs.
@@ -125,7 +146,12 @@ fn checkpoint(file: &mut File, value: &Value) -> Result<()> {
     Ok(())
 }
 
-async fn run(plan: &comparison::Plan, key_file: &Path, output: &Path) -> Result<()> {
+async fn run(
+    document: Value,
+    comparisons: &[comparison::Comparison],
+    key_file: &Path,
+    output: &Path,
+) -> Result<()> {
     let mut bytes = Zeroizing::new(Vec::new());
     File::open(key_file)?.take(4097).read_to_end(&mut bytes)?;
     let key = std::str::from_utf8(&bytes)?.trim();
@@ -141,11 +167,8 @@ async fn run(plan: &comparison::Plan, key_file: &Path, output: &Path) -> Result<
         .timeout(Duration::from_secs(60))
         .build()?;
     let mut journal = new_file(output)?;
-    checkpoint(
-        &mut journal,
-        &json!({"event":"plan","plan":plan.document()}),
-    )?;
-    for (index, case) in plan.comparisons.iter().enumerate() {
+    checkpoint(&mut journal, &json!({"event":"plan","plan":document}))?;
+    for (index, case) in comparisons.iter().enumerate() {
         // A crash after this checkpoint is an uncertain paid attempt. Never replay it.
         checkpoint(
             &mut journal,
@@ -161,7 +184,7 @@ async fn run(plan: &comparison::Plan, key_file: &Path, output: &Path) -> Result<
                 println!(
                     "{}/{} {} {}",
                     index + 1,
-                    plan.comparisons.len(),
+                    comparisons.len(),
                     case.case_id,
                     case.variant
                 );
@@ -182,7 +205,7 @@ async fn run(plan: &comparison::Plan, key_file: &Path, output: &Path) -> Result<
     }
     checkpoint(
         &mut journal,
-        &json!({"event":"complete","requests":plan.comparisons.len(),"certifies_model":false}),
+        &json!({"event":"complete","requests":comparisons.len(),"certifies_model":false}),
     )?;
     Ok(())
 }
@@ -224,6 +247,36 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::EvidencePlan { output } => {
+            let plan = evidence::build_plan()?;
+            let document = plan.document();
+            serde_json::to_writer_pretty(new_file(&output)?, &document)?;
+            println!(
+                "Evidence plan: {} requests; {} conservative input units; SHA-256 {}",
+                plan.comparisons.len(),
+                plan.reservation(),
+                fingerprint(&document)?
+            );
+        }
+        Command::EvidenceReport { journal, output } => {
+            let plan = evidence::build_plan()?;
+            let result = evidence::report::read(&plan, &journal)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &result)?;
+            println!(
+                "Evidence report saved; source sensitivity is not musical accuracy or certification."
+            );
+        }
+        Command::EvidenceRun {
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output,
+        } => {
+            let plan = evidence::build_plan()?;
+            plan.check_authorization(&plan_sha256, max_requests, max_input_units)?;
+            run(plan.document(), &plan.comparisons, &key_file, &output).await?;
+        }
         Command::Plan { output } => {
             let plan = comparison::build_plan()?;
             let document = plan.document();
@@ -276,7 +329,7 @@ async fn main() -> Result<()> {
         } => {
             let plan = comparison::build_plan()?;
             plan.check_authorization(&plan_sha256, max_requests, max_input_units)?;
-            run(&plan, &key_file, &output).await?;
+            run(plan.document(), &plan.comparisons, &key_file, &output).await?;
         }
     }
     Ok(())
