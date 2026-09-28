@@ -20,6 +20,7 @@ pub const MOOD_DECISIONS_CAPABILITY: &str = "mood-decisions/v1";
 pub enum TypedQuestion {
     Noul {
         instructions: Value,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         criteria: BTreeMap<String, Value>,
     },
     Choice {
@@ -62,7 +63,9 @@ impl TypedDecisionRequest {
                     instructions,
                     criteria,
                 } => {
-                    if criteria.keys().map(String::as_str).collect::<Vec<_>>() != ["false", "true"]
+                    if !criteria.is_empty()
+                        && criteria.keys().map(String::as_str).collect::<Vec<_>>()
+                            != ["false", "true"]
                     {
                         return Err(ModelTaskError::new("invalid_request"));
                     }
@@ -536,6 +539,53 @@ mod tests {
                 scores["solo_singing"].as_f64().ok_or("score")? >= 0.9
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn noul_criteria_are_optional_but_explicit_criteria_must_be_complete()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let wire = json!({"type":"noul","instructions":"Does the description mention singing?"});
+        let question: TypedQuestion = serde_json::from_value(wire.clone())?;
+        assert_eq!(serde_json::to_value(&question)?, wire);
+        let mut request = TypedDecisionRequest {
+            state: json!({"description":"A solo singer"}),
+            questions: BTreeMap::from([("singing".to_owned(), question)]),
+        };
+        request.validate()?;
+        assert_eq!(
+            typed_answers(&request, json!({"singing":{"type":"noul","noul":0.9}}))?["singing"],
+            TypedAnswer::Noul { noul: 0.9 }
+        );
+        for criteria in [
+            json!({"true":"yes"}),
+            json!({"false":"no"}),
+            json!({"true":"yes","false":"no","maybe":"uncertain"}),
+            json!({"true":true,"false":"no"}),
+        ] {
+            request.questions.insert(
+                "singing".to_owned(),
+                TypedQuestion::Noul {
+                    instructions: wire["instructions"].clone(),
+                    criteria: serde_json::from_value(criteria)?,
+                },
+            );
+            assert!(request.validate().is_err());
+        }
+        assert!(
+            serde_json::from_value::<TypedQuestion>(
+                json!({"type":"choice","instructions":"Which description matches?"})
+            )
+            .is_err()
+        );
+        request.questions.insert(
+            "singing".to_owned(),
+            TypedQuestion::Choice {
+                instructions: json!("Which description matches?"),
+                criteria: BTreeMap::new(),
+            },
+        );
+        assert!(request.validate().is_err());
         Ok(())
     }
 

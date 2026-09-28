@@ -19,6 +19,57 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev optional-criteria investigation prepared: 2026-09-28
+
+No new provider result is claimed. Production remains v9, restoring the v7
+questions; historical v7 quality is **55/66**, and the v8 candidate was rejected
+at 49/66. The complete v9 quality-plan document remains identical after this batch,
+including requests, inference identity, fixtures, thresholds and budget.
+
+The adapter previously required Noul criteria even though TypeSafe documents them
+as optional and recommends comparing questions with and without them
+([Noul guidance](https://docs.typesafe.ai/primitives/noul)). It now accepts omission
+while rejecting incomplete explicit criteria; Choice still requires options.
+This enables an experiment, not a demonstrated explanation for the misses.
+
+The new comparison changes **only initial-fit Noul criteria**, retaining exact
+production state, instructions, definitions, thresholds, Choice questions and
+partitioning. All 66 unchanged suite cases are accounted for: 64 have requests and
+two have no eligible evidence. It compares **7,760 Noul judgments**, including
+**151 required assignments**, every previously passing positive lost in v8, custom
+definitions and all applicable safety controls. Period Choice is unchanged and
+not scored by this diagnostic. Grounding and safety repeats require the full run.
+
+Prepared offline plan: **366 requests / 17,016,148 conservative input units**, pinned
+`jev-1.13.0`, synthetic data only, no retries. SHA-256:
+`d8a3642bb41e4d264545183351af8786dfb59289835f4a7c7dcee69133666c0f`.
+Local artifact: `target/jev-criteria-plan-20260928.json`. Prior paid approvals do
+not cover this plan; it has **not been executed**.
+
+The offline journal report lists required gains/losses, new forbidden candidates,
+resolved forbidden candidates and unscored threshold crossings. An unlisted tag
+is not automatically a negative, and a first-pass forbidden crossing is not yet a
+false-positive final tag. Missing/unpaired responses remain unknown; a stopped or
+interrupted journal cannot appear complete. No diagnostic pass rate or model
+certification is issued. The report was also exercised through its CLI with a
+simulated interrupted journal, without credentials or network access.
+
+Semantic inspection retains the distinction between clear descriptive misses
+(Arctic, temple, festival and probable storytelling), textual boundaries
+(city/shopping and court festivities), and acoustic benchmark assumptions. The
+two settled-texture cases have identical provider-visible musical state after
+loudness filtering; their different historical scores do not establish an audio
+sensitivity. High steady drive alone does not verify time-critical urgency.
+No vocabulary, fixture or threshold was changed to resolve those ambiguities;
+independent listening remains necessary.
+
+Local validation passes: **582 Rust tests** with real FFmpeg and the pinned voice
+model, **eight** developer-example tests, nine focused typed-adapter tests and
+seven architecture policy tests. Formatting, architecture, workspace check,
+strict workspace Clippy, doc tests and generated contracts pass. All 165 local
+links in the checked Assistant references resolve. No dependency or fuzz source
+changed; this batch does not add a provider, listening or production acceptance.
+
 ## Jev full v8 validation and rollback: 2026-09-28
 
 The authorized full run completed conformance, all unchanged v29 scenarios and
@@ -53,8 +104,8 @@ The broader inference fingerprint and exact-budget runner checks remain. There i
 one current engine, with no legacy fallback. Definitions, evidence, thresholds,
 fixtures and review requirements are unchanged. The historical 55/66 result is
 not a fresh v9 certification; quality repair and independent listening remain open.
-The old developer comparison is explicitly marked as a rejected historical
-experiment, not a recommended new paid run.
+The dimension-predicate comparison was rejected; its saved journals remain
+historical evidence, not a recommended new paid run.
 
 All **287 requests**, including conformance, received responses: **3,358,024 input**
 and **214,363 output tokens**, with **14,155,387 conservative units reserved**.

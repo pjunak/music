@@ -117,26 +117,37 @@ built-in synthetic cases and never loads application configuration or library da
 ```powershell
 cargo run --locked -p music-server --example jev-compare -- plan target/jev-framing-plan.json
 cargo run --locked -p music-server --example jev-compare -- quality-plan target/jev-quality-plan.json
+# After a separately authorized comparison has produced this journal:
+cargo run --locked -p music-server --example jev-compare -- report target/jev-framing-run.jsonl target/jev-framing-report.json
 ```
 
-Both commands are offline and refuse to overwrite their output. Comparison plans
-cover initial matching and selected observation support for fifteen fixed cases,
-including negative controls, with unchanged state, definitions, scopes and conflict
-questions. The current comparison reproduces the historical dimension-specific
-candidate rejected by full v8 validation; it is not a recommended new paid run.
-New experiments must include previously passing positives as well as failures and
-negative controls. Custom predicates remain unchanged. Interpret matching and support
-as separate outcomes, and do not adopt a support rewrite from matching results. Plans
-omit identical variants; prior experiments remain dated results in their journals,
-not the current plan. Full plans include conformance,
+These commands are offline and refuse to overwrite their output. Comparison plans
+account for every case in the current synthetic suite, including previously passing
+positives, failures, custom definitions and safety controls. The baseline is the
+exact production assessment plan. Its paired candidate removes only optional Noul
+yes/no criteria from initial fit questions; instructions, state, definitions,
+scopes, thresholds, Choice questions and partitioning stay identical. Cases with
+no eligible evidence are recorded without requests. This replaces the rejected
+dimension-specific experiment; old journals remain historical evidence.
+
+The offline report requires a journal matching the current comparison plan. It
+separates required-tag gains/losses, forbidden-tag threshold crossings, and changes
+to tags with no explicit expectation. Missing or unpaired responses stay unknown;
+partial runs cannot look complete. Duplicate, uncheckpointed, malformed or
+wrong-model responses are rejected. Reported token totals include reporting counts
+so absent usage cannot be mistaken for complete accounting. First-pass candidates
+are not final tags: capacity, grounding, period applicability, conformance and
+safety repeats are not evaluated by this experiment. No diagnostic pass rate is
+reported and no production adoption follows automatically. Full plans include conformance,
 the entire current quality suite, safety repeats, inference identity, scoring
 expectations and conservative total request/input bounds.
 
 After separate paid-run authorization, `run` or `quality-run` requires
 `--key-file` (a temporary secret outside source control), `--plan-sha256`,
 `--max-requests` and `--max-input-units`, plus a new `--output` journal or
-`--output-directory`. Use `--help` for the exact arguments. The full runner uses
-the plan's exact total request/input bounds, an isolated SQLite job database and
+`--output-directory`. Use `--help` for the exact arguments. Both runners require
+the plan's exact total request/input bounds before reading credentials. The full
+runner uses an isolated SQLite job database and
 the production planner/executor/scorer. A
 successfully completed job can still have `evaluation.passed: false`; neither
 command writes application acceptance. Stop after any uncertain request and

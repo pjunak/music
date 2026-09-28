@@ -150,7 +150,12 @@ families; cache reads/writes and reasoning tokens are reported only when supplie
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
 `music-jev-decisions/v9`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
-requirements. Jev receives one song's actual observation cards without a track ID.
+requirements. The typed adapter accepts Noul questions with no optional criteria;
+when present, criteria must contain both `true` and `false`. Empty criteria are
+omitted from the wire body. Choice options remain mandatory. Production v9 still
+uses its existing explicit criteria; the developer-only comparison tests omission
+without changing production questions or acceptance identity.
+Jev receives one song's actual observation cards without a track ID.
 Each question includes group meaning, the tag definition and its synonyms. Initial
 matching asks what the supplied descriptions or measurements express, separately
 from independent verification of the recording. Metadata cards identify supplied
