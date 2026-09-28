@@ -1,10 +1,13 @@
 # Song evidence, audio analysis, and mood dataset research
 
-Research date: 23 September 2026. Repository baseline: `3a68034`.
+Initial research date: 23 September 2026. Repository baseline: `3a68034`.
 This is a research proposal, not an adopted runtime contract or model certification.
-Source inspection and public documentation support the findings below. No private
+The [28 September reassessment](SONG_EVIDENCE_REASSESSMENT.md) gives the current
+recommendation after the real-music pilot and new offline rhythm controls. The
+implementation findings below describe the original baseline, not today's inventory.
+Source inspection and public documentation supported that initial work. No private
 library, listening labels, model weights, paid inference, or production service was
-used. Expected quality gains require the experiments described here.
+used in the initial research. Expected quality gains require measured experiments.
 
 The follow-up [implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md) specifies
 components, code owners, dependencies and completion gates. It governs implementation

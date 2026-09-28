@@ -7,6 +7,21 @@ Public model specifications and current source were inspected; native compatibil
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
 
+## Evidence reassessment — 28 September 2026
+
+The owner's rejection of the empty real-music results changes the next priority.
+The [research reassessment](SONG_EVIDENCE_REASSESSMENT.md) identifies missing learned
+instrument/style/mood evidence and reproduces misleading rhythmic development:
+a fixed 90 BPM pulse is classified as volatile. All 22 existing real-song summaries
+also say volatile; its causal effect on Jev is not yet measured. Existing EffNet
+predictions are numerically qualified but were absent from Jev's input.
+
+Next: repair the physical summary semantics, expose learned predictions in the
+offline pilot, then compare those inputs and one audio/text challenger with owner
+feedback. Input compaction is secondary to obtaining useful suggestions. This
+supersedes the earlier compaction-first recommendation below; it is a research
+decision, not a runtime change, new certification or paid-run authorization.
+
 ## Real-music input minimization — 28 September 2026
 
 The approved developer pilot is complete: 22 authorized recordings analyzed locally,
@@ -670,7 +685,9 @@ options survey; this plan determines the narrower implementation scope.
 
 An isolated release-build Rust probe on the Windows GNU host loaded all three artifacts.
 The ONNX encoder's real output names are `activations` and `embeddings`, and both heads
-use `activations`; the catalog JSON names describe a different exported graph interface.
+consume `embeddings`; their prediction outputs are `activations`. The catalog JSON
+names describe a different exported graph interface. The checked-in reference
+runner validates the encoder's `[1,1280]` embedding before passing it to each head.
 Use `with_ignore_value_info(true)` to let Tract infer intermediate shapes after binding
 batch size one; otherwise symbolic `batch_size` value-info conflicts with the concrete input.
 No graph operations or weights were rewritten. Encoder input is `[1,128,96]`, embedding
