@@ -146,7 +146,9 @@ recording and two semantic probes require **380 requests**, bounded at
 The separately approved run must use these exact bounds and a new output directory.
 No retries, adaptive follow-ups, production database access or tag writes occur.
 The native durable ledger checkpoints every attempt before provider cost.
-At preparation, this run is **awaiting separate paid approval**.
+The owner approved this exact plan, and it completed on 29 September 2026.
+Observed results are recorded below; the approval does not authorize a changed
+comparison or another paid run.
 
 The request body cap, exact plan reconstruction, source-content verification and
 fixed HTTPS target are checked before accessing the temporary key. Failed jobs
@@ -180,3 +182,110 @@ score changes and repeat variation separately. These 13 songs can guide the next
 iteration but cannot establish general accuracy, calibrated thresholds or playlist
 quality. Production numeric persistence, review UI and playlist weighting follow
 only after this experiment demonstrates useful graded judgments.
+
+## Observed run, 29 September 2026
+
+All 380 requests succeeded on pinned `jev-1.13.0`, including both semantic probes
+and the preselected repeats. The 7,454 Score answers cover 7,176 primary song/tag
+judgments, 276 repeat judgments, and two probes. The validated result and journal
+agree on every question and score. No library tags were written.
+
+The provider reported 2,576,879 input and 121,050 output tokens, with no unknown
+usage. At the published $0.042 per million input tokens and free outputs, the
+whole experiment is approximately **$0.10823**. These are reported API tokens and
+a list-price calculation, not an account invoice. [Pricing](https://docs.typesafe.ai/models).
+
+| Evidence recipe | Mean input tokens / song | Estimated USD / 1,000 songs |
+| --- | ---: | ---: |
+| Nine labels (`labels3`) | 42,604.7 | 1.7894 |
+| 24 labels (`labels8`) | 45,699.8 | 1.9194 |
+| 24 labels plus physical observations | 49,058.2 | 2.0604 |
+| 24 labels plus temporal observations | 54,220.4 | 2.2773 |
+
+These primary averages exclude repeats and probes. They cover all 138 tags on
+the small selected corpus and exclude local extraction cost. They are not a
+prediction of exact future billing on arbitrary recordings.
+
+The output now contains varied emotional associations, including dark/ominous
+and majestic/heroic clusters. Graded output has not solved all listening errors:
+the owner-described celebration recording still ranks calm above joyful,
+festive and dancing, and the described light whimsical associations remain weak.
+Those qualitative disagreements need better evidence or better questions; merely
+displaying more tags is not success.
+
+Increasing nine labels to 24 raises mean mood scores by 4.4 percentage points
+and changes which tags cross the display cutoff. Physical and temporal additions
+each produce a mean absolute mood difference of 2.3 points from the 24-label arm.
+These are output changes, not measured accuracy gains. Endpoint repeats have
+maximum changes of 4.0 and 3.75 points, with nine total cutoff crossings. Small
+individual differences therefore need cautious interpretation.
+
+The common 25% cutoff also admits 30–39 of 42 scene tags per song in the 24-label
+arm. The scene rubric currently rewards broad compatibility; owner review should
+help distinguish useful scene recommendations from merely possible uses. Preserve
+the raw scores while testing group-specific wording and eventual display rules.
+
+Private artifacts remain under the ignored experiment directory: frozen plan,
+durable request journal, result, complete owner report, concise listening sheet,
+exact calm-question example, and computed summary. None is a production model
+certificate or independently labelled test set. The four-way comparison is ready
+for owner feedback; no winning recipe is claimed yet.
+
+## Exact question example and reuse
+
+For the `calm` mood tag, the instructions contain this task:
+
+> Rate expression of this emotional musical character, not how certain the evidence is. Quietness alone does not establish calm; setting and instrument names do not establish emotions.
+
+Its vocabulary definition is “Peaceful, settled, gentle, or emotionally untroubled
+tone.” The exact five level descriptions are:
+
+| Normalized level | Description |
+| --- | --- |
+| 0% | The described musical character conflicts with this mood or gives no recognizable expression of it. |
+| 25% | This mood is a faint secondary color; a listener could notice it behind the main musical character. |
+| 50% | This mood is a recognizable part of the musical character alongside other emotions. |
+| 75% | This mood strongly characterizes the music and would be a useful prominent listening description. |
+| 100% | This mood defines the music's central emotional character and is an especially clear description of it. |
+
+An additional evidence rule limits judgments to supplied observations, treats
+learned labels as fallible and missing labels as unknown, and permits compatible
+tags to coexist. Score can return positions between levels; code divides its
+0..4 result by four. These percentages express rubric position, with confidence
+retained separately. [Score](https://docs.typesafe.ai/primitives/score).
+
+Question descriptions are already reused as code templates. API reuse has
+different boundaries, verified against the current docs and public schema:
+
+- Multiple questions share one `state`, read once within a request. This pilot
+  already batches up to 25 questions, producing seven requests per song/recipe.
+  Logical tag groups can keep distinct question rubrics while sharing a request;
+  the group boundary does not inherently require a network boundary.
+  [State](https://docs.typesafe.ai/concepts/state),
+  [multiple questions](https://docs.typesafe.ai/primitives#ask-multiple-questions-together).
+- Multiple songs can be put in structured state, with one question explicitly
+  targeting each song/tag pair. A single Score still returns one scalar, not one
+  per array item. Question IDs are routing keys, not model-visible instructions,
+  so the target song must be named inside each question. This is an available
+  design, not a tested optimization in this run.
+  [API](https://docs.typesafe.ai/api),
+  [field references](https://docs.typesafe.ai/primitives#reference-specific-fields).
+- The public API documents no persistent question-template ID, shared-criteria
+  reference, or cross-request cache discount. A code constant still serializes
+  its descriptions into each Score question. Moving a common rule into shared
+  state is possible, but abbreviated references to rubric levels introduce
+  indirection and must be evaluated before replacing self-contained levels.
+  [Public schema](https://api.typesafe.ai/openapi.json),
+  [known limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
+
+The next economical comparison should test shorter self-contained questions and
+common evidence rules supplied once, then pack more tag questions for the same
+song under the provider's 64k total / 32k state-plus-longest-question token limits.
+An offline transformation of the 364 primary request bodies moved each identical
+evidence rule from every question to shared state. Serialized size fell from
+9,877,125 to 7,584,029 bytes (23.2%). This measures byte reduction only; it does not
+measure billed tokens or establish that scores remain equivalent.
+Multi-song batches should be tested for song-order effects and evidence mixing.
+Large unrelated state can reduce Jev accuracy. No batching or wording change was
+introduced mid-experiment, and no billing savings from those untested changes are
+claimed.
