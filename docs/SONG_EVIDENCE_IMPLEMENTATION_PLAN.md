@@ -9,7 +9,28 @@ The status below identifies delivered contracts; conditional stages remain propo
 
 ## Jev evidence inputs experiment — 28 September 2026
 
-Prepared a controlled data experiment with 14 variants, unchanged questions and
+**Completed: 1,616/1,616 approved requests**, 19,158,055 input tokens and an estimated
+US$0.8046 input cost, with no retries or unresolved attempts. Lossless compaction
+is the preferred next candidate: 139/151 -> 142/151 required first-pass assignments,
+no lost required candidates or explicit forbidden threshold crossings, and 0.68%
+fewer paired input tokens. Two of its three gains are within observed repeat variation. This is not a
+new 66-case quality result. Production remains v9 and accepted progress stays about
+**80%** until quality, independent listening and production acceptance pass.
+
+The data supports keeping complementary album/descriptive-genre content and
+temporal trajectories. Repetition lost thirteen candidates while gaining two;
+identity expansion and synthetic source relocation regressed. No tested input
+representation repaired the acoustic-only calm/urgent misses. The small mixed
+sample does not support dropping audio analysis or qualifying actual catalog data.
+
+Next: promote only the exact lossless initial-state compaction, advance its
+inference identity, then run separately approved full native validation. Treat
+section filtering as a later, separate experiment; qualify acoustic expectations
+through independent listening before adding semantic heads or more raw features.
+The [complete paired results and implementation sequence](AI_ACCEPTANCE.md#jev-evidence-source-and-amount-results-2026-09-28)
+record every arm, token effects, period limitations and the unresolved evidence gap.
+
+The controlled data experiment used 14 variants, unchanged questions and
 all current synthetic cases. It separates source omissions/combinations, acoustic
 detail, numeric versus named bands, reversible compaction, repeated detail and
 source-attribution probes. Six identical-input controls expose variation. No-op
@@ -19,14 +40,13 @@ Exact provider bodies are deduplicated across cases/arms, saving 49 calls while
 preserving all case expectations. Shared answers cannot masquerade as independent
 observations, and total usage counts each physical response once.
 
-The complete offline plan is **1,616 requests / 82,194,553 conservative input
-units**. It needs a separate paid-run budget; no new Jev result is claimed.
+The approved offline plan bounded **1,616 requests / 82,194,553 conservative input
+units**; the run reproduced its exact hash and the validated report accounts for
+all 1,471 logical pairs and deduplicated usage.
 The [acceptance record](AI_ACCEPTANCE.md#jev-evidence-source-and-amount-experiment-prepared-2026-09-28)
 contains the exact hash, matrix, source limitations and conservative cost estimate.
 The current suite has only three mixed text/audio cases and no catalog cards;
-synthetic source relocation is not real catalog validation. Production v9 stays
-unchanged. Overall accepted progress remains approximately **80%** until quality,
-independent listening and production acceptance are complete.
+synthetic source relocation is not real catalog validation.
 
 Local checks pass: **12** experiment tests, including shared-answer expectation and
 usage accounting, incomplete responses, exact approval and period-report regressions;
@@ -618,8 +638,8 @@ options survey; this plan determines the narrower implementation scope.
 | JSONL listening pilot + grouped bootstrap | Small/result-derived sample; assisted/excerpt scores mixed with independent listening | Explicit inventory, frozen duration/groups, read-only readiness, independent whole-recording scoring, marked diagnostics and paired comparison | Use readiness to finish independent judgments; evaluate development, then confirmation | Essential: prevents selection/listening-scope bias and exposes unfinished listening before model calls; no dataset application. |
 | Discogs-EffNet + matching MTG-Jamendo mood/theme and instrument heads | Not used | Whole-track native checks pass; original TensorFlow pairing passes on 71 patches | Qualify production lifecycle/resources and listening usefulness before adoption | Conditional high value: verified graph pairing and label identity support a pilot; they do not certify mood quality. |
 | tract-onnx / ort | Neither in production | Tract 0.23.7 passes isolated whole-track streaming and summary comparison | Prefer Tract if fully qualified; native ORT only if required | Conditional infrastructure: retain one production runtime; native worker integration still requires admission gates. |
-| TypeSafe Jev | v5 reached 15/66; v6 45/66; v7 55/66 | V9 restores v7 questions; criteria removal rejected with zero gains, four losses and one forbidden candidate | Keep explicit criteria; audit literal metadata misses, qualify acoustics, then independent listening and full validation | Requested high priority: no fresh certification; preserve quality and safety gates. |
-| Bounded Jev developer comparison/quality runner | Manual logs, then limited question comparisons | Criteria-removal comparison rejected; source/amount experiment prepared with shared journal guards, skipped no-ops and repeat controls | Run only the separately approved data plan, inspect paired tradeoffs, then fully validate promising changes | High debugging value: determine useful evidence without changing questions or adding a production service/dependency. |
+| TypeSafe Jev | v5 reached 15/66; v6 45/66; v7 55/66 | V9 restores v7 questions; 14-arm data screen favors lossless compaction but acoustic-only misses remain | Keep explicit criteria; qualify exact compaction with full native validation, then independent listening | Requested high priority: 142/151 first-pass assignments is not fresh certification; preserve quality and safety gates. |
+| Bounded Jev developer comparison/quality runner | Manual logs, then limited question comparisons | Completed the approved 1,616-request source/amount screen with deduplicated usage and repeat controls | Keep for separately approved controlled investigations and complete native validation | High debugging value: reject redundant evidence and preserve useful source/trajectory content without adding a production service/dependency. |
 | LAION larger_clap_music | Not used | Research option | Compare only for a remaining semantic/retrieval gap | Deferred: flexible text/audio matching; similarity is not probability and runtime cost must be justified. |
 | MSD-MusiCNN + DEAM head | Not used | Research option | Probe only if affect dimensions remain weak | Deferred: valence/arousal evidence; requires its own matching encoder, not the existing voice output. |
 | Beat This! | Not used | Research option | After a demonstrated failure of simpler rhythm repair | Deferred: beat/downbeat detail only when useful to selection; adds native integration and resource work. |

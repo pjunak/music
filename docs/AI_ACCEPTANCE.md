@@ -19,14 +19,146 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Jev evidence-source and amount results: 2026-09-28
+
+The approved experiment completed **1,616/1,616 requests** from `d8c590c` against
+pinned `jev-1.13.0`, with **19,158,055 input / 1,290,285 output tokens**. Every
+attempt has one response; there were no retries, unresolved attempts or missing
+usage counts. All 1,471 logical pairs are complete. At the verified
+[$0.042/M input rate](https://docs.typesafe.ai/models), the estimated charge is
+**US$0.8046**, with output free, within the approved 82,194,553-unit allowance.
+This is an input-cost calculation, not an invoice or a new quality certification.
+
+**Decision:** lossless card compaction is the preferred next candidate for full
+validation. Retain complementary album and descriptive genre evidence, retain
+temporal trajectories, and avoid repeated evidence or a blanket addition of
+identity fields. No production projection, inference identity, vocabulary, fixture,
+threshold or acceptance state changed. Historical full quality remains 55/66;
+these first-pass candidate counts do not replace that result.
+
+### Complete paired screen
+
+Each row compares its own matched baseline, not another row's denominator.
+"Required" counts non-period tag assignments crossing the unchanged 0.70 initial
+fit threshold, before capacity and grounding. Different cases and variants can
+share a physical request; the report exposes all shared indices and expectations.
+Paired token changes are relative to that row's baseline and must not be added
+together as total spend. No explicit forbidden Noul candidate crossed 0.70 in any
+arm. This does not certify final tags, period applicability or the full safety gate.
+
+| Input variant | Paired cases | Required retained: baseline -> variant | Gained / lost | Paired input tokens |
+|---|---:|---:|---:|---:|
+| Compact cards, all facts retained | 64 | 139/151 -> 142/151 | 3 / 0 | -0.68% |
+| Three copies of the same cards | 64 | 139/151 -> 128/151 | 2 / 13 | +7.34% |
+| Add artist/origin/duration/unverified BPM | 58 | 135/147 -> 134/147 | 2 / 3 | +1.22% |
+| Album only | 55 | 138/147 -> 80/147 | 3 / 61 | -1.39% |
+| Genre only | 55 | 138/147 -> 71/147 | 0 / 67 | -1.39% |
+| Genre text presented as catalog data | 55 | 138/147 -> 128/147 | 3 / 13 | +0.85% |
+| Genre text presented as a community label | 55 | 138/147 -> 125/147 | 1 / 14 | +0.90% |
+| Metadata only, mixed-source cases | 3 | 6/8 -> 7/8 | 1 / 0 | -14.06% |
+| Audio only, mixed-source cases | 3 | 6/8 -> 0/8 | 0 / 6 | -0.77% |
+| Without sections, trajectories retained | 11 | 7/12 -> 9/12 | 2 / 0 | -3.68% |
+| Without trajectories, sections retained | 11 | 7/12 -> 6/12 | 0 / 1 | -8.20% |
+| Without voice card | 11 | 7/12 -> 8/12 | 1 / 0 | -0.85% |
+| Numbers without derived bands | 11 | 7/12 -> 8/12 | 1 / 0 | -4.43% |
+| Bands replacing binned magnitudes | 11 | 7/12 -> 7/12 | 0 / 0 | -1.98% |
+| Unchanged-input repeat control | 6 | 11/15 -> 12/15 | 1 / 0 | 0.00% |
+
+### What the data supports
+
+- **Musical descriptions and setting descriptions do different jobs.** Within
+  the metadata-only cohort, combined evidence retained 61/62 required mood
+  assignments; genre-only retained 59/62 and album-only 9/62. For settings the
+  corresponding counts were 30/33, 1/33 and 30/33; for scenes, 37/40, 6/40 and
+  34/40. These fixtures put rich phrases such as "jubilant folk for a holiday
+  celebration" in `genre`. They support retaining descriptive musical content,
+  not a claim that a bare genre label predicts mood or that field names determine
+  meaning. Album descriptions supply useful tabletop-use context in these cases.
+- **Compaction has the best observed tradeoff, with limited evidence of gains.**
+  It preserves all values, timing, reliability, source attribution and ending data,
+  removes redundant card IDs and shares the repeated band explanation. Its gains
+  were Arctic 0.68 -> 0.71, escape 0.66 -> 0.76 and festive 0.66 -> 0.70. The 18
+  repeat-control requests produced 654 Noul comparisons, median absolute movement
+  0.00 and maximum 0.06; Arctic crossed 0.68 -> 0.70 with no input change. Thus two
+  compaction gains fall within observed repeat variation. The escape change is
+  larger, but this small control set is not a confidence interval or proof of
+  statistical significance. Compaction reduced paired input tokens only 0.68%;
+  its main rationale is simpler evidence presentation, not substantial cost savings.
+  Mood-only retention moved 65/70 -> 66/70; festive was its sole mood gain.
+  Triplication left mood at 65/70, with all thirteen losses in setting/scene tags.
+  This screen does not demonstrate a robust improvement in mood recognition.
+- **Temporal change is useful evidence.** Removing trajectories dropped the
+  acoustic volatile-development case's `chaotic` score from 0.74 to 0.26. Keep
+  dynamics and end-state summaries. Removing section cards recovered escape
+  (0.66 -> 0.77) and festive (0.66 -> 0.70), while retaining trajectories including
+  their ending. This motivates a separately tested smaller initial-match view;
+  it does not justify deleting sections from local analysis or conflict review.
+- **The current physical proxies leave a semantic gap.** Removing metadata from
+  the three mixed cases lost all six previously retained required assignments.
+  No tested variant recovered the unresolved acoustic-only calm or urgent
+  expectations: the settled input stayed below 0.70 (at most 0.68), and sustained
+  drive reached at most 0.42 for urgent. The two settled fixtures share identical
+  projected evidence and are not independent confirmations. Renaming numeric
+  ranges as bands did not repair these misses. The expectations still need
+  independent listening qualification; the experiment neither proves that the
+  measurements establish those emotions nor that audio analysis is unnecessary.
+- **Extra context is not automatically helpful.** Triplicated evidence gained
+  two required candidates but lost thirteen. Adding identity fields gained two
+  and lost three. Keep identity for source matching; neither variant warrants
+  broadening initial tag matching. The source-relocation probes also regressed,
+  but contain copied synthetic phrases, not actual retrieved catalog records.
+  Do not relabel sources to inflate support or infer MusicBrainz/Last.fm retrieval
+  quality from this test. Preserve each observation's real source and scope.
+
+Period Choice was analyzed separately. Compact cards changed one low-confidence,
+unrequired relative winner in the castle-procession negative case (industrial
+0.35 -> medieval 0.37); no independent applicability Noul or grounding ran.
+There is no demonstrated period-tagging improvement from compaction.
+
+The 58 default-vocabulary cases averaged **38,518 initial-match input tokens**
+(median 37,351; range 37,330-45,594), about **US$0.00162 per case** at the same
+rate. These are logical per-case totals using the experiment's common partitions;
+shared requests are reused in actual spend. They exclude later support/conflict
+checks and cannot be presented as total production song-tagging cost. The five
+small custom-vocabulary cases averaged 1,447 input tokens; the one maximum-size
+case used 52,191. Vocabulary/question coverage is a major part of cost.
+
+### Next implementation sequence
+
+1. Promote only the exact lossless compaction into the initial assessment state
+   projection in `crates/music-application/src/assistant/model_jev.rs`, leaving
+   source facts and grounding inputs intact. Advance inference identity; test
+   reconstruction, missingness, provenance, ending data and stale-result rejection.
+2. Prepare and separately authorize full native conformance, all 66 scenarios and
+   safety repeats using actual production packing. Keep the 90% quality gate and
+   all safety requirements. Do not combine compaction with untested omissions or
+   describe its 142/151 first-pass count as full acceptance.
+3. If the remaining evidence burden warrants it, test a separate initial-match
+   view retaining album/genre, trajectories, coverage and reliability while keeping
+   sections available for grounding and local use. The combined compact/filtered
+   view has not been tested, and the mixed-source sample has only three cases.
+4. Qualify the calm/urgent acoustic expectations through the existing independent
+   listening pilot. Only then evaluate whether the already-probed matched
+   Discogs-EffNet/MTG-Jamendo semantic heads supply missing useful evidence. Avoid
+   adding more raw features, a new annotation platform or a source combiner without
+   a measured need and suitable independent labels.
+
+Artifacts are local and ignored: `target/jev-evidence-results-20260928.jsonl`,
+`target/jev-evidence-report-20260928.json` and the independent arithmetic summary
+`target/jev-evidence-analysis-20260928.json`. The validated report matches plan
+`d539166ea17681eb404591b0aec65ba5ed0f4a285bbe3639b00a957b15defbee`.
+Journal SHA-256: `119f069c8efb8c9cda2ca03c109da62329a44e876d25e0059ff599ab248eb701`.
+Report SHA-256: `ab2dcd112879a0729503f43b97e8cf49168a2a95ddbf8373a1cb7167f00f6e8e`.
+The current engine remains v9; no new production model certification is recorded.
+
 ## Jev evidence-source and amount experiment prepared: 2026-09-28
 
 The owner requested controlled additions, omissions and input-size comparisons.
 The developer runner now prepares **14 data variants plus current input** across
 all 66 unchanged synthetic cases. Questions, explicit criteria, definitions,
 thresholds and expected tags stay fixed. The two cases with no eligible production
-evidence remain accounted for without calls. No provider run has been made for
-this experiment, and no best data combination is claimed.
+evidence remain accounted for without calls. At preparation no provider run had
+been made; the completed results and qualified conclusions are recorded above.
 
 | Variant | Question investigated |
 |---|---|
@@ -75,8 +207,8 @@ Local artifact: `target/jev-evidence-plan-deduplicated-20260928.json`. At the pu
 [$0.042 per million input tokens](https://docs.typesafe.ai/models), treating every
 reserved unit as a billed token is approximately **US$3.45**; actual usage is
 expected to be lower and must be read from responses. Output is listed as free.
-This is a separately reviewable budget; previous completed-run approvals do not
-authorize it.
+This separately reviewed budget was explicitly approved before execution;
+previous completed-run approvals were not reused.
 
 Offline coverage inspection finds **52 metadata-only, nine audio-only and three
 mixed cases** among the 64 that make requests. None contains existing catalog
@@ -104,7 +236,7 @@ Production remains v9, with no runtime, vocabulary, fixture, provider dependency
 quality threshold or acceptance change. The existing no-criteria experiment and
 full native quality runner retain their exact contracts. The shared checkpoint
 validator now serves both developer comparisons. Local validation is recorded in
-the implementation plan; live evidence remains pending the separate budget.
+the implementation plan; the separately approved live results are recorded above.
 
 ## Jev optional-criteria comparison rejected: 2026-09-28
 
