@@ -1712,7 +1712,7 @@ dependencies = [
 name = "music-application"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "music-domain",
  "rand 0.9.5",
  "schemars",
@@ -1782,7 +1782,7 @@ name = "music-server"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "clap",
  "dotenvy",
  "flate2",
@@ -1820,7 +1820,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "argon2",
- "base64 0.22.1",
+ "base64 0.23.1",
  "music-application",
  "music-domain",
  "serde",
