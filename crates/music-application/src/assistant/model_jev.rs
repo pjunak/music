@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 mod diagnostics;
 pub use diagnostics::JevTaggingDiagnostics;
 
-pub const JEV_TAGGER_CONTRACT: &str = "music-jev-decisions/v9";
+pub const JEV_TAGGER_CONTRACT: &str = "music-jev-decisions/v10";
 const FIT_THRESHOLD: f64 = 0.70;
 const GROUNDING_THRESHOLD: f64 = 0.70;
 const PERIOD_CHOICE_THRESHOLD: f64 = 0.70;
@@ -84,6 +84,8 @@ pub fn jev_inference_identity() -> Value {
         GROUNDING_THRESHOLD,
         PERIOD_CHOICE_THRESHOLD,
         "physical-bands/v1",
+        super::AUDIO_PREDICTION_CONTRACT,
+        super::AUDIO_PREDICTION_MEANING,
         1.0 / 3.0,
         2.0 / 3.0,
         period_question(&[("period".to_owned(), tag.clone())], &group),
@@ -198,7 +200,7 @@ fn metadata_support_question(
     tag: &TagVocabularyEntry,
     observation: &Value,
 ) -> TypedQuestion {
-    // Descriptive metadata is a claim whose meaning can be judged directly.
+    // Metadata and learned descriptors are claims whose meaning can be judged directly.
     // It remains tentative evidence; conflict judgments still see the whole track.
     noul(
         json!({
@@ -246,7 +248,10 @@ fn grounding_questions(
         let support_question = if matches!(
             observation["id"].as_str(),
             Some("metadata.album" | "metadata.genre")
-        ) {
+        ) || observation["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("prediction."))
+        {
             metadata_support_question(group, meaning, tag, observation)
         } else {
             noul(
@@ -283,6 +288,15 @@ fn grounding_questions(
 }
 
 fn observation(input: &Value, id: &str) -> Option<Value> {
+    if let Some(kind) = id.strip_prefix("prediction.") {
+        return input
+            .get("audio_predictions")?
+            .get("sources")?
+            .as_array()?
+            .iter()
+            .find(|source| source["kind"].as_str() == Some(kind))
+            .cloned();
+    }
     if let Some(key) = id.strip_prefix("metadata.") {
         return input.get(key).cloned();
     }
@@ -329,7 +343,9 @@ fn physical_band(value: &Value) -> Option<&'static str> {
 
 fn observation_card(input: &Value, id: &str, value: Value) -> Value {
     let mut card = json!({"id":id,"value":value});
-    let meaning = if let Some(axis) = id.strip_prefix("audio.trajectories.") {
+    let meaning = if id.starts_with("prediction.") {
+        super::AUDIO_PREDICTION_MEANING
+    } else if let Some(axis) = id.strip_prefix("audio.trajectories.") {
         card["measurement_reliability"] = input
             .pointer(&format!("/context_evidence/measurement_reliability/{axis}"))
             .cloned()
@@ -1069,7 +1085,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(identity[0], "music-jev-decisions/v9");
+        assert_eq!(identity[0], "music-jev-decisions/v10");
         Ok(())
     }
 

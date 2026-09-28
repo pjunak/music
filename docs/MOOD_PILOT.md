@@ -230,22 +230,35 @@ It does not invent descriptions from filenames or folders. Voice is explicitly
 not configured and catalog evidence is not retrieved. This is an isolated native
 baseline, not an export of the operator's configured production library.
 
+The offline [learned exporter](../tools/jev-audio-evidence.mts) reuses the pinned
+EffNet encoder with its mood/theme, instrument and style outputs. Exact graph,
+metadata and ordered-label hashes prevent mixing model families or score indices.
+It keeps all 496 labels and full precision locally; the pilot selects bounded
+ranked lists, rounding the optional provider scores to four decimal places. Input
+PCM and source audio need an explicit verified hash pairing. Coverage is complete;
+opening/ending scores describe the first/last tenth, while `top_rank_fraction` is
+time spent among a head's top three predictions, not presence probability.
+Style graph shape and label identity are checked; original-export style numerical
+parity remains a qualification gap. No weights are bundled or installed by the app.
+
 ```powershell
 cargo run --locked -p music-server --example jev-compare -- pilot-analyze private-paths.json private-corpus.json --ffmpeg ffmpeg --ffprobe ffprobe
-cargo run --locked -p music-server --example jev-compare -- pilot-plan private-corpus.json private-plan.json --tracks 1,2,3
+cargo run --locked -p music-server --example jev-compare -- pilot-plan private-corpus.json private-plan.json --predictions private-audio-predictions.json --tracks 1,2,3
 ```
 
 Select 1..8 distinct recordings before inspecting predictions. Freeze and record
 the sampling rule; preserve unexposed recordings for later independent work. The plan
-uses the shipped default vocabulary and three arms: current production input;
-lossless compaction of initial assessment cards; and that same compaction with section
-observations omitted from both initial matching and subsequent grounding. Trajectories,
-endings, reliability and coverage remain. Original local section data stays in the
-corpus. All tag definitions, questions, candidate limits, period checks and thresholds
-stay fixed. Native request packing can differ when omissions allow smaller requests;
+uses the shipped default vocabulary and eight arms: corrected physical evidence;
+mood/theme predictions; instrument/style predictions; all three learned sources;
+physical plus all learned sources; that combination limited to three labels per head;
+the six-label combination with raw mean scores; and that combination with temporal
+scores. The default learned view keeps six ranked labels per head. All arms use the
+same lossless assessment compaction. Source and score omissions apply to matching and
+grounding; originals stay in the local corpus. Questions, candidate limits, period
+checks and thresholds stay fixed. Native request packing can differ when omissions allow smaller requests;
 this tests complete input recipes and their cost, not only a constant-packing effect.
 
-The first and last selected recordings receive deliberate current-input repeats
+The first and last selected recordings receive deliberate combined-input repeats
 (one repeat for a single-recording pilot). Arm order rotates by recording. The plan
 includes synthetic native conformance, all initial request bodies, full-pipeline
 worst-case bounds, vocabulary, engine identity and the exact disclosure. Review the
@@ -272,6 +285,17 @@ zero or initial-fit scores into final accepted tags. Report each suggested mood 
 session-use tag for the owner to mark useful, wrong or uncertain, and solicit missing
 tags separately. More tags alone do not establish improvement. The existing JSONL
 listening protocol remains the authority for later independent qualification.
+
+Render the private rating sheet after a run with the offline reporter:
+
+```powershell
+node tools/jev-pilot-report.mts --plan private-plan.json --result private-run/result.json --journal private-run/requests.jsonl --output private-ratings.md
+```
+
+It checks case/track membership and the attempt journal, separates primary usage
+from repeat/conformance controls, and groups identical tag sets per song. Missing,
+failed and empty results stay distinct; unknown usage stays unknown. The sheet
+records feedback without changing the frozen predictions or accepted tags.
 
 ## Assisted or excerpt diagnostics
 

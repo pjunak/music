@@ -22,7 +22,7 @@ export interface ReferenceOptions {
   output: string;
   signal?: AbortSignal;
 }
-export interface ReferenceScores { embeddings: number[]; mood: number[]; instrument: number[] }
+export interface ReferenceScores { style: number[]; embeddings: number[]; mood: number[]; instrument: number[] }
 export interface ReferenceRuntime {
   header: Record<string, unknown>;
   transform(samples: Float32Array): Float32Array;
@@ -268,12 +268,13 @@ export async function withReferenceRuntime<T>(options: ReferenceOptions, consume
         const encoder = session("encoder"), moodHead = session("mood"), instrumentHead = session("instrument");
         encoded = await encoder.run({ [encoder.inputNames[0]]: input });
         checkCancelled(signal);
+        const style = outputValues(encoded.activations, [1, 400], true);
         const embeddings = outputValues(encoded.embeddings, [1, 1280]);
         mood = await moodHead.run({ [moodHead.inputNames[0]]: encoded.embeddings });
         checkCancelled(signal);
         instrument = await instrumentHead.run({ [instrumentHead.inputNames[0]]: encoded.embeddings });
         checkCancelled(signal);
-        return { embeddings, mood: outputValues(mood.activations, [1, 56], true),
+        return { style, embeddings, mood: outputValues(mood.activations, [1, 56], true),
           instrument: outputValues(instrument.activations, [1, 40], true) };
       } finally {
         for (const tensor of new Set([input, ...Object.values(encoded ?? {}),

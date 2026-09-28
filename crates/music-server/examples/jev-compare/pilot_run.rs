@@ -208,7 +208,7 @@ impl JobHandler for Handler {
                     .find(|v| v["input"]["track_id"] == case["track_id"])
                     .ok_or_else(|| error("recording"))?;
                 let arm = case["arm"].as_str().ok_or_else(|| error("arm"))?;
-                let task = task(&recording["input"], arm).map_err(error)?;
+                let task = task(recording, arm).map_err(error)?;
                 let mut trace = task.diagnostics();
                 let result = task
                     .execute(
@@ -380,7 +380,8 @@ mod tests {
                 transport: fake.clone(),
                 journal: Arc::new(Mutex::new(new_file(&journal)?)),
             });
-            let result = quality::run_job(handler, directory.path(), "test-private-pilot", 8).await;
+            let result =
+                quality::run_job(handler, directory.path(), "test-private-pilot", 18).await;
             let records = std::fs::read_to_string(&journal)?
                 .lines()
                 .map(serde_json::from_str::<Value>)
@@ -400,7 +401,7 @@ mod tests {
             } else {
                 let result = result?.ok_or("result")?;
                 let rows = result["rows"].as_array().ok_or("rows")?;
-                assert_eq!(rows.len(), 8);
+                assert_eq!(rows.len(), 18);
                 for row in rows {
                     assert!(row["profiles"].get(row["track_id"].to_string()).is_some());
                 }

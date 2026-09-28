@@ -22,7 +22,8 @@ function pcm(root: string, values: Float32Array | number[], name = "audio.pcm") 
   return { file, bytes };
 }
 function scores(value: number): ReferenceScores {
-  return { embeddings: Array(1280).fill(value), mood: Array(56).fill(value), instrument: Array(40).fill(value) };
+  return { style: Array(400).fill(value), embeddings: Array(1280).fill(value),
+    mood: Array(56).fill(value), instrument: Array(40).fill(value) };
 }
 const runtime: ReferenceRuntime = { header: {}, transform: (frame: Float32Array) => new Float32Array(96).fill(frame[256]), infer: async () => scores(0.5) };
 

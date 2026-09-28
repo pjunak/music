@@ -43,6 +43,7 @@ uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+serde_json = { workspace = true, features = ["raw_value"] }
 tokio-tungstenite.workspace = true
 
 [lints]

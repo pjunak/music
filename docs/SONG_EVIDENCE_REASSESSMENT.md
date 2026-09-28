@@ -1,7 +1,8 @@
 # Audio evidence reassessment after the empty Jev pilot
 
 Research date: 28 September 2026. Source baseline: `fcc32a0`.
-This changes the recommended next experiment, not the production contract.
+The initial research changes the recommended next experiment. The implementation
+and offline follow-up below records work subsequently completed against that plan.
 The investigation inspected the completed private pilot, existing audio-model
 reference results, current code and upstream documentation, and ran five new
 offline synthetic controls. No new paid inference, audio upload or model download
@@ -222,6 +223,55 @@ threshold nor forcing one tag repairs absent evidence.
 The existing safety/conformance suite remains necessary. Model quality requires
 listening outcomes as well. All paid comparisons need their own concrete reviewed
 plan; this research did not execute or prepare a new paid request batch.
+
+## Implementation and offline follow-up, 28 September 2026
+
+The rhythm-development repair now summarizes onset activity in duration-weighted
+four-second observations, preserving the partial ending. Five constant-pulse
+controls and three shifted phases per tempo are steady; separate regressions retain
+activity jumps, gradual builds, silence and short recordings. All 22 originals were
+reanalyzed and their file hashes stayed unchanged. Their rhythm shapes changed from
+22 volatile to 16 alternating, two arch, one falling and three mixed. This removes
+the demonstrated pulse-alignment defect; musical interpretation still needs listening.
+
+The offline exporter now produces whole-track instrument, mood/theme and style
+observations from the existing encoder and two heads. Its 5,503 patches cover all
+22 recordings. Original/decoded audio bindings, graph hashes, taxonomy hashes and
+exact ordered-label hashes are checked. Mood/instrument maxima match the previous
+reference exactly; maximum mean difference is 3.33e-16 from summation order.
+Style activations have the expected 400 dimensions and label order; original-export
+numerical parity for that output remains outstanding. No inference dependency or
+weights were added to the application.
+
+The native Jev adapter accepts separate bounded learned observations, and the
+developer pilot compares eight source/amount/representation combinations through
+the complete matching and support pipeline. Six prior development recordings plus
+two combined-input repeats produce 50 executions. The prepared maximum is 830
+requests and 38,039,205 conservative input units. This is a newly prepared plan,
+not an authorized or completed paid run. Production library extraction remains
+unchanged pending listening qualification. See the [pilot procedure](MOOD_PILOT.md#developer-jev-input-comparison).
+
+A separate zero-Jev baseline maps the six highest mood-head labels through exact
+vocabulary names/aliases plus an explicit relaxing-to-calm mapping. It leaves
+unmapped labels alone and has no calibrated acceptance threshold; these are
+ranking candidates for listening comparison, not qualified suggestions.
+
+An independent [AudioMuse DCLAP](https://github.com/NeptuneHub/AudioMuse-AI-DCLAP)
+v1 experiment ran locally on the same six complete recordings, using 12 audible
+contrasts with three paraphrases per side. Only 30 of 72 track-level contrasts had
+unanimous paraphrase agreement. Retain the raw results as a challenger; do not turn
+prompt-sensitive cosine scores into facts. The model assets matched publisher
+digests and inference stayed offline. Source is AGPL-3.0; the release does not give
+separate model-weight terms, so redistribution needs clarification. The larger
+[LAION music CLAP](https://huggingface.co/laion/larger_clap_music) was researched but
+not executed in this batch. No paid inference or audio upload occurred in these
+offline experiments.
+
+Ignored artifacts are under `target/jev-audio-combinations-20260928/` (current
+corpus, corpus-bound predictions, exact plan and review summary) and
+`target/jev-clap-20260928/` (raw similarities, pinned prompt/model identities,
+coverage, research notes and reproducible probe). The earlier unbound prediction
+export in the first directory is superseded and must not be used.
 
 ## Local diagnostic artifacts
 

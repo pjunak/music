@@ -143,16 +143,16 @@ No vocabulary entries are dropped. An oversized single-track request prevents en
 a live job. Response order is immaterial, but track membership must be exact and unique.
 The provider deadline covers DNS resolution through complete response-body reading.
 
-Text-engine mood tagging input v25 uses batch-local slots, a stable vocabulary reference prefix and
+Text-engine mood tagging input v26 uses batch-local slots, a stable vocabulary reference prefix and
 per-measurement context reliability. Full membership is validated before resolving slots
 back to local IDs. Explicit cache controls are limited to documented native OpenAI model
 families; cache reads/writes and reasoning tokens are reported only when supplied by the provider.
 Native Jev uses `typesafe-systemone/v1`, `typed-decisions/v1` and
-`music-jev-decisions/v9`. The mood role requires `mood-decisions/v1`, which
+`music-jev-decisions/v10`. The mood role requires `mood-decisions/v1`, which
 both existing text adapters and Jev implement; other roles retain their capability
 requirements. The typed adapter accepts Noul questions with no optional criteria;
 when present, criteria must contain both `true` and `false`. Empty criteria are
-omitted from the wire body. Choice options remain mandatory. Production v9 still
+omitted from the wire body. Choice options remain mandatory. Production v10 still
 uses its existing explicit criteria; the developer-only comparison tests omission
 without changing production questions or acceptance identity.
 Jev receives one song's actual observation cards without a track ID.
@@ -168,6 +168,14 @@ regressed in full validation. Album/genre support includes required purpose/prop
 rather than a merely compatible attribute. Conflict questions, evidence views,
 candidate limits and every acceptance threshold remain. Inference identity
 includes each group-specific question family so changes invalidate stale gates/results.
+Engine v10 additionally accepts bounded `song-audio-candidates/v1` learned observations
+through `audio_predictions`, with separate `prediction.*` citations. Rank, raw sigmoid
+scores and temporal agreement are explicitly uncalibrated. Shared encoder heads do
+not count as independent corroboration; omitted labels do not count as contradictions.
+The private developer pilot supplies this field after checking model, taxonomy,
+whole-track coverage and audio identity. The production library builder does not yet
+populate it: model installation, live disclosure and listening qualification remain
+required before adopting learned extraction there.
 Display labels stay in the application; changing a label does not change its semantic
 question. Vocabulary context cues remain available to playlist retrieval but are excluded
 from Jev tag meanings. Mood grounding asks about musical character, while setting/scene
@@ -251,13 +259,17 @@ before retaining an unbounded request plan. No generated-output allowance is sen
 fallback or remote Batch is supported. A native execution failure stops further
 quality calls, including safety reruns. Subsequent cases report not-run with the original
 error, retain their failed certification outcome and are counted separately in progress.
-The quality report identifies the native v9 engine; successful synthetic checks still do not
+The quality report identifies the native v10 engine; successful synthetic checks still do not
 establish listening quality. Decisions enter the existing output v5/storage/review
 contract under disclosure v16; changing the engine invalidates generated proposals,
 not local context or accepted tags. The [dated live validation](AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28)
 records the rejected rewrite and unresolved quality gate. See [operator setup](../ASSISTANT.md#trying-jev-for-mood-tagging).
 
-The context implementation is `local-context/v3+rustfft/v2+loudness/v2`.
+The context implementation is `local-context/v3+rustfft/v2+loudness/v2+rhythm/v2`.
+Rhythm trajectories aggregate onset activity into duration-weighted four-second
+observations so repeated beats do not masquerade as changing development. Raw timeline
+and section rows retain their shorter resolution; a partial final observation is kept.
+Existing contexts must be regenerated after this implementation change.
 Loudness capture retains the bounded end of FFmpeg stderr so long embedded notes cannot
 displace the final measurement. Decode/loudness codec and filter pools are explicitly
 limited; the loudnorm measurement algorithm is unchanged. This identity change expires
@@ -428,7 +440,7 @@ payloads may contribute only allowlisted machine codes; upstream messages never 
 | Role | Runtime fingerprint fragment | Disclosure | Engine/storage identity | Quality gate | Live job |
 |---|---|---|---|---|---|
 | Playlist planning (`playlist_planner`) | `assistant-playlist-planner-input/v5+output/v1+closed-ids/v1` | `assistant-playlist-model-disclosure/v4` | `model-playlist-planner/v2` | `playlist-quality-v1` | `assistant.model-playlist-suggestion` |
-| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v25+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v16` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
+| Mood tagging (`music_tagger`) | `assistant-music-tagger-input/v26+output/v5+local-context/v3` | `assistant-model-music-tagging-disclosure/v16` | `model-context-tagger/v8` | `music-tagging-quality-v1` | `assistant.model-music-tagging` |
 | Mood-tag cleanup (`tag_cleanup`) | `assistant-model-tag-cleanup-input/v3+output/v2+incidental-text-bounds/v1` | `assistant-model-tag-cleanup-disclosure/v3` | `model-tag-cleanup/v3` | `tag-cleanup-quality-v1` | `assistant.model-tag-cleanup` |
 | EQ assistance (`eq_assistant`) | `assistant-eq-draft-input/v2+output/v1+incidental-text-bounds/v1` | `assistant-eq-draft-disclosure/v2` | `model-graphic-eq/v2` | `eq-quality-v1` | `assistant.model-eq-draft` |
 | Library metadata (`library_cleanup`) | `assistant-library-cleanup-input/v1+output/v1+closed-evidence/v1+edition-advice/v1` | `assistant-library-cleanup-disclosure/v2` | `model-catalog-adjudication/v2` | `library-cleanup-quality-v1` | `assistant.model-library-cleanup` |

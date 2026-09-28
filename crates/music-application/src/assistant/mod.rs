@@ -4,6 +4,7 @@
 //! inputs to an explicit review operation; they never mutate operator-owned
 //! tags, playlists, or presets by themselves.
 
+mod audio_predictions;
 #[cfg(feature = "fuzzing")]
 mod fuzzing;
 mod local_analysis;
@@ -32,6 +33,7 @@ mod tags;
 mod typed_decisions;
 mod vocabulary;
 
+pub use audio_predictions::*;
 #[cfg(feature = "fuzzing")]
 #[doc(hidden)]
 pub use fuzzing::exercise_structured_model_outputs;

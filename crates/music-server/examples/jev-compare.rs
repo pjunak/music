@@ -56,6 +56,9 @@ enum Command {
     PilotPlan {
         corpus: PathBuf,
         output: PathBuf,
+        /// Hash-bound whole-track learned predictions from the offline exporter.
+        #[arg(long)]
+        predictions: PathBuf,
         #[arg(long, value_delimiter = ',')]
         tracks: Vec<i64>,
     },
@@ -290,9 +293,10 @@ async fn main() -> Result<()> {
         Command::PilotPlan {
             corpus,
             output,
+            predictions,
             tracks,
         } => {
-            let plan = pilot::plan(&corpus, &tracks)?;
+            let plan = pilot::plan(&corpus, &predictions, &tracks)?;
             serde_json::to_writer_pretty(new_file(&output)?, &plan)?;
             println!(
                 "Private pilot: {} requests; {} conservative input units; SHA-256 {}",

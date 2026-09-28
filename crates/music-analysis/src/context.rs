@@ -22,6 +22,9 @@ use crate::decoder_process::{DecoderWaitError, wait_for_decoder};
 const CONTEXT_SAMPLE_RATE: u32 = 16_000;
 const CONTEXT_FRAME_SECONDS: f64 = 0.5;
 const CONTEXT_TIMELINE_SECONDS: f64 = 2.0;
+// A multi-second observation separates sustained pulse activity from the beat's
+// incidental alignment with the half-second analysis frames.
+const RHYTHM_DEVELOPMENT_SECONDS: f64 = 4.0;
 const FFT_SIZE: usize = 2_048;
 const SPECTRAL_BANDS: usize = 24;
 const MAX_SECTIONS: usize = 10;
@@ -176,7 +179,7 @@ impl AudioContextAnalyzer for FfmpegContextAnalyzer {
         let trajectories = Map::from_iter(
             TimelineMetric::TRAJECTORIES
                 .into_iter()
-                .map(|metric| (metric.name().to_owned(), trajectory(&metric.values(&rows)))),
+                .map(|metric| (metric.name().to_owned(), metric_trajectory(metric, &rows))),
         );
         let tempo_bpms = tempo_points
             .iter()
@@ -1104,6 +1107,48 @@ fn timeline_frames(frames: &[Frame], short_levels: &[f64]) -> Vec<TimelineRow> {
         .collect()
 }
 
+fn metric_trajectory(metric: TimelineMetric, rows: &[TimelineRow]) -> Value {
+    let values = match metric {
+        TimelineMetric::RhythmicDrive => rhythmic_development_curve(rows),
+        _ => metric.values(rows),
+    };
+    trajectory(&values)
+}
+
+fn rhythmic_development_curve(rows: &[TimelineRow]) -> Vec<f64> {
+    let mut curve = Vec::new();
+    let mut duration = 0.0;
+    let mut weighted_drive = 0.0;
+
+    for row in rows {
+        let mut remaining = row.duration_s.max(0.0);
+        while remaining > f64::EPSILON {
+            let used = remaining.min(RHYTHM_DEVELOPMENT_SECONDS - duration);
+            weighted_drive += row.rhythmic_drive * used;
+            duration += used;
+            remaining -= used;
+            if duration >= RHYTHM_DEVELOPMENT_SECONDS - f64::EPSILON {
+                curve.push(weighted_drive / duration);
+                duration = 0.0;
+                weighted_drive = 0.0;
+            }
+        }
+    }
+
+    if duration > f64::EPSILON {
+        curve.push(weighted_drive / duration);
+    }
+    if curve.is_empty() && !rows.is_empty() {
+        curve.push(mean(
+            &rows
+                .iter()
+                .map(|row| row.rhythmic_drive)
+                .collect::<Vec<_>>(),
+        ));
+    }
+    curve
+}
+
 fn trajectory(values: &[f64]) -> Value {
     if values.is_empty() {
         return json!({
@@ -1843,8 +1888,43 @@ mod tests {
 
     use super::{
         AudioContextAnalyzer, ContextAccumulator, FfmpegContextAnalyzer, TimelineMetric,
-        VoiceContextPreparation, estimate_tempo, timeline_frames, trajectory, voice_placeholders,
+        VoiceContextPreparation, estimate_tempo, metric_trajectory, timeline_frames, trajectory,
+        voice_placeholders,
     };
+
+    fn pulse_rows(
+        seconds: f64,
+        mut next_beat_s: f64,
+        bpm_at: impl Fn(f64) -> f64,
+    ) -> Vec<super::TimelineRow> {
+        const SHORT_WINDOWS_PER_SECOND: f64 = 20.0;
+        let short_count = (seconds * SHORT_WINDOWS_PER_SECOND).ceil() as usize;
+        let mut levels = vec![0.01; short_count];
+        while next_beat_s < seconds {
+            let index = (next_beat_s * SHORT_WINDOWS_PER_SECOND).round() as usize;
+            if let Some(level) = levels.get_mut(index) {
+                *level = 1.0;
+            }
+            next_beat_s += 60.0 / bpm_at(next_beat_s);
+        }
+        rows_for_levels(seconds, &levels)
+    }
+
+    fn rows_for_levels(seconds: f64, levels: &[f64]) -> Vec<super::TimelineRow> {
+        let frame_count = (seconds / super::CONTEXT_FRAME_SECONDS).ceil() as usize;
+        let frames = (0..frame_count)
+            .map(|index| {
+                let start_s = index as f64 * super::CONTEXT_FRAME_SECONDS;
+                super::Frame {
+                    start_s,
+                    duration_s: (seconds - start_s).min(super::CONTEXT_FRAME_SECONDS),
+                    loudness_dbfs: -20.0,
+                    spectrum: super::Spectrum::silent(),
+                }
+            })
+            .collect::<Vec<_>>();
+        timeline_frames(&frames, levels)
+    }
 
     #[test]
     fn configured_but_unavailable_voice_backend_is_not_reported_as_disabled() {
@@ -1947,6 +2027,106 @@ mod tests {
     }
 
     #[test]
+    fn rhythm_development_is_steady_for_constant_pulses_across_tempos_and_phases() {
+        for bpm in [60.0, 90.0, 120.0, 150.0, 180.0] {
+            for phase_s in [0.0, 0.07, 0.23] {
+                let rows = pulse_rows(60.0, phase_s, |_| bpm);
+                let summary = metric_trajectory(TimelineMetric::RhythmicDrive, &rows);
+                assert_eq!(
+                    summary["shape"], "steady",
+                    "{bpm} BPM at phase {phase_s}: {summary}"
+                );
+                assert!(
+                    summary["range"].as_f64().is_some_and(|range| range < 0.12),
+                    "{bpm} BPM at phase {phase_s}: {summary}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rhythm_development_retains_a_real_activity_change_and_gradual_tempo_build() {
+        let mut changed_levels = vec![0.01; 1_200];
+        for beat in (600..1_200).step_by(10) {
+            changed_levels[beat] = 1.0;
+        }
+        let changed = metric_trajectory(
+            TimelineMetric::RhythmicDrive,
+            &rows_for_levels(60.0, &changed_levels),
+        );
+        assert!(
+            changed["end"].as_f64().is_some_and(|end| {
+                changed["start"]
+                    .as_f64()
+                    .is_some_and(|start| end > start + 0.25)
+            }),
+            "{changed}"
+        );
+        assert!(
+            matches!(
+                changed["shape"].as_str(),
+                Some("gradual_rise" | "stepped_build" | "rising")
+            ),
+            "{changed}"
+        );
+
+        let gradual_rows = pulse_rows(80.0, 0.13, |at_s| 60.0 + 120.0 * at_s / 80.0);
+        let gradual = metric_trajectory(TimelineMetric::RhythmicDrive, &gradual_rows);
+        assert!(
+            gradual["end"].as_f64().is_some_and(|end| {
+                gradual["start"]
+                    .as_f64()
+                    .is_some_and(|start| end > start + 0.2)
+            }),
+            "{gradual}"
+        );
+        assert!(
+            gradual["slope"].as_f64().is_some_and(|slope| slope > 0.12),
+            "{gradual}"
+        );
+    }
+
+    #[test]
+    fn rhythm_development_handles_silence_short_tracks_and_partial_endings() {
+        let silence = metric_trajectory(
+            TimelineMetric::RhythmicDrive,
+            &rows_for_levels(60.0, &vec![0.01; 1_200]),
+        );
+        assert_eq!(silence["shape"], "steady");
+        assert_eq!(silence["typical"], 0.0);
+
+        let short = metric_trajectory(
+            TimelineMetric::RhythmicDrive,
+            &pulse_rows(1.25, 0.17, |_| 120.0),
+        );
+        assert_eq!(short["shape"], "steady");
+        assert!(short["typical"].as_f64().is_some_and(|value| value > 0.0));
+
+        let mut ending_levels = vec![0.01; 210];
+        for beat in (160..210).step_by(7) {
+            ending_levels[beat] = 1.0;
+        }
+        let ending = metric_trajectory(
+            TimelineMetric::RhythmicDrive,
+            &rows_for_levels(10.5, &ending_levels),
+        );
+        assert!(
+            ending["end"].as_f64().is_some_and(|end| {
+                ending["start"]
+                    .as_f64()
+                    .is_some_and(|start| end > start + 0.25)
+            }),
+            "{ending}"
+        );
+        assert!(
+            ending["peak_at_fraction"]
+                .as_f64()
+                .is_some_and(|fraction| fraction == 1.0),
+            "{ending}"
+        );
+    }
+
+    #[test]
     fn v2_tempo_and_absolute_high_fraction_keep_their_semantics() {
         let levels = (0..600)
             .map(|index| {
@@ -2023,7 +2203,7 @@ mod tests {
         assert_eq!(document.summary["coverage"]["decoded_seconds"], 12.0);
         assert_eq!(
             document.summary["trajectories"]["rhythmic_drive"]["typical"],
-            0.312_6
+            0.273_52
         );
         assert_eq!(document.summary["tempo"]["typical_bpm"], 120.0);
         assert_eq!(

@@ -185,7 +185,7 @@ void test("wrong model, version, sample rate, dimensions or encoder pairing fail
   assert.throws(() => projectModelMetadata("constructor", headMetadata()), /Unknown model role/);
 });
 
-void test("encoder metadata identifies embeddings without exporting unused style labels", () => {
+void test("encoder metadata qualifies both its 400 style activations and 1280 embeddings", () => {
   const metadata = {
     name: "EffnetDiscogs", version: "1", classes: Array.from({ length: 400 }, (_, i) => "style-" + i),
     inference: { sample_rate: 16000 },

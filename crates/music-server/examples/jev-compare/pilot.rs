@@ -2,7 +2,8 @@
 use super::*;
 use music_analysis::{AudioContextAnalyzer, FfmpegContextAnalyzer, VoiceContextPreparation};
 use music_application::assistant::{
-    JevTaggerTask, LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID,
+    AUDIO_PREDICTION_CONTRACT, AudioPredictionEvidence, AudioPredictionSource, JevTaggerTask,
+    LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, RankedAudioLabel,
     compact_context_evidence, default_vocabulary_snapshot,
 };
 use std::collections::BTreeSet;
@@ -11,13 +12,24 @@ use std::sync::atomic::AtomicBool;
 #[path = "pilot_run.rs"]
 mod execution;
 pub(super) use execution::run;
+#[path = "pilot_predictions.rs"]
+mod predictions;
 #[cfg(test)]
 #[path = "pilot_tests.rs"]
 mod tests;
 
 const CORPUS_SCHEMA: &str = "jev-private-corpus/v1";
-const PLAN_SCHEMA: &str = "jev-private-pilot/v1";
-const ARMS: [&str; 3] = ["current", "compact", "compact_without_sections"];
+const PLAN_SCHEMA: &str = "jev-private-pilot/v2";
+const ARMS: [&str; 8] = [
+    "physical",
+    "mood",
+    "instrument_style",
+    "learned",
+    "combined",
+    "combined_top3",
+    "combined_scored",
+    "combined_temporal",
+];
 const MAX_REQUESTS: u64 = 1_200;
 const MAX_UNITS: u64 = 60_000_000;
 
@@ -88,24 +100,17 @@ pub(super) fn analyze(paths: &Path, output: &Path, ffmpeg: &Path, ffprobe: &Path
     Ok(())
 }
 
-fn task(input: &Value, arm: &str) -> Result<JevTaggerTask> {
+fn task(recording: &Value, arm: &str) -> Result<JevTaggerTask> {
     if !ARMS.contains(&arm) {
         return Err("unknown pilot arm".into());
     }
-    let mut input = input.clone();
-    if arm == "compact_without_sections" {
-        // This tests omission in both matching and grounding. Original local data is retained.
-        input["context_evidence"]["sections"] = json!([]);
-    }
+    let input = predictions::input(recording, arm)?;
     plan_jev_tagging(&[input], &default_vocabulary_snapshot()?)?
         .pop()
         .ok_or_else(|| "missing pilot task".into())
 }
 
-fn assessment_request(request: &TypedDecisionRequest, arm: &str) -> Result<TypedDecisionRequest> {
-    if arm == "current" {
-        return Ok(request.clone());
-    }
+fn assessment_request(request: &TypedDecisionRequest, _arm: &str) -> Result<TypedDecisionRequest> {
     let mut compact = request.clone();
     compact.state = evidence::variants::transform("compact_cards", &request.state, &Value::Null)?;
     compact.validate()?;
@@ -117,8 +122,16 @@ fn assessment_request(request: &TypedDecisionRequest, arm: &str) -> Result<Typed
     Ok(compact)
 }
 
-pub(super) fn plan(corpus: &Path, tracks: &[i64]) -> Result<Value> {
-    build_plan(&read_json(corpus)?, tracks)
+pub(super) fn plan(corpus: &Path, predictions: &Path, tracks: &[i64]) -> Result<Value> {
+    let mut export = String::new();
+    File::open(predictions)?
+        .take(32 * 1024 * 1024 + 1)
+        .read_to_string(&mut export)?;
+    if export.len() > 32 * 1024 * 1024 {
+        return Err("pilot document exceeds 32 MiB".into());
+    }
+    let corpus = predictions::attach(read_json(corpus)?, &export)?;
+    build_plan(&corpus, tracks)
 }
 
 fn build_plan(corpus: &Value, tracks: &[i64]) -> Result<Value> {
@@ -143,6 +156,7 @@ fn build_plan(corpus: &Value, tracks: &[i64]) -> Result<Value> {
             return Err("selected recording missing or ambiguous".into());
         }
         let recording = matches[0];
+        predictions::validate_recording(recording)?;
         let hash = recording["file_sha256"].as_str().ok_or("audio hash")?;
         if hash.len() != 64 || !hash.bytes().all(|v| v.is_ascii_hexdigit()) || !hashes.insert(hash)
         {
@@ -155,7 +169,7 @@ fn build_plan(corpus: &Value, tracks: &[i64]) -> Result<Value> {
     let mut units = model_request_reservation(&conformance.accounting_request(), 0);
     let mut cases = Vec::new();
     let mut add = |recording: &Value, arm: &str, repeat: bool| -> Result<()> {
-        let task = task(&recording["input"], arm)?;
+        let task = task(recording, arm)?;
         let assessment = task
             .assessment_requests()
             .iter()
@@ -184,9 +198,9 @@ fn build_plan(corpus: &Value, tracks: &[i64]) -> Result<Value> {
         }
     }
     // Deliberate repeats expose model variation; failures never trigger an automatic retry.
-    add(&selected[0], "current", true)?;
+    add(&selected[0], "combined", true)?;
     if selected.len() > 1 {
-        add(&selected[selected.len() - 1], "current", true)?;
+        add(&selected[selected.len() - 1], "combined", true)?;
     }
     if calls > MAX_REQUESTS || units > MAX_UNITS {
         return Err("pilot exceeds fixed developer ceiling".into());
@@ -194,14 +208,16 @@ fn build_plan(corpus: &Value, tracks: &[i64]) -> Result<Value> {
     Ok(
         json!({"schema_version":PLAN_SCHEMA,"engine_id":JEV_TAGGER_CONTRACT,
         "inference_identity":jev_inference_identity(),"model":MODEL,"endpoint":ENDPOINT,
-        "implementation":"initial-lossless-compaction-and-whole-task-section-ablation/v1",
+        "implementation":"learned-source-rank-score-time-combinations/v1",
+        "prediction_contract":AUDIO_PREDICTION_CONTRACT,"arms":ARMS,
+        "sampling_rule":"Explicit preselected development tracks; reuse the prior pilot selection for paired comparisons. Predictions shown to the owner are assisted feedback, never blind confirmation.",
         "vocabulary":default_vocabulary_snapshot()?.document,"corpus":{
             "schema_version":CORPUS_SCHEMA,"analyzer_id":LOCAL_CONTEXT_ANALYZER_ID,
             "implementation_id":LOCAL_CONTEXT_IMPLEMENTATION_ID,"recordings":selected},
         "selected_tracks":tracks,"conformance":conformance,"cases":cases,
         "max_requests":calls,"max_input_units":units,"certifies_model":false,
         "assessment_mode":"assisted_development_diagnostic",
-        "disclosure":"Only embedded metadata and locally measured evidence go to pinned Jev. No audio, paths, filenames, collection labels, content hashes, listener judgments or app credentials are sent. Default vocabulary; optional voice and catalog evidence absent. Full current candidate, support/conflict and period gates remain. Compact arms change initial state only; compact_without_sections also removes section observations from matching and grounding. Requests reserve the conservative uncompressed native bounds. No retries, no app acceptance or tag writes."}),
+        "disclosure":"Only embedded metadata, locally measured evidence and selected audio-classifier predictions go to pinned Jev. No audio, paths, filenames, collection labels, content hashes, listener judgments or app credentials are sent. Default vocabulary; optional voice and catalog evidence absent. Classifier scores are uncalibrated, never probabilities or verified tags. All source, amount and representation omissions apply to both matching and grounding. Assessment compaction and questions are identical across arms. Full native candidate, support/conflict and period gates remain. Requests reserve conservative uncompressed native bounds. No retries, no app acceptance or tag writes."}),
     )
 }
 
