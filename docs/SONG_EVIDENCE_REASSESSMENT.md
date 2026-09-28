@@ -247,8 +247,8 @@ The native Jev adapter accepts separate bounded learned observations, and the
 developer pilot compares eight source/amount/representation combinations through
 the complete matching and support pipeline. Six prior development recordings plus
 two combined-input repeats produce 50 executions. The prepared maximum is 830
-requests and 38,039,205 conservative input units. This is a newly prepared plan,
-not an authorized or completed paid run. Production library extraction remains
+requests and 38,039,205 conservative input units. The owner subsequently approved
+this exact plan; its completed results are recorded below. Production library extraction remains
 unchanged pending listening qualification. See the [pilot procedure](MOOD_PILOT.md#developer-jev-input-comparison).
 
 A separate zero-Jev baseline maps the six highest mood-head labels through exact
@@ -272,6 +272,62 @@ corpus, corpus-bound predictions, exact plan and review summary) and
 `target/jev-clap-20260928/` (raw similarities, pinned prompt/model identities,
 coverage, research notes and reproducible probe). The earlier unbound prediction
 export in the first directory is superseded and must not be used.
+
+## Approved learned-evidence comparison, 28 September 2026
+
+The exact approved plan (`44e2c917811e927c1384695f6a369c0cccf92a7f943817e559a7bbdf0d678a74`)
+completed all 50 executions: 48 primary comparisons and two deliberate repeats,
+plus synthetic conformance. All 259 requests returned successfully, reporting
+3,578,939 input and 163,202 output tokens with no missing usage. At the current
+[published input rate](https://docs.typesafe.ai/models), estimated provider cost
+is $0.150315; this is not an invoice. Audio stayed local and tags stayed proposals.
+
+| Input recipe | Primary requests | Input tokens across six songs | Songs with suggestions | Suggested assignments |
+|---|---:|---:|---:|---:|
+| Physical only | 23 | 293,609 | 0 | 0 |
+| Mood predictions | 24 | 242,334 | 6 | 6 |
+| Instrument and style predictions | 20 | 246,766 | 2 | 3 |
+| All three learned sources | 24 | 305,967 | 6 | 7 |
+| Physical plus all learned sources | 38 | 570,223 | 5 | 5 |
+| Combined, three labels per head | 37 | 537,729 | 5 | 5 |
+| Combined, six labels plus mean scores | 35 | 505,887 | 5 | 5 |
+| Combined, six labels plus temporal scores | 42 | 652,325 | 5 | 5 |
+
+Primary recipe totals exclude conformance and repeats; the whole-run total above
+includes them exactly once. Mood-only averaged 40,389 input tokens per song;
+all learned sources averaged 50,994.5, 46.3% below combined input's 95,037.2.
+These are observed development-sample averages, not library-wide guarantees.
+
+Five recordings received only `calm` from every recipe that included mood
+predictions. The sixth received `majestic` from mood predictions, `majestic` and
+`calm` from all learned sources, and `dreamy`/`ethereal` from instrument/style
+predictions. Adding physical evidence returned no tags for that recording in
+every primary combined recipe. No setting, scene or period suggestions survived.
+These counts measure returned suggestions, not correctness or recall.
+
+The first deliberate repeat retained `calm`; the other changed from no tags to
+`calm`. Its initial calm fit moved from 0.69 to 0.70, crossing the unchanged gate,
+and one section supplied qualifying support. Two repeats cannot estimate a
+general instability rate. For this same song, majestic's mood-head support fell
+from 0.79 with learned-only input to 0.68 with combined input. This is evidence of
+context-sensitive judgments in this run, not proof that physical measurements
+are intrinsically harmful or that the extra tags are correct.
+
+Keep the compact mood/all-learned recipes as development baselines. Owner ratings
+of proposed and missing tags are still required. The next targeted harness
+question is whether evaluating each source in isolation reduces interference
+before local combination. Numeric/temporal expansion did not differentiate the
+five calm-only outputs here, and borderline gates need independent calibration
+rather than a threshold change selected from these six songs.
+
+Private `run/result.json` and `run/requests.jsonl` retain the actual output and
+wire evidence. `owner-ratings.md` validates their membership and usage;
+`concise-results.md` provides the shorter listening comparison. The live run
+also exposed an offline reporter defect: saved profiles use normalized
+`TagDecision.tag` names, not provider-side `tag_id`. The reporter now resolves
+those names through the frozen vocabulary; regression coverage rejects mismatched
+profiles and groups identical tag sets regardless of decision ordering. Provider
+execution, questions, gates and the frozen result were not changed by that repair.
 
 ## Local diagnostic artifacts
 

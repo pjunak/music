@@ -221,15 +221,22 @@ function classify(planned: ObjectValue, row: ObjectValue | undefined, tags: Map<
   assert.deepEqual(keys, [expected], "Profile does not match selected track");
   const profile = object(profiles[expected], "Invalid profile"); assert.equal(profile.track_id, planned.track_id, "Proposal track mismatch");
   const decisions = array(profile.decisions, "Missing decisions").map(value => object(value, "Invalid decision"));
-  const ids = decisions.map(decision => text(decision.tag_id, "Invalid decision tag"));
-  assert.deepEqual(array(profile.tags, "Missing profile tags"), ids, "Profile tags/decisions differ");
+  // Saved ModelTagTrackOutput contains normalized names (TagDecision.tag), after
+  // the application has resolved the provider's tag_id against the vocabulary.
+  const names = decisions.map(decision => text(decision.tag, "Invalid saved decision tag"));
+  assert.deepEqual(array(profile.tags, "Missing profile tags"), names, "Profile tags/decisions differ");
+  const ids = names.map(name => {
+    const matches = [...tags].filter(([, tagName]) => tagName === name);
+    assert(matches.length === 1, "Proposal outside vocabulary or ambiguous saved tag");
+    return matches[0][0];
+  });
   assert.equal(new Set(ids).size, ids.length, "Duplicate proposal");
-  const suggestions = decisions.map(decision => {
-    const id = text(decision.tag_id, "Invalid tag id"), name = tags.get(id); assert(name, "Proposal outside vocabulary");
+  const suggestions = decisions.map((decision, index) => {
+    const id = ids[index], name = names[index];
     const support = text(decision.support, "Missing support"); assert(support === "supported" || support === "tentative", "Invalid support");
     return `**${markdown(name)}** (\`${markdown(id)}\`, ${support})`;
   });
-  return suggestions.length ? { kind: "suggestions", summary: `${suggestions.length} suggestion${suggestions.length === 1 ? "" : "s"}`, suggestions, tagIds: ids } :
+  return suggestions.length ? { kind: "suggestions", summary: `${suggestions.length} suggestion${suggestions.length === 1 ? "" : "s"}`, suggestions, tagIds: ids.sort() } :
     { kind: "empty", summary: "**No suggestions returned**", suggestions: [], tagIds: [] };
 }
 

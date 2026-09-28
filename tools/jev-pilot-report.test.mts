@@ -19,8 +19,8 @@ function plan() {
   };
 }
 const emptyProfile = { "7": { track_id: 7, tags: [], decisions: [] } };
-const suggestionProfile = { "7": { track_id: 7, tags: ["mood.calm"], decisions: [
-  { tag_id: "mood.calm", support: "tentative", evidence: ["local"], evidence_ids: ["audio"], contradiction_ids: [] },
+const suggestionProfile = { "7": { track_id: 7, tags: ["calm"], decisions: [
+  { tag: "calm", support: "tentative", evidence: ["local"], evidence_ids: ["audio"], contradiction_ids: [] },
 ] } };
 const row = (caseIndex: number, arm: string, repeat: boolean, profiles: unknown, error: unknown = null) =>
   ({ case: caseIndex, track_id: 7, arm, repeat_control: repeat, profiles, error, diagnostics: {} });
@@ -130,4 +130,31 @@ void test("response phase must match the started request before accounting", () 
   const p = plan(), records = [...conformance(p),
     started(0, 0, p.cases[0].assessment[0]), response(0, 0, 10, 2, true, "grounding")];
   assert.throws(() => renderPilotReport(p, { status: "failed", result: { rows: [] } }, jsonl(records)), /phase differs/);
+});
+
+void test("saved names resolve to vocabulary IDs while provider-shaped and mismatched profiles fail", () => {
+  const p = plan(), records = [...conformance(p), started(0, 0, p.cases[0].assessment[0]), response(0, 0, 10, 2)];
+  const render = (profile: unknown) => renderPilotReport(p,
+    { status: "failed", result: { rows: [row(0, "physical", false, profile)] } }, jsonl(records));
+  assert.match(render(suggestionProfile), /\*\*calm\*\* \(`mood\.calm`, tentative\)/);
+  assert.throws(() => render({ "7": { track_id: 7, tags: ["mood.calm"], decisions: [
+    { tag_id: "mood.calm", support: "tentative" },
+  ] } }), /Invalid saved decision tag/);
+  assert.throws(() => render({ "7": { ...suggestionProfile["7"], tags: ["dreamy"] } }), /tags\/decisions differ/);
+  assert.throws(() => render({ "7": { track_id: 7, tags: ["invented"], decisions: [
+    { tag: "invented", support: "tentative" },
+  ] } }), /outside vocabulary/);
+});
+
+void test("owner grouping treats reordered normalized decisions as the same tag set", () => {
+  const p = plan(), records = [...conformance(p)];
+  const rows = p.cases.map((item, index) => {
+    records.push(started(index, 0, item.assessment[0]), response(index, 0, 10, 2));
+    const names = index === 1 ? ["dreamy", "calm"] : ["calm", "dreamy"];
+    return row(index, item.arm, item.repeat_control, { "7": {
+      track_id: 7, tags: names, decisions: names.map(tag => ({ tag, support: "tentative" })),
+    } });
+  });
+  const report = renderPilotReport(p, { status: "succeeded", result: { rows } }, jsonl(records));
+  assert.equal(report.match(/- Set \d+:/g)?.length, 1);
 });
