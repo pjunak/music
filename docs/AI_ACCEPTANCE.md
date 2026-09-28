@@ -19,6 +19,50 @@ tool and host availability before declaring a task blocked; record what was
 actually verified and keep local engineering, provider and physical acceptance
 separate.
 
+## Private Jev input-minimization pilot results: 2026-09-28
+
+The owner approved execution of the prepared six-recording comparison. All **20/20
+full native tagging executions** completed: three input variants for each of six
+recordings, plus two deliberate current-input repeats. Fresh native conformance
+passed. The run made **73/73 successful requests**, all reporting pinned
+`jev-1.13.0` and usage, with no retries, unresolved attempts or missing results.
+
+Every execution produced an explicit **empty final tag list**. All 130 non-period
+definitions were below the unchanged 0.70 initial-match threshold. Each period
+Choice included all eight configured periods and selected `no_supported_period`. The highest
+non-period match across the run was 0.58. No candidate qualified for follow-up
+grounding, so the complete task finished with abstention; these are not transport
+failures, unavailable profiles or a first-pass-only substitute for final outputs.
+
+| Input variant, six primary executions | Requests | Reported input tokens | Reduction against current |
+|---|---:|---:|---:|
+| Current v9 | 23 | 309,177 | Baseline |
+| Lossless initial-state compaction | 23 | 293,562 | 5.05% |
+| Compaction without section observations | 18 | 242,304 | 21.63% |
+| Two current-input repeats | 8 | 107,664 | Control; excluded from paired savings |
+| Synthetic conformance | 1 | 476 | Setup; excluded from paired savings |
+
+Total observed usage: **953,183 input / 52,418 output tokens**, approximately
+**US$0.0400** at the verified [$0.042/M input rate](https://docs.typesafe.ai/models),
+with output free. The durable native ledger reserved 3,885,118 conservative units,
+within the approved 329-request / 14,721,150-unit cap. Savings above apply to these
+abstaining runs; they do not establish quality equivalence when tags trigger grounding.
+
+Exact final per-recording outputs, actual wire requests, diagnostics and the listening
+sheet remain private under `target/jev-listening-20260928/run/`. All six source
+hashes were rechecked after execution and remain unchanged. An independent offline
+reconciliation verified every attempt/response, model ID, usage total, selected
+recording, final profile, diagnostic decision and empty tag list. The owner has not
+provided listening judgments; no precision, recall or quality pass is claimed.
+Production remains v9 with unchanged thresholds and acceptance gates; no authored
+tags were changed. The sixteen unselected recordings were not sent to Jev.
+
+Plan SHA-256: `7c9fa155e3a0e25447fe20e5cacb8eddc5e105e85d729cd69e58ec4a6f3c901d`.
+Journal SHA-256: `d7260312ad1c29c0126a36e23547108b76751fcffd682271ae2d55d203126f39`.
+Result SHA-256: `f10fe5291098293421a2acd3ece937a2e593828f4d551955607df2795b952e02`.
+This completes the approved private pilot. Further paid experiments require their
+own reviewed scope and budget. Owner judgments remain the next input to optimization.
+
 ## Private Jev input-minimization pilot prepared: 2026-09-28
 
 Following the completed synthetic screen, the owner authorized read-only use of two
@@ -61,8 +105,9 @@ feedback, not blind listening, a new full-suite result or application certificat
 Prepared cap: **329 requests / 14,721,150 conservative input units**, pinned
 `jev-1.13.0`, no retries; approximately **US$0.62** at the published input rate.
 Plan SHA-256: `7c9fa155e3a0e25447fe20e5cacb8eddc5e105e85d729cd69e58ec4a6f3c901d`.
-No paid call is implied by offline preparation. The prior synthetic allowance was
-consumed; this private run needs its own explicit reviewed budget. See the
+At preparation, no paid call was implied and the prior synthetic allowance was
+consumed. The owner subsequently approved this exact budget; execution is recorded
+above. See the
 [developer pilot procedure](MOOD_PILOT.md#developer-jev-input-comparison).
 
 ## Jev evidence-source and amount results: 2026-09-28
