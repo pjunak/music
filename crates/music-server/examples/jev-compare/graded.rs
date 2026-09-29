@@ -382,7 +382,7 @@ fn request(case: &Value) -> Result<TypedDecisionRequest> {
     Ok(request)
 }
 
-fn authorize(plan: &Value, expected: &str, calls: usize, units: u64) -> Result<()> {
+pub(super) fn authorize(plan: &Value, expected: &str, calls: usize, units: u64) -> Result<()> {
     let rebuilt = build(plan["recordings"].as_array().ok_or("recordings")?)?;
     if &rebuilt != plan
         || fingerprint(plan)? != expected
@@ -392,6 +392,11 @@ fn authorize(plan: &Value, expected: &str, calls: usize, units: u64) -> Result<(
         return Err("graded pilot differs from exact reviewed plan or budget".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn fixture_plan() -> Result<Value> {
+    build(&tests::recordings()?)
 }
 
 fn scores(case: &Value, payload: Value) -> Result<Value> {

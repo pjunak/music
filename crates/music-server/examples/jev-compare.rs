@@ -31,6 +31,8 @@ mod pilot;
 mod quality;
 #[path = "jev-compare/report.rs"]
 mod report;
+#[path = "jev-compare/simple.rs"]
+mod simple;
 const MODEL: &str = "jev-1.13.0";
 const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -45,6 +47,28 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Freeze short Nouls against one completed graded pilot evidence arm.
+    SimplePlan {
+        baseline: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<u64>,
+    },
+    /// Run only the reviewed short-question plan; reuse the old baseline offline.
+    SimpleRun {
+        baseline: PathBuf,
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Freeze independent graded tag questions and four controlled audio evidence views.
     GradedPlan { sources: PathBuf, output: PathBuf },
     /// Run an exactly authorized graded listening experiment in a new isolated directory.
@@ -300,6 +324,38 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::SimplePlan {
+            baseline,
+            output,
+            tracks,
+        } => {
+            let plan = simple::prepare(&pilot::read_json(&baseline)?, &tracks)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan.document)?;
+            println!(
+                "Simple Noul pilot: {} requests; {} conservative input units; SHA-256 {}",
+                plan.document["request_count"],
+                plan.document["max_input_units"],
+                fingerprint(&plan.document)?
+            );
+        }
+        Command::SimpleRun {
+            baseline,
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output,
+        } => {
+            let prepared = simple::load_authorized(
+                &baseline,
+                &plan,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )?;
+            run(prepared.document, &prepared.comparisons, &key_file, &output).await?;
+        }
         Command::GradedPlan { sources, output } => {
             let plan = graded::prepare(&sources)?;
             serde_json::to_writer_pretty(new_file(&output)?, &plan)?;

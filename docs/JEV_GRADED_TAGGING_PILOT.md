@@ -289,3 +289,7 @@ Multi-song batches should be tested for song-order effects and evidence mixing.
 Large unrelated state can reduce Jev accuracy. No batching or wording change was
 introduced mid-experiment, and no billing savings from those untested changes are
 claimed.
+
+The owner-approved [short-question comparison](JEV_SIMPLE_QUESTION_PILOT.md)
+tests simplified Nouls against the seven new recordings' existing `labels8`
+results, preserving their evidence and vocabulary definitions.
