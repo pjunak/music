@@ -17,6 +17,8 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+#[path = "jev-compare/ablation.rs"]
+mod ablation;
 #[path = "jev-compare/comparison.rs"]
 mod comparison;
 #[path = "jev-compare/evidence.rs"]
@@ -47,6 +49,38 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Freeze the bounded one-request-per-song Jev evidence ablation.
+    AblationPlan {
+        baseline: PathBuf,
+        auxiliary: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<u64>,
+    },
+    /// Run only an exactly rebuilt and explicitly authorized ablation plan.
+    AblationRun {
+        baseline: PathBuf,
+        auxiliary: PathBuf,
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Export a complete, plan-matched ablation journal without provider access.
+    AblationReport {
+        baseline: PathBuf,
+        auxiliary: PathBuf,
+        plan: PathBuf,
+        journal: PathBuf,
+        output: PathBuf,
+    },
     /// Freeze short Nouls against one completed graded pilot evidence arm.
     SimplePlan {
         baseline: PathBuf,
@@ -324,6 +358,58 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::AblationPlan {
+            baseline,
+            auxiliary,
+            output,
+            tracks,
+        } => {
+            let plan = ablation::prepare(
+                &pilot::read_json(&baseline)?,
+                &pilot::read_json(&auxiliary)?,
+                &tracks,
+            )?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan.document)?;
+            println!(
+                "Ablation plan: {} requests; {} conservative input units; SHA-256 {}",
+                plan.document["request_count"],
+                plan.document["max_input_units"],
+                fingerprint(&plan.document)?
+            );
+        }
+        Command::AblationRun {
+            baseline,
+            auxiliary,
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output,
+        } => {
+            let prepared = ablation::load_authorized(
+                &baseline,
+                &auxiliary,
+                &plan,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )?;
+            run(prepared.document, &prepared.comparisons, &key_file, &output).await?;
+        }
+        Command::AblationReport {
+            baseline,
+            auxiliary,
+            plan,
+            journal,
+            output,
+        } => {
+            let report = ablation::report(&baseline, &auxiliary, &plan, &journal)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &report)?;
+            println!(
+                "Complete ablation journal exported with raw typed answers; no quality gate or adoption decision was applied."
+            );
+        }
         Command::SimplePlan {
             baseline,
             output,
