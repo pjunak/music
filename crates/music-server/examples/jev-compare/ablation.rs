@@ -21,7 +21,7 @@ const ARMS: [&str; 8] = [
 const MAX_REQUESTS: usize = 146;
 const MAX_INPUT_UNITS: u64 = 8_000_000;
 const MAX_BODY_BYTES: usize = 63_000;
-const QUESTION_COUNT: usize = 138;
+pub(super) const QUESTION_COUNT: usize = 138;
 const NULL_STATE: &str = "No observations of this recording are available.";
 
 pub(super) struct Plan {
@@ -29,14 +29,14 @@ pub(super) struct Plan {
     pub comparisons: Vec<comparison::Comparison>,
 }
 
-struct BaselineMaterial {
-    state: Value,
-    questions: BTreeMap<String, TypedQuestion>,
-    tags: BTreeMap<String, comparison::FitTarget>,
-    tag_catalog: BTreeMap<String, Value>,
-    evidence_sha256: String,
-    simple_questions_sha256: String,
-    graded_questions_sha256: String,
+pub(super) struct BaselineMaterial {
+    pub state: Value,
+    pub questions: BTreeMap<String, TypedQuestion>,
+    pub tags: BTreeMap<String, comparison::FitTarget>,
+    pub tag_catalog: BTreeMap<String, Value>,
+    pub evidence_sha256: String,
+    pub simple_questions_sha256: String,
+    pub graded_questions_sha256: String,
 }
 
 #[derive(Clone, Copy)]
@@ -51,7 +51,7 @@ fn hash_serializable<T: serde::Serialize>(value: &T) -> Result<String> {
     fingerprint(&serde_json::to_value(value)?)
 }
 
-fn baseline_material(
+pub(super) fn baseline_material(
     baseline: &Value,
     simple: &simple::Plan,
     track_id: u64,

@@ -23,6 +23,8 @@ mod ablation;
 mod comparison;
 #[path = "jev-compare/evidence.rs"]
 mod evidence;
+#[path = "jev-compare/feature.rs"]
+mod feature;
 #[path = "jev-compare/graded.rs"]
 mod graded;
 #[path = "jev-compare/journal.rs"]
@@ -49,6 +51,70 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Freeze a bounded follow-up on feature-card presentation and affect inclusion.
+    FeatureFormatPlan {
+        baseline: PathBuf,
+        features: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<u64>,
+    },
+    /// Run only an exactly rebuilt and explicitly authorized feature-format plan.
+    FeatureFormatRun {
+        baseline: PathBuf,
+        features: PathBuf,
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Export only a complete, plan-matched feature-format journal.
+    FeatureFormatReport {
+        baseline: PathBuf,
+        features: PathBuf,
+        plan: PathBuf,
+        journal: PathBuf,
+        output: PathBuf,
+    },
+    /// Freeze a bounded comparison of locally extracted numeric feature families.
+    FeaturePlan {
+        baseline: PathBuf,
+        features: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<u64>,
+    },
+    /// Run only an exactly rebuilt and explicitly authorized feature plan.
+    FeatureRun {
+        baseline: PathBuf,
+        features: PathBuf,
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Export only a complete, plan-matched feature experiment journal.
+    FeatureReport {
+        baseline: PathBuf,
+        features: PathBuf,
+        plan: PathBuf,
+        journal: PathBuf,
+        output: PathBuf,
+    },
     /// Freeze the bounded one-request-per-song Jev evidence ablation.
     AblationPlan {
         baseline: PathBuf,
@@ -358,6 +424,110 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::FeatureFormatPlan {
+            baseline,
+            features,
+            output,
+            tracks,
+        } => {
+            let plan = feature::feature_format::prepare(
+                &pilot::read_json(&baseline)?,
+                &pilot::read_json(&features)?,
+                &tracks,
+            )?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan.document)?;
+            println!(
+                "Feature-format plan: {} requests; {} conservative input units; SHA-256 {}",
+                plan.document["request_count"],
+                plan.document["max_input_units"],
+                fingerprint(&plan.document)?
+            );
+        }
+        Command::FeatureFormatRun {
+            baseline,
+            features,
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output,
+        } => {
+            let prepared = feature::feature_format::load_authorized(
+                &baseline,
+                &features,
+                &plan,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )?;
+            run(prepared.document, &prepared.comparisons, &key_file, &output).await?;
+        }
+        Command::FeatureFormatReport {
+            baseline,
+            features,
+            plan,
+            journal,
+            output,
+        } => {
+            let report = feature::feature_format::report(&baseline, &features, &plan, &journal)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &report)?;
+            println!(
+                "Complete feature-format journal exported with raw typed answers; no quality gate or adoption decision was applied."
+            );
+        }
+        Command::FeaturePlan {
+            baseline,
+            features,
+            output,
+            tracks,
+        } => {
+            let plan = feature::prepare(
+                &pilot::read_json(&baseline)?,
+                &pilot::read_json(&features)?,
+                &tracks,
+            )?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan.document)?;
+            println!(
+                "Feature plan: {} requests; {} conservative input units; SHA-256 {}",
+                plan.document["request_count"],
+                plan.document["max_input_units"],
+                fingerprint(&plan.document)?
+            );
+        }
+        Command::FeatureRun {
+            baseline,
+            features,
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output,
+        } => {
+            let prepared = feature::load_authorized(
+                &baseline,
+                &features,
+                &plan,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )?;
+            run(prepared.document, &prepared.comparisons, &key_file, &output).await?;
+        }
+        Command::FeatureReport {
+            baseline,
+            features,
+            plan,
+            journal,
+            output,
+        } => {
+            let report = feature::report(&baseline, &features, &plan, &journal)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &report)?;
+            println!(
+                "Complete feature journal exported with raw typed answers; no quality gate or adoption decision was applied."
+            );
+        }
         Command::AblationPlan {
             baseline,
             auxiliary,
