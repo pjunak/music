@@ -19,7 +19,8 @@ not a second description of the implementation.
   [graded Jev tagging experiment](JEV_GRADED_TAGGING_PILOT.md),
   [concise-question comparison](JEV_SIMPLE_QUESTION_PILOT.md),
   [evidence and harness investigation](JEV_EVIDENCE_RESEARCH.md),
-  [algorithmic feature investigation](JEV_ALGORITHMIC_FEATURE_PILOT.md)
+  [algorithmic feature investigation](JEV_ALGORITHMIC_FEATURE_PILOT.md),
+  [targeted beat, harmonic and temporal experiments](JEV_TARGETED_FEATURE_PILOT.md)
 - Library cleanup detection, metadata sources and bounded AI options:
   [metadata research](LIBRARY_METADATA_RESEARCH.md), [offline metadata pilot](LIBRARY_METADATA_PILOT.md),
   [full dates and composer tags](LIBRARY_RICH_METADATA.md)

@@ -37,6 +37,8 @@ mod quality;
 mod report;
 #[path = "jev-compare/simple.rs"]
 mod simple;
+#[path = "jev-compare/targeted.rs"]
+mod targeted;
 const MODEL: &str = "jev-1.13.0";
 const ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
@@ -51,6 +53,38 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Freeze a bounded comparison of targeted beat, harmony and time-profile features.
+    TargetedPlan {
+        baseline: PathBuf,
+        input: PathBuf,
+        output: PathBuf,
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<u64>,
+    },
+    /// Run only an exactly rebuilt and explicitly authorized targeted plan.
+    TargetedRun {
+        baseline: PathBuf,
+        input: PathBuf,
+        plan: PathBuf,
+        #[arg(long)]
+        key_file: PathBuf,
+        #[arg(long)]
+        plan_sha256: String,
+        #[arg(long)]
+        max_requests: usize,
+        #[arg(long)]
+        max_input_units: u64,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Export only a complete, plan-matched targeted comparison journal.
+    TargetedReport {
+        baseline: PathBuf,
+        input: PathBuf,
+        plan: PathBuf,
+        journal: PathBuf,
+        output: PathBuf,
+    },
     /// Freeze a bounded follow-up on feature-card presentation and affect inclusion.
     FeatureFormatPlan {
         baseline: PathBuf,
@@ -424,6 +458,58 @@ async fn call(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::TargetedPlan {
+            baseline,
+            input,
+            output,
+            tracks,
+        } => {
+            let plan = targeted::prepare(
+                &pilot::read_json(&baseline)?,
+                &targeted::input::read(&input)?,
+                &tracks,
+            )?;
+            serde_json::to_writer_pretty(new_file(&output)?, &plan.document)?;
+            println!(
+                "Targeted plan: {} requests; {} conservative input units; SHA-256 {}",
+                plan.document["request_count"],
+                plan.document["max_input_units"],
+                fingerprint(&plan.document)?
+            );
+        }
+        Command::TargetedRun {
+            baseline,
+            input,
+            plan,
+            key_file,
+            plan_sha256,
+            max_requests,
+            max_input_units,
+            output,
+        } => {
+            let prepared = targeted::load_authorized(
+                &baseline,
+                &input,
+                &plan,
+                &plan_sha256,
+                max_requests,
+                max_input_units,
+            )?;
+            run(prepared.document, &prepared.comparisons, &key_file, &output).await?;
+        }
+        Command::TargetedReport {
+            baseline,
+            input,
+            plan,
+            journal,
+            output,
+        } => {
+            let report = targeted::report(&baseline, &input, &plan, &journal)?;
+            serde_json::to_writer_pretty(new_file(&output)?, &report)?;
+            println!(
+                "Complete targeted journal exported with raw typed answers; no quality gate or adoption decision was applied."
+            );
+        }
         Command::FeatureFormatPlan {
             baseline,
             features,
