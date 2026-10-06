@@ -240,7 +240,7 @@ Strict parsing rejects missing/extra answers, invalid scores and model mismatche
 The additive native Score primitive accepts 2..10 ordered descriptive levels and
 validates level membership, finite score range and confidence/probabilities. Its
 provider legend/extensions are discarded. Score is currently exercised only by
-the [isolated graded listening experiment](JEV_GRADED_TAGGING_PILOT.md); it does not
+the isolated graded listening experiment (private research record); it does not
 change production binary tagging, its capabilities, conformance or acceptance.
 Choice validates every score in 0..1, exact option membership and a positive maximal
 winner. TypeSafe documents approximate probability sums without a rounding bound;
@@ -719,7 +719,7 @@ all fourteen must pass the current role fingerprint. The eight recording quality
 Unicode, absent evidence, duration contradiction and injected instructions. All must pass for a
 configured model to become usable. This is a pilot gate, not measured accuracy on a private library.
 Additional providers, OCR/audio models and broader recognition remain conditional research pilots;
-see [metadata research](LIBRARY_METADATA_RESEARCH.md) for source policies and the held-out benchmark.
+the metadata research notes (private until finalized) hold source policies and the held-out benchmark.
 The [offline metadata pilot](LIBRARY_METADATA_PILOT.md) scores exported catalog proposals against
 independent recording/edition/field labels with artist/release families kept in one split.
 After a completed catalog lookup, the browser can download the original job JSON, including

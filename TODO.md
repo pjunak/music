@@ -22,7 +22,7 @@ full release/original dates and composer credits in file tags and the web librar
 are implemented. This is the remaining plan for
 albums and game/film soundtracks, ordered by expected useful corrections, protection of correct metadata,
 review effort and implementation cost. Benefits are engineering estimates;
-they are not measured accuracy gains. The [research](docs/LIBRARY_METADATA_RESEARCH.md)
+they are not measured accuracy gains. The private research notes
 records the alternatives and sources. Completed work moves into the living
 Assistant contract and is removed from this backlog.
 

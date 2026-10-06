@@ -2,7 +2,7 @@
 
 Prepared 23 September 2026; clean-cutover scope reviewed against `music` commit `046f67e`.
 Status: core pipeline implemented; Jev quality repair, independent listening and production acceptance remain open. No model is certified.
-This turns the [research](SONG_EVIDENCE_RESEARCH.md) into dependency-ordered work.
+This turns the song-evidence research (private notes) into dependency-ordered work.
 Public model specifications and current source were inspected; native compatibility,
 listening accuracy, licensing suitability, and production cost still need the gates below.
 The status below identifies delivered contracts; conditional stages remain proposals.
@@ -10,7 +10,7 @@ The status below identifies delivered contracts; conditional stages remain propo
 ## Evidence reassessment — 28 September 2026
 
 The owner's rejection of the empty real-music results changes the next priority.
-The [research reassessment](SONG_EVIDENCE_REASSESSMENT.md) identifies missing learned
+The research reassessment (private notes) identifies missing learned
 instrument/style/mood evidence and reproduces misleading rhythmic development:
 a fixed 90 BPM pulse is classified as volatile. All 22 existing real-song summaries
 also say volatile; its causal effect on Jev is not yet measured. Existing EffNet

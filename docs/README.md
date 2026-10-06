@@ -14,15 +14,10 @@ not a second description of the implementation.
   [offline listening pilot](MOOD_PILOT.md),
   [factual audio acceptance probe](AUDIO_ANALYSIS_ACCEPTANCE.md)
 - Song evidence, audio models, datasets, and Jev assessment:
-  [research and proposed experiments](SONG_EVIDENCE_RESEARCH.md),
-  [ordered implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md),
-  [graded Jev tagging experiment](JEV_GRADED_TAGGING_PILOT.md),
-  [concise-question comparison](JEV_SIMPLE_QUESTION_PILOT.md),
-  [evidence and harness investigation](JEV_EVIDENCE_RESEARCH.md),
-  [algorithmic feature investigation](JEV_ALGORITHMIC_FEATURE_PILOT.md),
-  [targeted beat, harmonic and temporal experiments](JEV_TARGETED_FEATURE_PILOT.md)
+  [ordered implementation plan](SONG_EVIDENCE_IMPLEMENTATION_PLAN.md). Research and
+  experiment records stay in private local notes until finalized.
 - Library cleanup detection, metadata sources and bounded AI options:
-  [metadata research](LIBRARY_METADATA_RESEARCH.md), [offline metadata pilot](LIBRARY_METADATA_PILOT.md),
+  [offline metadata pilot](LIBRARY_METADATA_PILOT.md),
   [full dates and composer tags](LIBRARY_RICH_METADATA.md)
 - Post-audit release and model acceptance: [validation plan](AI_ACCEPTANCE.md)
 - Queue measurements and scheduling limits: [job diagnostics](JOB_DIAGNOSTICS.md)

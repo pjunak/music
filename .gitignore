@@ -123,6 +123,7 @@ coverage/
 .codeium/
 
 # Local planning and mockups stay private; architecture decisions are shared.
+# Research and experiment records also stay private until finalized as formal docs.
 docs/*
 !docs/ADR-*.md
 !docs/assistant-ux-philosophy.md
@@ -138,10 +139,6 @@ docs/*
 !docs/MOOD_CONTEXT_REVIEW.md
 !docs/MOOD_PILOT.md
 !docs/AUDIO_ANALYSIS_ACCEPTANCE.md
-!docs/SONG_EVIDENCE_RESEARCH.md
-!docs/SONG_EVIDENCE_REASSESSMENT.md
-!docs/JEV_GRADED_TAGGING_PILOT.md
 !docs/SONG_EVIDENCE_IMPLEMENTATION_PLAN.md
-!docs/LIBRARY_METADATA_RESEARCH.md
 !docs/LIBRARY_METADATA_PILOT.md
 !docs/LIBRARY_RICH_METADATA.md
