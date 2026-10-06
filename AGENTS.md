@@ -4,6 +4,10 @@ Self-hosted Rust + React music player and tabletop-session orchestrator.
 The server owns canonical playback, library, authentication, and device state.
 Browsers, headless appliances, and the optional Baton Android client consume it.
 
+This is a personal project with one operator. Keep user data safe first, then
+favour simple, clear code. Avoid hardening or process that a solo, low-risk
+setup does not need.
+
 ## Read by task
 
 Read only the relevant owner and section before changing a subsystem. Follow
@@ -65,27 +69,21 @@ clients/                   external output and authoring contracts
 - Durable jobs declare restartability and bounded cancellation. Preserve
   transaction/recovery ordering and never substitute development data for live
   data. Detailed persistence rules are in the engineering reference.
-- Production rollout belongs to `pjunak/infra`, target `music`. This repo
-  verifies/publishes its image and waits for the exact main-only infrastructure
-  run to deploy the immutable digest and verify health. It never SSHes to
-  production. The [deployment guide](README.md#automated-deployment) and infra's
-  [shared contract](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md)
-  own token scope, pinned client use and **Deploy published release** retries.
-  `INFRA_SERVICE` is unused here; headless output and Baton installation remain
-  separate from server rollout.
+
+## Delivery
+
+A main push verifies and publishes the image; `pjunak/infra` deploys it as
+target `music` and the workflow waits for that result. See the
+[deployment guide](README.md#automated-deployment) for retries. The native
+output (`music-output`) and Baton are installed separately by their owners.
 
 ## Completion
 
-Select final checks from [the validation matrix](docs/VALIDATION.md). Prose-only
-changes need diff/link/claim verification; runtime and shared-contract changes
-need their applicable regression and repository gates. Report checks actually
-run and any outstanding provider, Docker, physical-audio or manual acceptance.
-Keep relevant generated-contract, architecture and documentation checks intact.
+Pick checks from [the validation matrix](docs/VALIDATION.md); documentation-only
+changes need a diff review, link check and verification of changed claims.
+Report anything left unverified (provider, Docker, physical audio, manual).
+Update the owning reference when a contract changes instead of copying detail
+into this file.
 
-Update the owning reference when its contract changes; avoid copying detailed
-rules back into this entrypoint. Keep this file comfortably below the project
-instruction budget, leaving room for narrower guidance.
-
-Create logical local commits after applicable validation and preserve unrelated
-changes. Never push, deploy, or release unless explicitly requested. Do not
-commit media, databases, secrets, transient builds or local tool configuration.
+Commit locally after validation. Never push, deploy or release without explicit
+approval. Keep media, databases, secrets and build output out of Git.
