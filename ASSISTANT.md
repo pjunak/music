@@ -18,8 +18,8 @@ remain the operator-facing acceptance procedure.
 - Optional local voice/instrumental analysis can enrich the same factual track context.
 - Database mood tags remain separate from embedded file metadata and generated suggestions.
 - The local playlist planner creates a reviewable draft and is the default.
-- Optional provider models can assist playlist planning, mood tagging, mood-tag
-  cleanup, library metadata candidate review, and ten-band EQ drafting.
+- Optional provider models can assist playlist planning, mood tagging, library
+  metadata candidate review, and ten-band EQ drafting.
 - Every model task has a separate role. Roles may share one connection and key or
   use different connections, providers, models, and keys.
 - Playlist and EQ drafts go through Authoring import preview and explicit commit.
@@ -170,8 +170,8 @@ Managed deployments may instead generate a URL-safe base64 key outside the repos
 
 The key encrypts provider credentials in `app.db`; it is not a provider API key. Losing
 it does not expose a provider key, but it makes every saved credential unreadable and
-requires those credentials to be entered again. For file-backed storage, **Reset AI secure
-storage** can deliberately start over through the UI after current-password confirmation.
+requires those credentials to be entered again. For file-backed storage, **Reset encrypted
+key storage** can deliberately start over through the UI after current-password confirmation.
 It erases all saved provider credentials and their verification/quality gates before it
 removes the fixed key file, while retaining connection and role drafts. Environment-backed
 keys remain deployment-managed. Use the offline rotation workflow in section 7 when saved
@@ -315,14 +315,13 @@ Use a small, representative sample before running across the whole library.
 
 After the application's deployment finishes successfully, refresh the page. If
 **TypeSafe Jev** is missing from the connection types, the deployed build does not
-contain the native adapter yet. The dedicated applicability/grounding strategy requires
-Jev engine v9; updating it makes old model/quality checks stale. The full v8 run
-regressed to 49/66, so v9 restores the preceding v7 questions, whose last full run
-reached 55/66. All safety and custom-vocabulary checks passed in both runs, but
-overall and acoustic quality gates still fail. V9 has no fresh paid certification.
-No quality requirement has been relaxed. See the
-[dated result and remaining work](docs/AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28)
-before paying to repeat the unchanged configuration.
+contain the native adapter yet. The dedicated applicability/grounding strategy is
+the Jev engine `music-jev-decisions/v10`; changing it makes old model/quality checks
+stale. No full quality run has certified the current engine: earlier engines passed
+every safety and custom-vocabulary check but failed the overall and acoustic quality
+gates. No quality requirement has been relaxed. See the
+[last full result and remaining work](docs/AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28)
+before paying for a run.
 
 1. Get an API key from the [TypeSafe console](https://console.typesafe.ai/), following
    its [quick start](https://docs.typesafe.ai/introduction/quickstart). No SDK or local
@@ -528,16 +527,18 @@ without changing the database; whole-container playback/resource acceptance rema
 This is sensible before relying on saved provider credentials in production, but it is
 not required for every deployment and is irrelevant when no provider key is stored.
 
-Run the read-only credential audit inside the deployed application environment:
+Run the credential audit in the deployed application environment while the server is
+stopped; it needs the database's exclusive lock and applies pending migrations to an older
+database after a verified backup:
 
 ```console
 music-cli assistant-credentials check
 ```
 
-For Docker, this is normally:
+For Docker, stop `music` and use a one-off container with the same mounts and environment:
 
 ```console
-docker exec music music-cli assistant-credentials check
+docker run --rm -v /srv/music-data:/data -v /srv/music-secrets:/run/music-secrets music-rust music-cli assistant-credentials check
 ```
 
 Follow the deployment stack's own runbook for file paths and the safe
@@ -603,7 +604,7 @@ separate data-minimization contract, tests, failure policy, and explicit review 
 
 ## Library cleanup and metadata evidence
 
-Open **Assistant → Library cleanup → Run**. Renaming collisions propose an unchecked unique
+Open **Assistant → Library cleanup → Clean up**. Renaming collisions propose an unchecked unique
 name using existing artist, album or track positions, with numbered suffixes as the fallback.
 Embedded titles stay unchanged by collision handling. Enable catalog evidence to identify recordings,
 review competing local/catalog values and choose an album edition for each folder. Matching a

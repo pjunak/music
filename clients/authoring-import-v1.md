@@ -85,12 +85,23 @@ from `GET /api/authoring/import/document/schema`.
 Every top-level resource array is optional, but the document must contain at least one resource.
 Unknown fields are rejected so a misspelling cannot be silently ignored.
 
+Optional fields not shown above:
+
+- soundboard item `hotkey` (at most 16 characters);
+- interrupt `soundboard_item` (instead of `playlist`) and `duck_to` (`0..1`);
+- cue `description` (at most 2,000 characters), `start_index` (at most 100,000) and `start_ms`;
+- cue `loops`: `{ "soundboard", "item", "interval_s", "volume" }` entries that repeat a sound
+  every `interval_s` seconds (`1..3600`); `volume` defaults to 1 as for cue `sfx`.
+
+The generated OpenAPI schema for the preview endpoint is the exact field reference.
+
 ## Reference rules
 
 - IDs use lowercase letters, digits, hyphens, and underscores, start with a letter or digit, and
   are at most 64 characters.
-- Playlist tracks and sound item files are canonical paths relative to the music library. Use
-  forward slashes; absolute paths, backslashes, drive letters, `.` and `..` segments are invalid.
+- Playlist tracks are canonical paths relative to the music library; soundboard item files and
+  the cue/interrupt references to them are relative to the SFX library. Use forward slashes;
+  absolute paths, backslashes, drive letters, `.` and `..` segments are invalid.
 - Missing playlist tracks are warnings. The playlist can still be selected, and unavailable tracks
   are listed and omitted during commit.
 - An interrupt references exactly one source: `playlist` or `soundboard_item`.
@@ -120,5 +131,6 @@ mode manifest are applied as one operation; if validation or mode reload fails, 
 are rolled back.
 
 The current safety limits are 1 MiB per file or paste in the web app, 500 total resources, 20,000
-playlist track references, 20,000 soundboard items, and 20,000 cue sound actions per document, and
-10,000 tracks per individual playlist.
+playlist track references, 20,000 soundboard items, and 20,000 cue sound actions (`sfx` plus
+`loops`) per document; 10,000 tracks per playlist; 500 `sfx` and 500 `loops` per cue; and 32
+effects with `crossfade_ms` at most 60,000 per preset.

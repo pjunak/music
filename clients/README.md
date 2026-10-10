@@ -58,10 +58,14 @@ current track.
 | | Transport | Use when |
 |---|---|---|
 | **WebSocket** (recommended) | `ws(s)://<host>/api/ws` — server pushes on every change | You want instant reaction to play/pause/skip |
-| **HTTP polling** | `GET /api/sync/state` every ~1–2s — returns the full `PlayerState` | Your environment can't open a WebSocket (some old TV browsers, constrained MCUs) |
+| **HTTP polling** | `GET /api/sync/state?client_id=<id>` every ~1–2s — returns the `PlayerState` | Your environment can't open a WebSocket (some old TV browsers, constrained MCUs) |
 
 Both return the **same** `PlayerState` shape. Both are reachable **without authentication**
-(guest access) — see [Auth](#auth).
+(guest access) — see [Auth](#auth). Guests receive a filtered projection: `connected_devices`
+is empty, and `active_output_device_ids` and `device_volumes` contain only the caller's own
+client ID (the registered socket, or the optional `client_id` query parameter of 1–64
+characters for polling). A polling client never registers, so it cannot be activated from the
+Console and should keep its own local on/off.
 
 ## The WebSocket handshake
 
@@ -186,8 +190,10 @@ The whole output protocol works **as a guest** — no cookie, no token. A guest 
   be designated + toggled from the Console),
 - stream tracks, covers, metadata, and referenced SFX.
 
-A guest **cannot** mutate server state. For an output that's exactly right — you *follow*
-state, you don't drive it. The narrow consequences:
+A guest **cannot** mutate server state; a mutating action is answered with
+`{"type": "error", "detail": "…", "code": null}`. Authenticated sockets may also receive
+`code: "session_expired"` or `"session_revoked"`. Clients should tolerate `error` messages.
+For an output, following without driving is exactly right. The narrow consequences:
 
 - **Identity and default-on survive reconnects; live membership does not.** The server removes a
   disconnected socket from `active_output_device_ids`. On reconnect, a remembered **output by
@@ -313,19 +319,12 @@ GStreamer/pyglet kiosk (not a browser), so the audio output there is the **headl
 on that same machine, and the on/off + volume control lives in the existing `control.html`:
 
 1. **Audio:** run the [`music-output` Rust appliance](headless/) on the dnd-table box as a systemd
-   service (see its README), pointed at the player with `MUSIC_CONTROL_PORT` set so it exposes
-   a small LAN control endpoint.
+   service (see its README), with `MUSIC_CONTROL_PORT`, `MUSIC_CONTROL_BIND=0.0.0.0` and
+   `MUSIC_CONTROL_TOKEN` set so it exposes a small LAN control endpoint (it binds to loopback
+   by default).
 2. **Control:** add a "Music" card to `templates/control.html` (vanilla JS) that talks to the
-   appliance's `/control` endpoint **on the LAN** — no player credential needed:
-   ```js
-   const OUT = "http://dnd-table.local:8731";   // the appliance's MUSIC_CONTROL_PORT
-   async function refresh() {
-     const s = await (await fetch(`${OUT}/control`)).json();   // {on, volume, is_playing, title, artist}
-     // …render on/off state + now-playing…
-   }
-   const setOn  = (on)  => fetch(`${OUT}/control`, {method:"POST", body: JSON.stringify({on})});
-   const setVol = (v)   => fetch(`${OUT}/control`, {method:"POST", body: JSON.stringify({volume:v})});
-   ```
+   appliance's `/control` endpoint on the LAN with the control token; no player credential is
+   needed. See the [example card](headless/README.md#local-control-surface-for-the-dnd-table-panel-or-anything-on-the-lan).
 
 This keeps the player server untouched and the dnd-table repo's only change a small card in
 its own control panel. For full-fidelity effects/crossfade on that box (rather than plain

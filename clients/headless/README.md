@@ -98,9 +98,9 @@ Most options also have an environment-variable equivalent (handy for the systemd
 | Flag | Env | Default | Meaning |
 |---|---|---|---|
 | `--server URL` | `MUSIC_SERVER_URL` | — (required) | The player's base URL |
-| `--name NAME` | `MUSIC_OUTPUT_NAME` | hostname | Name shown in the Console |
+| `--name NAME` | `MUSIC_OUTPUT_NAME` | `$HOSTNAME`/`$COMPUTERNAME`, else `music-output` | Name shown in the Console; systemd does not export `HOSTNAME`, so set it there |
 | `--client-id ID` | `MUSIC_CLIENT_ID` | persisted generated id | Override the stable identity |
-| — | `MUSIC_STATE_DIR` | `~/.config/music-output` | Directory for the generated client id |
+| `--state-dir PATH` | `MUSIC_STATE_DIR` | `$XDG_CONFIG_HOME/music-output`, else `~/.config/music-output` | Directory for the generated client id |
 | `--control-port N` | `MUSIC_CONTROL_PORT` | off | Serve the on/off+volume control endpoint |
 | `--control-bind ADDR` | `MUSIC_CONTROL_BIND` | `127.0.0.1` | Control bind address; `0.0.0.0` to expose on the LAN |
 | `--control-token TOKEN` | `MUSIC_CONTROL_TOKEN` | — | Require this token (`X-Control-Token`) on control requests |
@@ -139,16 +139,20 @@ Example "Music" card for the dnd-table control panel:
 
 ```js
 const OUT = "http://dnd-table.local:8731";
+const TOKEN = "…";  // the appliance's MUSIC_CONTROL_TOKEN
+const headers = {"Content-Type": "application/json", "X-Control-Token": TOKEN};
+let lastOn = false;
 async function refresh() {
-  const s = await (await fetch(`${OUT}/control`)).json();
+  const s = await (await fetch(`${OUT}/control`, {headers})).json();
+  lastOn = s.on;
   musicBtn.textContent = `Music: ${s.on ? "ON" : "OFF"}`;
   nowPlaying.textContent = s.title ? `${s.title} — ${s.artist ?? ""}` : "";
   volSlider.value = s.volume;
 }
-musicBtn.onclick = () => fetch(`${OUT}/control`,
-  {method:"POST", body: JSON.stringify({on: !lastOn})}).then(refresh);
-volSlider.oninput = (e) => fetch(`${OUT}/control`,
-  {method:"POST", body: JSON.stringify({volume: +e.target.value})});
+const post = (body) =>
+  fetch(`${OUT}/control`, {method: "POST", headers, body: JSON.stringify(body)});
+musicBtn.onclick = () => post({on: !lastOn}).then(refresh);
+volSlider.oninput = (e) => post({volume: +e.target.value});
 setInterval(refresh, 2000);
 ```
 

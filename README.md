@@ -34,7 +34,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
 - **Multi-device output** — any connected browser tab (or headless client) can be switched on as
   a live speaker, each with its own canonical software volume. A device can be saved as "output by default" so
   it auto-activates when it reconnects.
-- **TV / room display** — a read-only now-playing view at `/` for a screen in the room, usable
+- **TV / room display** — a read-only now-playing view at `/tv` (also `/` for guests) for a screen in the room, usable
   **without logging in** (guest access), with cover art, up-next, and recently-played.
 - **Compatibility mode** — a dependency-free ES5 fallback player (`compat-mode.js`, built from TypeScript in `frontend/compat/`) for browsers
   that can't run the SPA (old smart TVs). Loads via `<script nomodule>` or a boot watchdog when
@@ -94,15 +94,15 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   the chosen provider supports them. A harness or task contract upgrade makes existing
   model tests and quality reports stale so they must be rerun explicitly. The harness is not
   exposed as a general prompt API. Provider adapters declare
-  supported transports such as structured text or future bounded audio input; verification records
-  the capabilities actually confirmed, and tasks accept only compatible verified connections.
+  supported transports such as structured text or future bounded audio input; verification proves
+  access and lists models, and tasks accept only verified connections whose adapter declares the
+  capability they need.
   Reserved future tasks remain visible as planned work but cannot be configured before their
   feature-specific input, quality, consent, and review contracts exist. The playlist planner,
-  context-aware mood tagger, mood-tag cleanup reviewer, and EQ draft assistant are the implemented
-  optional model tasks.
+  context-aware mood tagger, library metadata cleanup reviewer, and EQ draft assistant are the
+  implemented optional model tasks.
   Each task being used requires its own current synthetic quality pass and versioned disclosure
-  consent. Mood tagging does not require configuring, testing or running mood-tag cleanup. Playlist
-  planning sends at most 100 path-free candidates, constrains the response to those exact track
+  consent. Playlist planning sends at most 100 path-free candidates, constrains the response to those exact track
   IDs, and returns a draft.
   Playlist refinement keeps local defaults and supplements its bounded candidate pool through
   current vocabulary aliases/cues matched to your tags. The provider receives only
@@ -115,7 +115,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   stores suggestions under `model-context-tagger/v8` for explicit per-tag review.
   Pilots default to 20 tracks and stop after an empty request. Saved explanations,
   outcome filters and selected-track reconsideration make results reviewable without
-  another whole-library pass. Cleanup is optional legacy tag-name maintenance.
+  another whole-library pass.
   The pre-run plan shows the normal batch estimate and a maximum that includes up to two
   fresh contract-recovery requests; invalid output is never silently repaired.
   **Assistant → Mood library → Mood vocabulary** exposes every canonical name, definition, group,
@@ -129,15 +129,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   files, waveforms, full timelines, spectrograms, track titles, display titles, file and folder
   names, library paths, database mood tags, and detailed measurements remain on the server. Neither
   workflow can write a playlist or
-  manual tag directly. Tag cleanup resolves declared aliases and unambiguous spelling/plural cases
-  locally first, then sends only unresolved source IDs/names and usage counts plus canonical ID
-  definitions in batches of at most 20. The model returns exactly one canonical-ID-or-null decision
-  per source. Local-only cleanup makes no provider call, and every stored
-  suggestion identifies whether it came from a local rule or the model. The built-in groups separate
+  manual tag directly. The built-in groups separate
   physical setting, period feel, scene, and emotional mood; period feel describes the era the track
-  evokes rather than its release date. The proposal remains inert
-  until
-  the user selects specific renames, and stale proposals are rejected. Quality, playlist, tagging,
+  evokes rather than its release date. Quality, playlist, tagging,
   and cleanup jobs retain their attempted request count,
   provider-reported model IDs, and reported input/output token totals; the UI identifies calls where
   the provider omitted usage rather than treating missing counts as exact zero. Usage is checkpointed
@@ -181,10 +175,7 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   suggestions remain visibly and
   structurally separate, while local playlist ranking gives explicit manual matches priority.
   Multi-select actions apply tags across a batch, and usage-aware rename can merge overlapping tags
-  without leaving duplicates. A conservative local cleanup preview applies operator-declared aliases
-  and finds only unambiguous spelling or plural matches to the controlled vocabulary; it changes
-  nothing until individual suggestions are selected, rejects stale previews, and applies the chosen
-  renames in one transaction. Generated
+  without leaving duplicates. Generated
   tags expose their analyzer, per-tag support, reasons and observation references for review; accepting copies one into
   manual tags, while rejection remains a separate durable decision, keeps that suggestion out of authored playlist evidence, and never mutates authored data.
   Review-state filters and explicitly selected bulk decisions make larger libraries manageable;
@@ -200,13 +191,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   preselects only suggestions marked supported for explicit acceptance. It never receives
   track titles, display titles, library paths, audio, existing database mood tags, or review decisions; it skips unchanged
   model profiles and cannot promote its output without acceptance.
-  Optional AI cleanup shares the mood-tagging model settings but has its own quality check.
-  It reviews only the database mood-tag catalog and usage counts, not generated tagging results.
-  It proposes renames in a durable server job, selects nothing by default, and can
-  apply only the individually checked, still-current proposal items in one atomic transaction.
 - **Automatic playlists** — switch a normal playlist to a versioned local tag/BPM rule after
   previewing its exact resolved songs. Rules can match any or every included tag, exclude tags,
-  choose accepted/manual tags alone or add current local metadata analysis, bound BPM and list
+  use accepted/manual tags only, bound BPM and list
   length, and use deterministic ordering. The result materializes into the same ordered playlist
   rows used by playback and refreshes when opened or played after relevant library evidence changes.
   Individual item edits stay locked while automatic mode is active; switching back to manual keeps
@@ -242,15 +229,16 @@ sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-data
 # this and its mount if no model-provider or catalog API keys will be saved in Music.
 sudo install -d -m 0700 -o 1000 -g 1000 /srv/music-secrets
 
+# Create the operator account before starting the server; the CLI needs the
+# database's exclusive lock. The password prompts interactively.
+docker run --rm -it -v /srv/music-data:/data music-rust music-cli create-user admin
+
 # Run it — application data and optional secrets stay separate.
 docker run -d --name music \
   -p 8000:8000 \
   -v /srv/music-data:/data \
   -v /srv/music-secrets:/run/music-secrets \
   music-rust
-
-# Create the operator account (password prompts interactively)
-docker exec -it music music-cli create-user admin
 ```
 
 Then open `http://localhost:8000` and sign in. A fresh install boots fine with **zero** audio
@@ -340,8 +328,10 @@ delete it explicitly before entering another one. Removing it keeps the connecti
 choices, but prevents use until a new key is saved, the connection is verified, and the exact model
 configuration passes its tests again.
 
-Before relying on a backup, verify that its database and deployment key still match. This command
-is read-only: it prints a short non-secret key ID and counts, but never prints an API key.
+Before relying on a backup, verify that its database and deployment key still match. Run it with
+the server stopped (it needs the database's exclusive lock) or against an isolated copy. It prints a
+short non-secret key ID and counts, never an API key. Like every storage-opening command, it applies
+pending migrations to an older database after a verified backup.
 
 ```powershell
 music-cli assistant-credentials check
@@ -374,8 +364,9 @@ role choices remain, but must be verified and checked again. Never keep the old 
 same long-lived environment file.
 
 Connection types and model tasks are linked through versioned capabilities rather than provider or
-model-name guesses. OpenAI-compatible and Google Gemini adapters verify `structured-text/v1`; the
-explicit strict-schema variants additionally verify `strict-json-schema/v1`. Future
+model-name guesses. Each adapter declares the capabilities it implements, such as
+`structured-text/v1` or `strict-json-schema/v1`; a role's conformance test proves its structured
+output on the configured model. Future
 audio-capable adapters must implement and verify their own bounded `audio-input/v1` transport before
 the specialized audio-analysis role can be configured.
 
