@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { presetsApi } from "@/core/api";
+import { presetsApi, sfxApi } from "@/core/api";
 import type { PresetManifest } from "@/core/api";
 import { playbackEngine } from "@/core/playbackEngine";
 import { selectIsMyOutput, usePlayerStore } from "@/core/playerStore";
@@ -173,8 +173,7 @@ export function AudioEngine() {
   useEffect(() => {
     const unsub = wsClient.subscribe((msg) => {
       if (msg.type === "sfx_fired") {
-        const url = `/api/sfx/file?path=${encodeURIComponent(msg.item_path)}`;
-        playbackEngine.fireSfx(url, msg.volume);
+        playbackEngine.fireSfx(sfxApi.fileUrl(msg.item_path), msg.volume);
       }
     });
     return unsub;

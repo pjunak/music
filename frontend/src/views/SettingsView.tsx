@@ -5,7 +5,7 @@ import { DeviceIcon } from "@/components/DeviceIcon";
 import { SettingsIcon } from "@/components/icons";
 import { inputDialog } from "@/components/inputDialog";
 import { Switch } from "@/components/Switch";
-import { authApi, devicesApi } from "@/core/api";
+import { authApi, devicesApi, downloadBlob } from "@/core/api";
 import type { ActiveSession } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import { deviceDisplayName } from "@/core/deviceVisual";
@@ -280,21 +280,11 @@ function BackupPanel() {
   async function download() {
     setBusy(true);
     try {
-      const response = await fetch("/api/admin/backup", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(text || `HTTP ${response.status}`);
-      }
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const match = disposition.match(/filename="([^"]+)"/);
-      const fname = match ? match[1] : "music-backup.tar.gz";
-      const blob = await response.blob();
+      const { blob, filename } = await downloadBlob("/api/admin/backup");
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = fname;
+      a.download = filename ?? "music-backup.tar.gz";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -311,15 +301,17 @@ function BackupPanel() {
     <section className="surface-card settings-card">
       <h2>Backup</h2>
       <p className="muted small">
-        Download a tar.gz of <code>app.db</code>, <code>modes/</code> (including
-        each mode's EQ presets), and the saved <code>devices.json</code> — the
-        persistent state worth keeping. Music and SFX libraries aren't included;
-        back those up at the filesystem level (rsync / SFTP) since they're large
-        and change rarely from the app's perspective.
+        Download a tar.gz of <code>app.db</code> and <code>modes/</code> (including
+        each mode's EQ presets) with a manifest — the persistent state worth
+        keeping. Music and SFX libraries aren't included; back those up at the
+        filesystem level (rsync / SFTP) since they're large and change rarely from
+        the app's perspective.
       </p>
       <p className="muted small">
-        Restore is manual: stop the server, replace the files in place, start
-        again.
+        Restore with <code>music-cli backup restore</code> while the server is
+        stopped.
+        Saved provider keys stay readable only with the matching Assistant
+        credential key, which is not in the archive.
       </p>
       <div>
         <button

@@ -70,33 +70,66 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   const text = await response.text();
   const contentType = response.headers.get("content-type") ?? "";
-  const looksLikeJson = contentType.includes("application/json");
+  if (!response.ok) {
+    throw responseError(response.status, response.statusText, contentType, text);
+  }
+  if (!text) return undefined as T;
+  if (!contentType.includes("application/json")) {
+    throw responseError(response.status, response.statusText, contentType, text);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    // A success status with an unreadable body must not reach callers as undefined.
+    throw new ApiError(response.status, "malformed JSON response");
+  }
+}
 
-  let parsed: unknown = undefined;
+/** Build the ApiError for a failed or non-JSON response, notifying the auth
+ *  store on 401. Shared by fetch, XHR uploads and file downloads. */
+function responseError(
+  status: number,
+  statusText: string,
+  contentType: string,
+  text: string,
+): ApiError {
+  const looksLikeJson = contentType.includes("application/json");
+  let fromJson: string | null = null;
   if (text && looksLikeJson) {
     try {
-      parsed = JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && "detail" in parsed) {
+        fromJson = formatApiDetail(parsed.detail);
+      }
     } catch {
-      // fall through — surfaced as the error detail below.
+      // fall through to the status text.
     }
   }
+  const snippet = text.slice(0, 200).replace(/\s+/g, " ").trim();
+  const detail =
+    fromJson ??
+    (looksLikeJson || !text
+      ? statusText || `HTTP ${status}`
+      : `non-JSON response (${contentType || "no content-type"}): ${snippet}`);
+  if (status === 401) onUnauthorized?.();
+  return new ApiError(status, detail);
+}
 
-  if (!response.ok || (text && !looksLikeJson)) {
-    const fromJson =
-      parsed && typeof parsed === "object" && parsed !== null && "detail" in parsed
-        ? formatApiDetail(parsed.detail)
-        : null;
-    const snippet = text.slice(0, 200).replace(/\s+/g, " ").trim();
-    const detail =
-      fromJson ??
-      (looksLikeJson
-        ? response.statusText
-        : `non-JSON response (${contentType || "no content-type"}): ${snippet}`);
-    if (response.status === 401) onUnauthorized?.();
-    throw new ApiError(response.status, detail);
+/** Download a binary API response (e.g. a backup archive) as a Blob. */
+export async function downloadBlob(path: string): Promise<{ blob: Blob; filename: string | null }> {
+  const response = await fetch(`${BASE}${path}`, { credentials: "include" });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw responseError(
+      response.status,
+      response.statusText,
+      response.headers.get("content-type") ?? "",
+      text,
+    );
   }
-
-  return parsed as T;
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? null;
+  return { blob: await response.blob(), filename };
 }
 
 export const api = {
@@ -133,14 +166,14 @@ function uploadWithProgress<T>(
         }
         return;
       }
-      let detail = `${xhr.status}: ${xhr.statusText}`;
-      try {
-        const body = JSON.parse(xhr.responseText) as { detail?: unknown };
-        if (body && typeof body.detail === "string") detail = body.detail;
-      } catch {
-        if (xhr.responseText) detail = xhr.responseText.slice(0, 200);
-      }
-      reject(new ApiError(xhr.status, detail));
+      reject(
+        responseError(
+          xhr.status,
+          xhr.statusText,
+          xhr.getResponseHeader("content-type") ?? "",
+          xhr.responseText,
+        ),
+      );
     };
     xhr.send(form);
   });
