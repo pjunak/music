@@ -54,11 +54,11 @@ and [interpretation limits](docs/LIBRARY_METADATA_PILOT.md#when-an-http-error-ha
 
 ## Conditional cleanup
 
-- **Remove the SPA end-of-track stall backstop.** The server-side advancer has
-  existed since 2026-07-08. Once its production behavior is confirmed, delete
-  `maybeAdvanceAtEnd`, `endStallTime`, and `ADVANCE_DEBOUNCE_MS` from
+- **Remove the SPA end-of-track stall backstop.** The playback actor advances
+  tracks server-side. Once its production behavior is confirmed, delete
+  `maybeAdvanceAtEnd`, `endStallTime` and `END_STALL_EPSILON_S` from
   `frontend/src/core/playbackEngine.ts`. Preserve the low-latency `ended` → skip
-  path.
+  path and its `ADVANCE_DEBOUNCE_MS` guard.
 
 - **Pin container bases and CI actions by digest** if supply-chain
   reproducibility becomes more important than automatic patch updates.

@@ -19,6 +19,3 @@ Add feature-specific rules to their owner. Shared tokens and reusable component
 rules stay shared. This is file ownership, not CSS selector isolation; existing
 selectors and their order remain part of the contract. Further extraction should
 follow actual feature work rather than delay it.
-
-The initial extraction preserved every declaration and rule in the original order;
-the production CSS was byte-for-byte identical before and after the split.

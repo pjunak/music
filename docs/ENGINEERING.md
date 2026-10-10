@@ -8,7 +8,7 @@ is selected using [the validation matrix](VALIDATION.md).
 
 ## State and synchronization
 
-- The `PlaybackHandle` actor in `music-application` is authoritative. Every state mutation is
+- The playback actor (`PlaybackActorHandle`) in `music-application` is authoritative. Every state mutation is
   reduced, persisted, and only then published; HTTP and WebSocket actions use the same owner.
 - `music-protocol` is the wire contract. Update Rust schemas, frontend types and
   guards, compatibility behavior, external-client docs, and tests together.
@@ -168,12 +168,14 @@ is selected using [the validation matrix](VALIDATION.md).
   key. A legacy `devices.json` may be imported but is never a second authority. Seed modes copy
   only when the target is empty.
 - The reusable verification workflow validates Rust, the frontend, architecture boundaries,
-  dependencies, the final Rust-only tree, and the non-root release image. The `main` workflow calls
-  it before publishing an image or dispatching infrastructure deployment.
+  dependencies and the final Rust-only tree; pull requests also verify the non-root image. The
+  `main` workflow calls it, then builds, smoke-tests and publishes the image before dispatching
+  infrastructure deployment.
 - Private-library context/voice runs, long resource soaks, and physical-speaker checks are useful
   post-cutover operational checks for this personal deployment, not merge blockers. Keep failures
   visible and fix them normally; never weaken model or protocol contracts merely to make a check pass.
 - `rewrite-tree.mts final` protects the completed language boundary. Do not weaken its allowlist to
   make a stale runtime, workflow, generated artifact, or transition tool pass.
 - This repository does not SSH to production. Deployment rollout, reverse
-  proxy, bind mounts, and production `.env` live in `junak.eu`.
+  proxy, bind mounts, and production `.env` live in the infrastructure repository
+  (`pjunak/infra`).

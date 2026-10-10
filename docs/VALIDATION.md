@@ -1,11 +1,11 @@
 # Validation and development
 
 Run commands from the repository root unless a different directory is shown.
-Read the relevant rows before choosing checks. CI/release coverage is unchanged.
+Read the relevant rows before choosing checks.
 
 | Change | Final checks |
 |---|---|
-| Prose or agent guidance only | Review the diff and local links; verify changed command/contract claims against their owner. Run contract documentation checks when inventory values or generated contracts change. No runtime rebuild solely for prose. |
+| Prose or agent guidance only | Review the diff and local links; verify changed command/contract claims against their owner. Run `music-cli contracts check` when generated contracts change. No runtime rebuild solely for prose. |
 | Rust behavior | Focused regression tests while iterating; formatting, architecture checks, workspace check/Clippy/nextest/doc tests and contracts check below on the final change. |
 | Frontend behavior | Frontend lint, typecheck, tests and build; inspect affected visible flows. Rust gates apply when a server/wire contract also changes. |
 | Development audio references | `node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts tools/jev-audio-evidence.test.mts`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
@@ -62,12 +62,15 @@ node --test .github/scripts/rust-architecture.test.mts
 node --test tools/mood-pilot.test.mts
 node --test tools/cleanup-pilot.test.mts
 node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts
+node --test .github/scripts/publish-output.test.mts
 node .github/scripts/rust-architecture.mts
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo nextest run --workspace --all-features
-cargo test --workspace --all-features --doc
+cargo check --locked --workspace --all-targets
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo nextest run --locked --workspace --all-features
+cargo test --locked --workspace --all-features --doc
 cargo build --locked --release -p music-output --bin music-output
+# On Linux; CI then smoke-tests the package with Docker in debian:13-slim:
+bash .github/scripts/package-output.sh
 cargo run --locked -p music-server --bin music-cli -- contracts check --root .
 cargo deny check
 cargo audit --deny warnings

@@ -36,9 +36,9 @@ When two descriptions disagree, resolve the disagreement in the same change:
 4. ADRs record why a decision was made and may contain historical version strings;
 5. the operator guide describes deployment and human acceptance.
 
-The documentation tests intentionally bind this file to the runtime contract constants. They do
-not prove model quality or provider compatibility; the task-specific quality and conformance gates
-remain authoritative for those claims.
+The version inventory here is maintained by hand against the runtime contract constants; no test
+reads this file. It does not prove model quality or provider compatibility; the task-specific
+quality and conformance gates remain authoritative for those claims.
 
 ## Non-negotiable boundaries
 
@@ -344,13 +344,14 @@ revision, so an old review cannot accept a newly generated proposal by coinciden
 Catalog profiles also record their vocabulary fingerprint. Accepted/manual tags survive
 invalidation and the migration; legacy catalog proposals must be regenerated.
 
-Catalog workflow now lives in `music-application/cleanup_enrichment/workflow.rs`.
+Catalog workflow lives in `crates/music-application/src/cleanup_enrichment/workflow.rs`.
 Its `CatalogConnector` port returns typed observations; server adapters retain HTTP,
 credential fallback, rooted fingerprint execution, and response parsing. The application
 owns identity thresholds, fallback decisions, vocabulary mapping, cache validity and
 review proposals. Malformed collection responses fail instead of being cached as empty
-evidence. `catalog-evidence-policy/v10` is included in evidence signatures and invalidates
-results created before full-credit script preservation, edition alternatives and imported-source review.
+evidence. `catalog-evidence-policy/v13` is included in evidence signatures, so cached evidence
+from an older policy is refreshed; v13 refreshes caches that did not retain original community
+observations.
 
 The five model tasks derive their static output shapes from the strict Serde result
 types with Schemars. Required fields, nested object closure, types, nullability, and
@@ -830,7 +831,8 @@ prior consent.
 2. Change the strict Rust type and local validators first. Generate the provider schema from that same
    model; do not hand-maintain a second schema description.
 3. Advance the smallest owning contract version. If runtime behavior or harness semantics changed,
-   also update `MODEL_ROLE_RUNTIME_CONTRACTS` or the shared harness version so old gates become stale.
+   also update the role's `runtime_contract` in `providers.rs` or `ASSISTANT_RUNTIME_CONTRACT_VERSION`
+   so old gates become stale.
 4. Update the fixed task example, request-specific schema closure, synthetic suite, negative cases,
    and privacy assertions. Never use private library data as a checked-in fixture.
 5. Update the task disclosure when any sent/retained data category or retry/cost boundary changes.
@@ -1150,8 +1152,7 @@ Accepted/manual tags never change as part of inference or reconsideration.
   tag count and review decisions. Preserve run ID/time for current and outdated
   results; empty results still count as processed. Apply model/run/source filters
   before review counts and pagination. Run views are retained profiles, not lifetime
-  history. Label local metadata keyword guesses honestly, never as AI detection or
-  embedded mood metadata.
+  history.
   Tag cleanup detection is pure and conservative. Bind its preview to the current manual-tag
   catalog, require explicit per-suggestion selection, reject stale or invented selections, and apply
   all selected renames in one transaction without changing unselected tags.

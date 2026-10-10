@@ -110,7 +110,7 @@ Dependency direction is one-way:
 music-application -> music-domain
 music-storage     -> music-application + music-domain
 music-media       -> music-application + music-domain
-music-analysis    -> music-application + music-domain
+music-analysis    -> music-application
 music-server      -> all internal crates
 music-output      -> music-protocol
 ```
@@ -145,15 +145,15 @@ remain ordinary Rust modules inside `music-application`; concrete transport and 
 | Serialization | Serde and `serde_json` | Canonical Rust ecosystem and exact tagged-enum control. |
 | REST documentation | `utoipa`/`utoipa-axum` | OpenAPI is generated from registered handlers and DTOs. |
 | TypeScript contract export | `ts-rs` | HTTP/WS types are generated from the same Serde types and committed for frontend use. |
-| Task JSON Schema | Task-owned JSON schemas plus strict Serde validation | Request-specific identifiers and bounds are checked locally. Deriving static schema structure from result types remains follow-up work. |
+| Task JSON Schema | Task-owned JSON schemas plus strict Serde validation | Static output shape is derived from the strict Serde result types with Schemars; request-specific identifiers and bounds are added and checked locally. |
 | HTTP client | Reqwest with Rustls | Supports explicit redirect, proxy, retry, timeout, and DNS overrides needed by provider policy. |
 | Audio metadata | Lofty for its native formats; FFmpeg/ffprobe adapter for ASF/WMA | Keeps the common path in-process and typed without pretending Lofty supports WMA; both remain isolated behind one tag adapter. |
 | Decoding/probing | FFmpeg and ffprobe subprocesses | Preserves the existing broad format support, including formats pure-Rust decoders do not cover. |
 | DSP | RustFFT plus reusable buffers | Native SIMD-capable FFT without materializing Python lists or NumPy arrays. |
 | CPU execution | Bounded dedicated worker threads with per-task unwind isolation | A failed analysis task stays visible without permanently reducing pool capacity or automatically repeating work. |
 | Loudness | Separate bounded FFmpeg `loudnorm` pass | Retained after the direct `ebur128` replacement failed ending-peak and short-signal parity checks. |
-| Voice inference | `tract` candidate behind `VoiceBackend` | Try one model-owning Rust thread; select a Rust subprocess only if the feasibility gate proves isolation necessary. |
-| YAML | Typed adapter; candidate selected by corpus/security gate | Avoid deprecated `serde_yaml`/`serde_yml`; keep parser exposure small and input bounded. |
+| Voice inference | `tract-tensorflow` on one model-owning worker thread | Keeps inference in-process; a failed pass stays visible without a separate runtime. |
+| YAML | `serde-saphyr` behind a typed adapter | Avoids deprecated `serde_yaml`/`serde_yml`; keeps parser exposure small and input bounded. |
 | Headless playback | mpv subprocess JSON IPC | Keeps proven playback while avoiding an unsafe libmpv FFI layer in project code. |
 | Logging | `tracing` and `tracing-subscriber` | Structured request, action, worker, and job context without secret-bearing string assembly. |
 | CLI | Clap | One typed command tree for administration, diagnostics, migrations, and evaluation. |
@@ -175,8 +175,8 @@ The implemented process shell loads the current environment names and optional w
 `.env` exactly once, with process values taking precedence. Required paths, SQLite-only storage,
 origins, cookies, limits, and worker counts fail validation before mutable owners start. Optional
 provider credentials use a zeroizing, redacted wrapper and are never included in error values.
-Axum currently targets 0.8.9, Tokio Util 0.7.19, Tower HTTP 0.7.0, and tracing-subscriber 0.3.23 in
-`Cargo.lock`; upgrades remain ordinary reviewed dependency changes rather than floating CI inputs.
+`Cargo.lock` owns exact versions; upgrades remain ordinary reviewed dependency changes rather than
+floating CI inputs.
 
 ## Canonical playback model
 
@@ -331,8 +331,7 @@ file lock beside `app.db` and holds the file handle for its lifetime. Offline mu
 take the same lock. Lock contention is a clear startup/CLI error, not a second best-effort owner.
 
 SQL is explicit. Repositories return domain objects rather than exposing SQLx rows outside
-`music-storage`. Static queries use SQLx checked macros with committed offline metadata; dynamic
-search/filter queries use a bounded query builder with values always bound.
+`music-storage`. Queries are runtime-checked SQLx statements; dynamic search/filter queries use a bounded query builder with values always bound.
 
 The playback snapshot remains one cohesive versioned JSON aggregate, but its `storage_revision` is
 also an explicit column used for compare-and-swap persistence. A mismatched revision indicates an
@@ -456,9 +455,8 @@ paths or secrets.
 
 The compatibility `/api/diagnostics` projection reads counts and timestamps from the library
 coordinator's immutable status and connection/revision data from a playback-actor snapshot. It does
-not query mutable module globals or create another status owner. Until `ModeCoordinator` exists,
-its mode-loader fields remain the contract's explicit not-yet-loaded value: no timestamp, no loaded
-IDs, and no fabricated errors.
+not query mutable module globals or create another status owner. Mode-loader fields come from the
+mode coordinator's current status.
 
 During the rewrite, readiness remains `starting` until the real playback owner is running. The
 Phase-2 WebSocket transport shell returns a protocol-shaped availability error and closes instead
@@ -514,9 +512,8 @@ authoritative. No request body or whole media file is buffered in memory.
 
 Media streaming implements single-range and normal full responses with the same headers the current
 clients require. Range, conditional request, missing-file, traversal, content-type, and disconnect
-behavior receive integration tests with generated media fixtures. Tower's file service is an
-implementation candidate, not assumed parity; its current range behavior is wrapped or replaced
-where the fixture corpus differs.
+behavior receive integration tests with generated media fixtures. Tower HTTP's `ServeFile` serves
+the files; those fixtures define the required range behavior.
 
 HTTP-triggered path inspection, directory enumeration, cover extraction, and collision checks enter
 one shared two-slot blocking-media admission boundary. Admission is non-queueing: saturation returns
@@ -577,13 +574,13 @@ commit for that item, while any ambiguous post-replacement failure stops the bat
 
 ## Durable jobs
 
-`JobKind` is a closed enum for current jobs, while historical unknown strings remain representable.
+Job kinds are string keys registered in `JobRegistry`; historical unknown kinds remain listable.
 Each current handler has typed parameters and results serialized into the compatible JSON columns.
 New rows also persist lane, parameter-schema version, restart policy, checkpoint version, and the
 current per-claim `execution_id`; recovery does not infer historical policy solely from whichever
 handler registry happens to be compiled today.
 
-A `JobCoordinator` supervises two bounded lanes:
+The job coordinator (`SpawnedJobCoordinator`, used through `JobService`) supervises two bounded lanes:
 
 - **local lane:** one library-mutating or whole-library job at a time;
 - **provider lane:** one provider-cost-bearing job at a time.
@@ -796,7 +793,7 @@ non-restartability retain their present meaning.
   explicitly documented process-fatal startup invariants.
 - Release builds retain panic unwinding so task/thread supervisors can observe failure. Critical
   owner panics initiate controlled shutdown; they are never treated as normal request errors.
-- Secrets use `secrecy`/zeroization-aware wrappers and never implement ordinary display or debug.
+- Secrets use zeroizing, redacted wrappers and never implement ordinary display or debug.
 - Session tokens use OS randomness and database lookup; cookies keep current secure attributes.
 - Password verification uses Argon2 and a dummy hash path for unknown users.
 - File key initialization uses exclusive, no-follow creation and validates Unix permissions.

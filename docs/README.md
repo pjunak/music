@@ -77,7 +77,7 @@ decision when it was accepted unless an amendment says otherwise.
 2. Record a new durable trade-off as an ADR. Amend an existing ADR when implementation evolves
    without reversing its decision; do not rewrite history silently.
 3. Keep operator steps in `ASSISTANT.md`, current code ownership and version inventory in
-   `ASSISTANT_ARCHITECTURE.md`, and postponed work in `TODO.md` or `FUTURE.md`.
+   `ASSISTANT_ARCHITECTURE.md`, and postponed work in `TODO.md`.
 4. Keep relative Markdown links resolvable in the current tree. Completed migration records may
    use commit-pinned GitHub links for source that exists only on the frozen legacy revision. A
    contract-version change is incomplete until its generated-contract and owning subsystem tests

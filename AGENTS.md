@@ -44,7 +44,7 @@ clients/                   external output and authoring contracts
 
 ## Invariants
 
-- `PlaybackHandle` owns playback mutations: reduce, persist, then publish.
+- `PlaybackActorHandle` owns playback mutations: reduce, persist, then publish.
   HTTP and WebSocket actions use the same owner. Clients reconcile snapshots;
   reconnect never replays stale mutations. Stable client IDs can span tabs.
 - Wire changes update typed schemas, guards, tests, external-client docs and
