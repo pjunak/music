@@ -49,20 +49,6 @@ impl SqliteStorage {
         Ok(result.last_insert_rowid())
     }
 
-    pub async fn replace_password_hash(
-        &self,
-        user_id: i64,
-        password_hash: &str,
-    ) -> Result<bool, StorageError> {
-        let _admission = self.write_gate.lock().await;
-        let result = sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
-            .bind(password_hash)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(result.rows_affected() == 1)
-    }
-
     /// Replace one user's password and optionally revoke every active session
     /// in the same transaction. Offline administration must never expose a
     /// window where a new password is committed while leaked cookies survive.

@@ -175,11 +175,6 @@ impl TrackMetadataPatch {
     }
 
     #[must_use]
-    pub fn has_database_only_changes(&self) -> bool {
-        self.changes.keys().any(|field| !field.is_tag_backed())
-    }
-
-    #[must_use]
     pub fn database_only(&self) -> Self {
         Self {
             changes: self

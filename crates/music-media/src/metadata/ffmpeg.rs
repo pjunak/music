@@ -40,13 +40,6 @@ impl FfmpegTools {
             media_timeout: DEFAULT_MEDIA_TIMEOUT,
         }
     }
-
-    #[must_use]
-    pub const fn with_timeouts(mut self, probe_timeout: Duration, media_timeout: Duration) -> Self {
-        self.probe_timeout = probe_timeout;
-        self.media_timeout = media_timeout;
-        self
-    }
 }
 
 pub(super) fn read_wma_metadata(

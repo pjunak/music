@@ -185,12 +185,6 @@ impl RecoveryJournalDraft {
             progress: Value::Object(serde_json::Map::new()),
         })
     }
-
-    pub fn with_progress(mut self, progress: Value) -> Result<Self, RecoveryValidationError> {
-        validate_json(&progress)?;
-        self.progress = progress;
-        Ok(self)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

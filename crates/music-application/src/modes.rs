@@ -498,22 +498,6 @@ pub fn start_mode_coordinator(
     spawn_mode_coordinator(source, sink, None)
 }
 
-pub async fn start_mutable_mode_coordinator(
-    source: Arc<dyn ModeCatalogSource>,
-    sink: Arc<dyn ModeCatalogSink>,
-    journal: Arc<dyn RecoveryJournalRepository>,
-    effects: Arc<dyn ModeMutationEffects>,
-) -> Result<SpawnedModeCoordinator, ModeCoordinatorError> {
-    start_mutable_mode_coordinator_with_data(
-        source,
-        sink,
-        journal,
-        effects,
-        Arc::new(NoopModeMutationDataEffects),
-    )
-    .await
-}
-
 pub async fn start_mutable_mode_coordinator_with_data(
     source: Arc<dyn ModeCatalogSource>,
     sink: Arc<dyn ModeCatalogSink>,
