@@ -59,10 +59,8 @@ From the repository root:
 ```powershell
 cargo fmt --all --check
 node --test .github/scripts/rust-architecture.test.mts
-node --test tools/mood-pilot.test.mts
-node --test tools/cleanup-pilot.test.mts
-node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts
-node --test .github/scripts/publish-output.test.mts
+node --test tools/*.test.mts
+node --test .github/scripts/workflow-policy.test.mts .github/scripts/publish-output.test.mts
 node .github/scripts/rust-architecture.mts
 cargo check --locked --workspace --all-targets
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
