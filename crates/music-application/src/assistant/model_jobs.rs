@@ -26,7 +26,7 @@ use crate::assistant::{
 };
 use crate::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
-    JobHandlerFuture, JobLane, JobProgress, JobStatus,
+    JobHandlerFuture, JobLane, JobProgress, JobStatus, parse_parameters,
 };
 use music_domain::LibraryPath;
 use serde::{Deserialize, Serialize};
@@ -131,11 +131,11 @@ impl EvaluationKind {
 
     const fn job_kind(self) -> &'static str {
         match self {
-            Self::Playlist => "assistant.model-evaluation.playlist-quality-v1",
-            Self::Tagging => "assistant.model-evaluation.music-tagging-quality-v1",
-            Self::TagCleanup => "assistant.model-evaluation.tag-cleanup-quality-v1",
-            Self::Eq => "assistant.model-evaluation.eq-quality-v1",
-            Self::LibraryCleanup => "assistant.model-evaluation.library-cleanup-quality-v1",
+            Self::Playlist => super::model_quality::PLAYLIST_QUALITY_JOB_KIND,
+            Self::Tagging => super::model_quality::TAGGING_QUALITY_JOB_KIND,
+            Self::TagCleanup => super::model_quality::TAG_CLEANUP_QUALITY_JOB_KIND,
+            Self::Eq => super::model_quality::EQ_QUALITY_JOB_KIND,
+            Self::LibraryCleanup => super::model_quality::LIBRARY_CLEANUP_QUALITY_JOB_KIND,
         }
     }
 }
@@ -236,11 +236,8 @@ impl JobHandler for ModelEvaluationJobHandler {
         parameters: Map<String, Value>,
     ) -> JobHandlerFuture<'a> {
         Box::pin(async move {
-            let parameters =
-                serde_json::from_value::<ModelEvaluationJobParameters>(Value::Object(parameters))
-                    .map_err(|error| {
-                    JobHandlerError::caused_by("invalid model evaluation parameters", &error)
-                })?;
+            let parameters: ModelEvaluationJobParameters =
+                parse_parameters(parameters, "invalid model evaluation parameters")?;
             let result = match self.kind {
                 EvaluationKind::Playlist => self.execute_playlist(context, &parameters).await,
                 EvaluationKind::Tagging => self.execute_tagging(context, &parameters).await,
@@ -292,7 +289,7 @@ async fn load_tagging_baseline(
         .map_err(JobHandlerError::from_execution)?
         .filter(|job| {
             job.status == JobStatus::Succeeded
-                && job.kind == "assistant.model-evaluation.music-tagging-quality-v1"
+                && job.kind == super::model_quality::TAGGING_QUALITY_JOB_KIND
         })
         .ok_or_else(|| JobHandlerError::new("evaluation_retest_baseline_unavailable"))?;
     let baseline_parameters_valid = baseline.parameters.get("role_id").and_then(Value::as_str)
@@ -453,30 +450,21 @@ impl JobHandler for ModelFeatureJobHandler {
                 }
                 FeatureKind::Playlist => {
                     let parameters =
-                        serde_json::from_value(Value::Object(parameters)).map_err(|error| {
-                            JobHandlerError::caused_by("invalid playlist model parameters", &error)
-                        })?;
+                        parse_parameters(parameters, "invalid playlist model parameters")?;
                     self.execute_playlist(context, parameters).await
                 }
                 FeatureKind::Eq => {
-                    let parameters =
-                        serde_json::from_value(Value::Object(parameters)).map_err(|error| {
-                            JobHandlerError::caused_by("invalid EQ model parameters", &error)
-                        })?;
+                    let parameters = parse_parameters(parameters, "invalid EQ model parameters")?;
                     self.execute_eq(context, parameters).await
                 }
                 FeatureKind::TagCleanup => {
                     let parameters =
-                        serde_json::from_value(Value::Object(parameters)).map_err(|_| {
-                            JobHandlerError::new("invalid tag cleanup model parameters")
-                        })?;
+                        parse_parameters(parameters, "invalid tag cleanup model parameters")?;
                     self.execute_tag_cleanup(context, parameters).await
                 }
                 FeatureKind::Tagging => {
                     let parameters =
-                        serde_json::from_value(Value::Object(parameters)).map_err(|error| {
-                            JobHandlerError::caused_by("invalid music tagging parameters", &error)
-                        })?;
+                        parse_parameters(parameters, "invalid music tagging parameters")?;
                     self.execute_tagging(context, parameters).await
                 }
             }

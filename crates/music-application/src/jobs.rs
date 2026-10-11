@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tokio::sync::Notify;
@@ -380,6 +381,16 @@ impl Display for JobHandlerError {
 }
 
 impl Error for JobHandlerError {}
+
+/// Decode a job's stored parameters into the handler's typed request.
+/// `detail` is the stored failure message when they do not match.
+pub fn parse_parameters<T: DeserializeOwned>(
+    parameters: Map<String, Value>,
+    detail: &'static str,
+) -> Result<T, JobHandlerError> {
+    serde_json::from_value(Value::Object(parameters))
+        .map_err(|error| JobHandlerError::caused_by(detail, &error))
+}
 
 #[derive(Debug)]
 pub struct JobRegistry {

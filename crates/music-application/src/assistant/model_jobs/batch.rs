@@ -129,8 +129,7 @@ impl ModelFeatureJobHandler {
             #[serde(default)]
             abandon_uncertain: bool,
         }
-        let action: Action = serde_json::from_value(Value::Object(parameters))
-            .map_err(|error| JobHandlerError::caused_by("invalid_batch_action", &error))?;
+        let action: Action = crate::jobs::parse_parameters(parameters, "invalid_batch_action")?;
         if action.role_id != "music_tagger" {
             return Err(JobHandlerError::new("invalid_batch_action"));
         }

@@ -18,7 +18,7 @@ use music_application::assistant::{
 };
 use music_application::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
-    JobHandlerFuture, JobLane, JobProgress,
+    JobHandlerFuture, JobLane, JobProgress, parse_parameters,
 };
 use music_media::LibraryRoot;
 use serde::{Deserialize, Serialize};
@@ -208,11 +208,8 @@ impl JobHandler for ContextAnalysisJobHandler {
     ) -> JobHandlerFuture<'a> {
         Box::pin(async move {
             let started = Instant::now();
-            let parameters =
-                serde_json::from_value::<ContextAnalysisParameters>(Value::Object(parameters))
-                    .map_err(|error| {
-                        JobHandlerError::caused_by("invalid context analysis parameters", &error)
-                    })?;
+            let parameters: ContextAnalysisParameters =
+                parse_parameters(parameters, "invalid context analysis parameters")?;
             let scope = parameters
                 .scope
                 .to_scope()

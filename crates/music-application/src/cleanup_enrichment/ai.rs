@@ -9,7 +9,7 @@ use crate::cleanup::{CleanupScope, CleanupService};
 use crate::cleanup_sources::CleanupSourceService;
 use crate::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
-    JobHandlerFuture, JobLane, JobStatus,
+    JobHandlerFuture, JobLane, JobStatus, parse_parameters,
 };
 use music_domain::TrackId;
 use serde::{Deserialize, Serialize};
@@ -249,9 +249,7 @@ impl JobHandler for CleanupAiJobHandler {
         Box::pin(async move {
             self.run(
                 context,
-                serde_json::from_value(Value::Object(parameters)).map_err(|error| {
-                    JobHandlerError::caused_by("cleanup_model_parameters_invalid", &error)
-                })?,
+                parse_parameters(parameters, "cleanup_model_parameters_invalid")?,
             )
             .await
         })

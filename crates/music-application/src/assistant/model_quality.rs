@@ -21,6 +21,13 @@ pub struct ModelEvaluationDefinition {
     pub job_kind: &'static str,
 }
 
+pub const LIBRARY_CLEANUP_QUALITY_JOB_KIND: &str =
+    "assistant.model-evaluation.library-cleanup-quality-v1";
+pub const PLAYLIST_QUALITY_JOB_KIND: &str = "assistant.model-evaluation.playlist-quality-v1";
+pub const TAGGING_QUALITY_JOB_KIND: &str = "assistant.model-evaluation.music-tagging-quality-v1";
+pub const TAG_CLEANUP_QUALITY_JOB_KIND: &str = "assistant.model-evaluation.tag-cleanup-quality-v1";
+pub const EQ_QUALITY_JOB_KIND: &str = "assistant.model-evaluation.eq-quality-v1";
+
 pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
     ModelEvaluationDefinition {
         id: super::LIBRARY_CLEANUP_QUALITY_ID,
@@ -28,7 +35,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         label: "Library metadata matching quality",
         description: "Runs fourteen synthetic recording and edition comparison, abstention, Unicode, version, order and injection cases. No live library data are sent.",
         suite_id: super::LIBRARY_CLEANUP_SUITE_ID,
-        job_kind: "assistant.model-evaluation.library-cleanup-quality-v1",
+        job_kind: LIBRARY_CLEANUP_QUALITY_JOB_KIND,
     },
     ModelEvaluationDefinition {
         id: PLAYLIST_QUALITY_EVALUATION_ID,
@@ -36,7 +43,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         label: "Playlist planning quality",
         description: "Runs fixed synthetic D&D playlist scenarios through this model. No songs or live library data are sent.",
         suite_id: "model-dnd-playlist-quality-v7",
-        job_kind: "assistant.model-evaluation.playlist-quality-v1",
+        job_kind: PLAYLIST_QUALITY_JOB_KIND,
     },
     ModelEvaluationDefinition {
         id: TAGGING_QUALITY_EVALUATION_ID,
@@ -44,7 +51,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         label: "Mood tagging quality",
         description: "Runs fixed synthetic metadata and signal-evidence cases against bundled, custom, and 200-tag vocabularies. Each vocabulary must meet the same quality threshold. No songs or live library data are sent.",
         suite_id: super::TAGGING_QUALITY_SUITE_ID,
-        job_kind: "assistant.model-evaluation.music-tagging-quality-v1",
+        job_kind: TAGGING_QUALITY_JOB_KIND,
     },
     ModelEvaluationDefinition {
         id: TAG_CLEANUP_QUALITY_EVALUATION_ID,
@@ -52,7 +59,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         label: "Mood-tag cleanup quality",
         description: "Runs fixed synthetic canonical-ID and no-match tag-cleanup cases through this model. No songs or live library data are sent.",
         suite_id: "controlled-vocabulary-cleanup-baseline-v7",
-        job_kind: "assistant.model-evaluation.tag-cleanup-quality-v1",
+        job_kind: TAG_CLEANUP_QUALITY_JOB_KIND,
     },
     ModelEvaluationDefinition {
         id: EQ_QUALITY_EVALUATION_ID,
@@ -60,7 +67,7 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
         label: "EQ draft quality",
         description: "Runs fixed synthetic sound goals through this model and checks bounded, conservative graphic-EQ behavior. No songs or live presets are sent.",
         suite_id: "graphic-eq-safety-baseline-v4",
-        job_kind: "assistant.model-evaluation.eq-quality-v1",
+        job_kind: EQ_QUALITY_JOB_KIND,
     },
 ];
 

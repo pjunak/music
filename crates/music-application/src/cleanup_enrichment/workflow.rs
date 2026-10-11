@@ -21,7 +21,7 @@ use crate::cleanup_sources::{
 };
 use crate::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
-    JobHandlerFuture, JobLane, JobProgress,
+    JobHandlerFuture, JobLane, JobProgress, parse_parameters,
 };
 use music_domain::{IndexedTrack, TrackId};
 use serde::Deserialize;
@@ -733,12 +733,8 @@ impl JobHandler for CleanupEnrichmentJobHandler {
         parameters: Map<String, Value>,
     ) -> JobHandlerFuture<'a> {
         Box::pin(async move {
-            let parameters = serde_json::from_value::<EnrichmentParameters>(Value::Object(
-                parameters,
-            ))
-            .map_err(|error| {
-                JobHandlerError::caused_by("cleanup enrichment parameters are invalid", &error)
-            })?;
+            let parameters: EnrichmentParameters =
+                parse_parameters(parameters, "cleanup enrichment parameters are invalid")?;
             self.run(context, parameters).await.map(Value::Object)
         })
     }
