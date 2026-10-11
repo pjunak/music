@@ -1,4 +1,3 @@
-use music_application::ErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -18,6 +17,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use futures_util::stream;
+use music_application::ErrorChain;
 use music_storage::{
     CredentialVault, CryptoError, InstanceLock, SchemaCompatibility, SecretString, SqliteStorage,
     StorageError, inspect_database,

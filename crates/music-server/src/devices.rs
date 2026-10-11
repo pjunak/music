@@ -1,4 +1,3 @@
-use music_application::ErrorChain;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -7,6 +6,7 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use music_application::ErrorChain;
 use music_application::devices::{DeviceServiceError, RememberedDevice, RememberedDeviceService};
 use music_storage::SqliteStorage;
 use serde::{Deserialize, Serialize};

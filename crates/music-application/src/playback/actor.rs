@@ -1414,15 +1414,11 @@ async fn load_or_initialize<S: PlaybackStateStore>(
     state_id: i64,
     now_monotonic_ms: u64,
 ) -> Result<(PlaybackState, i64), PlaybackActorError> {
-    let loaded = store
-        .load(state_id)
-        .await
-        .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?;
+    let loaded = store.load(state_id).await.map_err(persistence_failure)?;
     if let Some(snapshot) = loaded {
-        let state = decode_persisted_state(&snapshot.state_json)
-            .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?;
-        let encoded = encode_persisted_state(&state, now_monotonic_ms)
-            .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?;
+        let state = decode_persisted_state(&snapshot.state_json).map_err(persistence_failure)?;
+        let encoded =
+            encode_persisted_state(&state, now_monotonic_ms).map_err(persistence_failure)?;
         if json_equivalent(&snapshot.state_json, &encoded) {
             return Ok((state, snapshot.storage_revision));
         }
@@ -1432,12 +1428,11 @@ async fn load_or_initialize<S: PlaybackStateStore>(
     }
 
     let state = PlaybackState::default();
-    let encoded = encode_persisted_state(&state, now_monotonic_ms)
-        .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?;
+    let encoded = encode_persisted_state(&state, now_monotonic_ms).map_err(persistence_failure)?;
     let inserted = store
         .insert_if_missing(state_id, &encoded)
         .await
-        .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?;
+        .map_err(persistence_failure)?;
     if inserted {
         Ok((state, 0))
     } else {
@@ -1452,8 +1447,7 @@ async fn persist_candidate<S: PlaybackStateStore>(
     state: &PlaybackState,
     now_monotonic_ms: u64,
 ) -> Result<i64, PlaybackActorError> {
-    let encoded = encode_persisted_state(state, now_monotonic_ms)
-        .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?;
+    let encoded = encode_persisted_state(state, now_monotonic_ms).map_err(persistence_failure)?;
     compare_and_swap(store, state_id, storage_revision, &encoded).await
 }
 
@@ -1466,11 +1460,17 @@ async fn compare_and_swap<S: PlaybackStateStore>(
     match store
         .compare_and_swap(state_id, storage_revision, encoded)
         .await
-        .map_err(|error| PlaybackActorError::Persistence(error.to_string()))?
+        .map_err(persistence_failure)?
     {
         StoreCompareAndSwap::Updated { storage_revision } => Ok(storage_revision),
         StoreCompareAndSwap::Conflict => Err(PlaybackActorError::PersistenceConflict),
     }
+}
+
+/// Keep the full cause: a failed save of canonical state must be diagnosable.
+fn persistence_failure<E: Into<Box<dyn Error + Send + Sync>>>(error: E) -> PlaybackActorError {
+    let error = error.into();
+    PlaybackActorError::Persistence(crate::ErrorChain(error.as_ref()).to_string())
 }
 
 fn json_equivalent(left: &str, right: &str) -> bool {

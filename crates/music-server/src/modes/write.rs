@@ -1,4 +1,3 @@
-use music_application::ErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -6,6 +5,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use music_application::ErrorChain;
 use music_application::modes::{
     CueDocument, CueLoopDocument, CueSfxDocument, EffectDocument, IntegrationsDocument,
     InterruptDocument, ModeCatalog, ModeDocument, ModeMutation, ModeMutationError,

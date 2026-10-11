@@ -1,4 +1,3 @@
-use music_application::ErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,6 +7,7 @@ use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{ConnectInfo, Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use music_application::ErrorChain;
 use music_application::assistant::{
     MODEL_ROLES, ModelConformanceStatus, ModelEvaluationRepository, ModelEvaluationStatus,
     ModelEvaluationView, ModelQualityError, ModelQualityService, ModelRoleUpdate, ModelRoleView,
