@@ -4,6 +4,7 @@ use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
+use music_application::ErrorChain;
 use music_application::assistant::{
     AnalysisReviewDecision, AnalysisReviewTarget, AssistantService, AssistantServiceError,
     AssistantTrackView, CATALOG_TAG_ANALYZER_ID, CleanupSelection, Confidence, EnergyCurve,
@@ -1015,7 +1016,7 @@ async fn model_batch_status(
         .batches
         .model_batch_summary(&batch_id)
         .await
-        .map_err(|_| ApiError::internal())?
+        .map_err(|error| ApiError::internal_from("model batch summary failed", error.as_ref()))?
         .ok_or_else(ApiError::not_found)?;
     Ok(Json(ModelBatchStatusResponse {
         id: batch.id,
@@ -1331,7 +1332,9 @@ async fn start_library_context_analysis(
         force: payload.force,
         scope: payload.scope.into_parameters()?,
     };
-    let parameters = serde_json::to_value(parameters).map_err(|_| ApiError::internal())?;
+    let parameters = serde_json::to_value(parameters).map_err(|error| {
+        ApiError::internal_from("context analysis parameters could not be encoded", &error)
+    })?;
     let (job, created) = state
         .jobs
         .as_deref()
@@ -1904,7 +1907,10 @@ async fn model_tagging_availability(
                 contexts.get(&track.track.id),
                 track.catalog_evidence.as_ref(),
             )
-            .map_err(|_| ApiError::internal())?;
+            .map_err(|reason| {
+                tracing::error!(%reason, "model tagging plan failed");
+                ApiError::internal()
+            })?;
             let is_current = track.analyses.iter().any(|analysis| {
                 music_application::assistant::model_tag_profile_is_current(analysis, &signature)
             });
@@ -1932,7 +1938,9 @@ async fn model_tagging_availability(
             .batches
             .pending_model_batch()
             .await
-            .map_err(|_| ApiError::internal())?
+            .map_err(|error| {
+                ApiError::internal_from("pending model batch lookup failed", error.as_ref())
+            })?
             .map(|batch| batch.id),
         None => None,
     };
@@ -2212,7 +2220,8 @@ async fn model_tag_cleanup_status(
     let assistant = service(&state)?;
     let usage = assistant.tag_usage().await.map_err(map_assistant_error)?;
     let vocabulary = assistant.vocabulary().await.map_err(map_assistant_error)?;
-    let signature = catalog_signature(&usage).map_err(|_| ApiError::internal())?;
+    let signature = catalog_signature(&usage)
+        .map_err(|error| ApiError::internal_from("tag catalog signature failed", &error))?;
     let mut reason_code = role.reason_code;
     if reason_code.is_none() && usage.is_empty() {
         reason_code = Some("tag_catalog_empty".to_owned());
@@ -2222,7 +2231,9 @@ async fn model_tag_cleanup_status(
     }
     let estimated_provider_requests = if usage.len() <= MAX_MODEL_CLEANUP_TAGS {
         ModelTagCleanupTask::new(&usage, vocabulary.clone())
-            .map_err(|_| ApiError::internal())?
+            .map_err(|error| {
+                ApiError::internal_from("tag cleanup task could not be planned", &error)
+            })?
             .total_model_batches()
     } else {
         usage.len().div_ceil(MODEL_TAG_CLEANUP_BATCH_SIZE).min(25)
@@ -2295,7 +2306,7 @@ async fn start_model_tag_cleanup(
         "disclosure_version": payload.disclosure_version,
         "consent": true,
         "role_fingerprint": role.fingerprint,
-        "catalog_signature": catalog_signature(&usage).map_err(|_| ApiError::internal())?,
+        "catalog_signature": catalog_signature(&usage).map_err(|error| ApiError::internal_from("tag catalog signature failed", &error))?,
         "vocabulary_fingerprint": vocabulary.fingerprint,
     });
     enqueue_model_feature(
@@ -3178,7 +3189,7 @@ fn track_context_detail_response(
 }
 
 fn map_local_analysis_error(error: LocalAnalysisError) -> ApiError {
-    tracing::error!(error = %error, "Local analysis request failed");
+    tracing::error!(error = %ErrorChain(&error), "Local analysis request failed");
     ApiError::internal()
 }
 
@@ -3201,7 +3212,7 @@ fn map_assistant_error(error: AssistantServiceError) -> ApiError {
             ApiError::unprocessable_message(message)
         }
         AssistantServiceError::Dependency(source) => {
-            tracing::error!(error = %source, "Assistant request failed");
+            tracing::error!(error = %ErrorChain(source.as_ref()), "Assistant request failed");
             ApiError::internal()
         }
     }

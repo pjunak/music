@@ -30,10 +30,12 @@ pub struct FilesystemModeMutations {
 
 impl FilesystemModeMutations {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ModeFilesystemMutationError> {
-        let root = fs::canonicalize(path.as_ref())
-            .map_err(|_| ModeFilesystemMutationError::new("modes root could not be resolved"))?;
-        let metadata = fs::metadata(&root)
-            .map_err(|_| ModeFilesystemMutationError::new("modes root could not be inspected"))?;
+        let root = fs::canonicalize(path.as_ref()).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("modes root could not be resolved", &error)
+        })?;
+        let metadata = fs::metadata(&root).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("modes root could not be inspected", &error)
+        })?;
         if !metadata.is_dir() {
             return Err(ModeFilesystemMutationError::new(
                 "modes root is not a directory",
@@ -112,6 +114,11 @@ pub struct ModeFilesystemMutationError {
 impl ModeFilesystemMutationError {
     const fn new(detail: &'static str) -> Self {
         Self { detail }
+    }
+
+    fn caused_by<E: std::error::Error + ?Sized>(detail: &'static str, cause: &E) -> Self {
+        music_application::log_dependency_failure(detail, cause);
+        Self::new(detail)
     }
 }
 
@@ -322,8 +329,9 @@ fn prepare_inner(
             journal_id,
             "write_cue",
             format!("{mode_id}/cues/{cue_id}.yaml"),
-            serialize_document(document)
-                .map_err(|_| ModeFilesystemMutationError::new("cue could not be serialized"))?,
+            serialize_document(document).map_err(|error| {
+                ModeFilesystemMutationError::caused_by("cue could not be serialized", &error)
+            })?,
             *create_only,
         )?,
         ModeMutation::DeleteCue {
@@ -348,8 +356,9 @@ fn prepare_inner(
             journal_id,
             "write_preset",
             format!("{mode_id}/presets/{preset_id}.yaml"),
-            serialize_document(document)
-                .map_err(|_| ModeFilesystemMutationError::new("preset could not be serialized"))?,
+            serialize_document(document).map_err(|error| {
+                ModeFilesystemMutationError::caused_by("preset could not be serialized", &error)
+            })?,
             *create_only,
         )?,
         ModeMutation::DeletePreset {
@@ -383,10 +392,12 @@ fn prepare_inner(
         )?,
     };
     Ok(PreparedModeMutation {
-        operation: RecoveryOperation::parse(operation)
-            .map_err(|_| ModeFilesystemMutationError::new("mode operation is invalid"))?,
-        plan: serde_json::to_value(plan)
-            .map_err(|_| ModeFilesystemMutationError::new("mode plan could not be encoded"))?,
+        operation: RecoveryOperation::parse(operation).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("mode operation is invalid", &error)
+        })?,
+        plan: serde_json::to_value(plan).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("mode plan could not be encoded", &error)
+        })?,
     })
 }
 
@@ -423,16 +434,18 @@ fn prepare_import_resources(
     for (cue_id, document) in cues {
         documents.push((
             format!("{mode_id}/cues/{cue_id}.yaml"),
-            serialize_document(document)
-                .map_err(|_| ModeFilesystemMutationError::new("cue could not be serialized"))?,
+            serialize_document(document).map_err(|error| {
+                ModeFilesystemMutationError::caused_by("cue could not be serialized", &error)
+            })?,
             true,
         ));
     }
     for (preset_id, document) in presets {
         documents.push((
             format!("{mode_id}/presets/{preset_id}.yaml"),
-            serialize_document(document)
-                .map_err(|_| ModeFilesystemMutationError::new("preset could not be serialized"))?,
+            serialize_document(document).map_err(|error| {
+                ModeFilesystemMutationError::caused_by("preset could not be serialized", &error)
+            })?,
             true,
         ));
     }
@@ -633,8 +646,9 @@ fn apply(root: &Path, journal: &RecoveryJournalEntry) -> Result<(), ModeFilesyst
                     "mode create target is occupied",
                 ));
             }
-            fs::rename(candidate, &target)
-                .map_err(|_| ModeFilesystemMutationError::new("mode could not be published"))?;
+            fs::rename(candidate, &target).map_err(|error| {
+                ModeFilesystemMutationError::caused_by("mode could not be published", &error)
+            })?;
         }
         FilesystemMutationKind::DeleteMode => {
             let backup = plan_backup(root, &plan, journal)?;
@@ -888,8 +902,9 @@ fn cleanup_orphans(root: &Path) -> Result<(), ModeFilesystemMutationError> {
             "mode staging root is unsafe",
         ));
     }
-    fs::remove_dir_all(staging)
-        .map_err(|_| ModeFilesystemMutationError::new("mode staging root could not be cleaned"))
+    fs::remove_dir_all(staging).map_err(|error| {
+        ModeFilesystemMutationError::caused_by("mode staging root could not be cleaned", &error)
+    })
 }
 
 fn decode_plan(
@@ -900,8 +915,10 @@ fn decode_plan(
             "recovery journal has the wrong domain",
         ));
     }
-    let plan: FilesystemMutationPlan = serde_json::from_value(journal.plan.clone())
-        .map_err(|_| ModeFilesystemMutationError::new("mode recovery plan is invalid"))?;
+    let plan: FilesystemMutationPlan =
+        serde_json::from_value(journal.plan.clone()).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("mode recovery plan is invalid", &error)
+        })?;
     if plan.version != PLAN_VERSION
         || plan.journal_id != journal.id.as_str()
         || plan.stage_directory != format!("{STAGING_DIRECTORY}/{}", journal.id.as_str())
@@ -964,8 +981,9 @@ fn restore_backup(backup: &Path, target: &Path) -> Result<(), ModeFilesystemMuta
                 "mode target was recreated before rollback",
             ));
         }
-        fs::rename(backup, target)
-            .map_err(|_| ModeFilesystemMutationError::new("mode backup could not be restored"))?;
+        fs::rename(backup, target).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("mode backup could not be restored", &error)
+        })?;
     }
     Ok(())
 }
@@ -990,8 +1008,9 @@ fn prepare_stage_directory(root: &Path, stage: &Path) -> Result<(), ModeFilesyst
             ));
         }
     }
-    fs::create_dir(stage)
-        .map_err(|_| ModeFilesystemMutationError::new("mode staging directory already exists"))
+    fs::create_dir(stage).map_err(|error| {
+        ModeFilesystemMutationError::caused_by("mode staging directory already exists", &error)
+    })
 }
 
 fn ensure_mode_target_absent(
@@ -1009,7 +1028,7 @@ fn ensure_mode_target_absent(
 fn ensure_mode_target(root: &Path, mode_id: &str) -> Result<(), ModeFilesystemMutationError> {
     let target = rooted_target(root, mode_id)?;
     let metadata = fs::symlink_metadata(target)
-        .map_err(|_| ModeFilesystemMutationError::new("mode does not exist"))?;
+        .map_err(|error| ModeFilesystemMutationError::caused_by("mode does not exist", &error))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(ModeFilesystemMutationError::new("mode target is unsafe"));
     }
@@ -1052,8 +1071,9 @@ fn ensure_document_parent(root: &Path, target: &Path) -> Result<(), ModeFilesyst
             "mode directory is unavailable",
         ));
     }
-    fs::create_dir(parent)
-        .map_err(|_| ModeFilesystemMutationError::new("mode document parent could not be created"))
+    fs::create_dir(parent).map_err(|error| {
+        ModeFilesystemMutationError::caused_by("mode document parent could not be created", &error)
+    })
 }
 
 fn rooted_target(root: &Path, relative: &str) -> Result<PathBuf, ModeFilesystemMutationError> {
@@ -1144,18 +1164,24 @@ fn write_synced(path: &Path, content: &[u8]) -> Result<(), ModeFilesystemMutatio
         })?;
     file.write_all(content)
         .and_then(|()| file.sync_all())
-        .map_err(|_| ModeFilesystemMutationError::new("mode candidate file could not be synced"))
+        .map_err(|error| {
+            ModeFilesystemMutationError::caused_by(
+                "mode candidate file could not be synced",
+                &error,
+            )
+        })
 }
 
 fn sha256_file(path: &Path) -> Result<String, ModeFilesystemMutationError> {
-    let mut file = File::open(path)
-        .map_err(|_| ModeFilesystemMutationError::new("mode document could not be hashed"))?;
+    let mut file = File::open(path).map_err(|error| {
+        ModeFilesystemMutationError::caused_by("mode document could not be hashed", &error)
+    })?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 16 * 1024];
     loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|_| ModeFilesystemMutationError::new("mode document could not be hashed"))?;
+        let read = file.read(&mut buffer).map_err(|error| {
+            ModeFilesystemMutationError::caused_by("mode document could not be hashed", &error)
+        })?;
         if read == 0 {
             break;
         }

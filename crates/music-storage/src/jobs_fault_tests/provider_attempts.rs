@@ -671,7 +671,7 @@ impl JobHandler for JevHandler {
                     )
                     .await?;
                 let trace = serde_json::to_value(&diagnostics)
-                    .map_err(|_| JobHandlerError::new("trace"))?;
+                    .map_err(|error| JobHandlerError::caused_by("trace", &error))?;
                 if outcome.is_err() {
                     assert!(trace["tags"].as_array().is_some_and(|tags| tags.iter().any(
                         |tag| tag["candidate"] == true && tag["status"] == "grounding_pending"

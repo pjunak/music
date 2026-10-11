@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -743,7 +744,7 @@ fn map_media_worker_error(error: BlockingMediaError) -> ApiError {
     if error == BlockingMediaError::Busy {
         return ApiError::service_unavailable();
     }
-    tracing::error!(error = %error, "SFX media worker failed");
+    tracing::error!(error = %ErrorChain(&error), "SFX media worker failed");
     ApiError::internal()
 }
 
@@ -876,7 +877,7 @@ async fn stage_upload_field(
 ) -> Result<StagedUpload, ApiError> {
     let staged = upload_stage_path(&requested)?;
     let absolute = root.resolve_for_creation(&staged).map_err(|error| {
-        tracing::error!(error = %error, "SFX upload staging path resolution failed");
+        tracing::error!(error = %ErrorChain(&error), "SFX upload staging path resolution failed");
         ApiError::internal()
     })?;
     let guard = StagedUpload {
@@ -890,7 +891,7 @@ async fn stage_upload_field(
         .open(&absolute)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "SFX upload staging file creation failed");
+            tracing::error!(error = %ErrorChain(&error), "SFX upload staging file creation failed");
             ApiError::internal()
         })?;
     let mut written = 0_u64;
@@ -908,16 +909,16 @@ async fn stage_upload_field(
             ));
         }
         output.write_all(&chunk).await.map_err(|error| {
-            tracing::error!(error = %error, "SFX upload staging write failed");
+            tracing::error!(error = %ErrorChain(&error), "SFX upload staging write failed");
             ApiError::internal()
         })?;
     }
     output.flush().await.map_err(|error| {
-        tracing::error!(error = %error, "SFX upload staging flush failed");
+        tracing::error!(error = %ErrorChain(&error), "SFX upload staging flush failed");
         ApiError::internal()
     })?;
     output.sync_all().await.map_err(|error| {
-        tracing::error!(error = %error, "SFX upload staging synchronization failed");
+        tracing::error!(error = %ErrorChain(&error), "SFX upload staging synchronization failed");
         ApiError::internal()
     })?;
     drop(output);
@@ -933,7 +934,7 @@ fn map_multipart_error(error: MultipartError) -> ApiError {
 }
 
 fn map_read_error(error: SfxCoordinatorError) -> ApiError {
-    tracing::error!(error = %error, "SFX inventory operation failed");
+    tracing::error!(error = %ErrorChain(&error), "SFX inventory operation failed");
     match error {
         SfxCoordinatorError::RecoveryConflict => ApiError::service_unavailable(),
         _ => ApiError::internal(),
@@ -986,7 +987,7 @@ fn map_sfx_delivery_error(error: RootedPathError) -> ApiError {
         | RootedPathError::ParentIsNotDirectory(_)
         | RootedPathError::TargetIsNotFile(_) => ApiError::bad_request("path escapes sfx root"),
         RootedPathError::Io { .. } | RootedPathError::RootIsNotDirectory(_) => {
-            tracing::error!(error = %error, "SFX playback path resolution failed");
+            tracing::error!(error = %ErrorChain(&error), "SFX playback path resolution failed");
             ApiError::internal()
         }
     }

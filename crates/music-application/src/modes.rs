@@ -254,6 +254,13 @@ impl ModeSourceError {
     pub const fn new(detail: &'static str) -> Self {
         Self { detail }
     }
+
+    /// A source failure whose cause is logged here.
+    #[must_use]
+    pub fn caused_by<E: Error + ?Sized>(detail: &'static str, cause: &E) -> Self {
+        crate::log_dependency_failure(detail, cause);
+        Self::new(detail)
+    }
 }
 
 impl Display for ModeSourceError {
@@ -1457,7 +1464,7 @@ mod tests {
             Box::pin(async move {
                 self.attempts
                     .lock()
-                    .map_err(|_| ModeSourceError::new("source lock failed"))?
+                    .map_err(|error| ModeSourceError::caused_by("source lock failed", &error))?
                     .pop_front()
                     .ok_or_else(|| ModeSourceError::new("no fixture attempt"))?
             })

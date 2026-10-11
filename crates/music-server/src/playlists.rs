@@ -5,6 +5,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use music_application::ErrorChain;
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::playlists::{
     AUTOMATIC_APPLY_SCHEMA, AUTOMATIC_PREVIEW_SCHEMA, AUTOMATIC_RULE_SCHEMA, AutomaticMatch,
@@ -747,7 +748,9 @@ async fn export_playlist(
         .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
     response.headers_mut().insert(
         CONTENT_DISPOSITION,
-        HeaderValue::from_str(&disposition).map_err(|_| ApiError::internal())?,
+        HeaderValue::from_str(&disposition).map_err(|error| {
+            ApiError::internal_from("playlist export header is invalid", &error)
+        })?,
     );
     Ok(response)
 }
@@ -964,7 +967,7 @@ fn map_playlist_error(error: PlaylistServiceError) -> ApiError {
         }
         PlaylistServiceError::InvalidRule(_) => ApiError::validation(),
         PlaylistServiceError::Dependency(error) => {
-            tracing::error!(error = %error, "playlist repository operation failed");
+            tracing::error!(error = %ErrorChain(error.as_ref()), "playlist repository operation failed");
             ApiError::internal()
         }
     }
@@ -1061,7 +1064,8 @@ fn build_json_export(
         },
         "tracks": tracks,
     });
-    let mut encoded = serde_json::to_string_pretty(&payload).map_err(|_| ApiError::internal())?;
+    let mut encoded = serde_json::to_string_pretty(&payload)
+        .map_err(|error| ApiError::internal_from("playlist export could not be encoded", &error))?;
     encoded.push('\n');
     Ok(encoded)
 }

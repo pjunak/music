@@ -1855,6 +1855,7 @@ dependencies = [
  "sha2 0.10.9",
  "tokio",
  "tokio-util",
+ "tracing",
  "unicode-casefold",
  "unicode-general-category",
  "unicode-normalization",

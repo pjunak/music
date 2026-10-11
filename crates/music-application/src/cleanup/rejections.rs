@@ -259,7 +259,10 @@ impl CleanupService {
             .repository
             .rejection_snapshot()
             .await
-            .map_err(|_| RejectionError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })?;
         let fingerprints = proposals
             .iter()
             .map(|proposal| {
@@ -270,7 +273,10 @@ impl CleanupService {
         self.repository
             .match_rejections(&fingerprints)
             .await
-            .map_err(|_| RejectionError::Dependency)
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })
     }
 
     pub async fn reject_proposal(
@@ -282,12 +288,18 @@ impl CleanupService {
             .repository
             .rejection_snapshot()
             .await
-            .map_err(|_| RejectionError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })?;
         let context = rejection_context(&proposal, &snapshot).ok_or(RejectionError::Stale)?;
         self.repository
             .save_rejection(&proposal, &context)
             .await
-            .map_err(|_| RejectionError::Dependency)?
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })?
             .ok_or(RejectionError::Stale)
     }
 
@@ -303,12 +315,18 @@ impl CleanupService {
             .repository
             .rejection_page(before, search)
             .await
-            .map_err(|_| RejectionError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })?;
         let snapshot = self
             .repository
             .rejection_snapshot()
             .await
-            .map_err(|_| RejectionError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })?;
         Ok(rows
             .into_iter()
             .map(|record| {
@@ -326,7 +344,10 @@ impl CleanupService {
         self.repository
             .restore_rejection(id)
             .await
-            .map_err(|_| RejectionError::Dependency)?
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+                RejectionError::Dependency
+            })?
             .map(|record| record.proposal)
             .ok_or(RejectionError::Stale)
     }
@@ -335,9 +356,9 @@ impl CleanupService {
         if id <= 0 {
             return Err(RejectionError::Invalid);
         }
-        self.repository
-            .forget_rejection(id)
-            .await
-            .map_err(|_| RejectionError::Dependency)
+        self.repository.forget_rejection(id).await.map_err(|error| {
+            crate::log_dependency_failure("cleanup rejection storage failed", &*error);
+            RejectionError::Dependency
+        })
     }
 }

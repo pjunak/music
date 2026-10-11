@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -65,7 +66,8 @@ impl CookieSettings {
             value.push_str("; Domain=");
             value.push_str(domain);
         }
-        HeaderValue::from_str(&value).map_err(|_| ApiError::internal())
+        HeaderValue::from_str(&value)
+            .map_err(|error| ApiError::internal_from("session cookie header is invalid", &error))
     }
 
     fn delete_header(&self) -> Result<HeaderValue, ApiError> {
@@ -80,7 +82,8 @@ impl CookieSettings {
             value.push_str("; Domain=");
             value.push_str(domain);
         }
-        HeaderValue::from_str(&value).map_err(|_| ApiError::internal())
+        HeaderValue::from_str(&value)
+            .map_err(|error| ApiError::internal_from("session cookie header is invalid", &error))
     }
 }
 
@@ -292,7 +295,7 @@ async fn login(
             return Err(ApiError::unauthorized(INVALID_CREDENTIALS_DETAIL));
         }
         Err(LoginError::Internal(error)) => {
-            tracing::error!(error = %error, "login failed");
+            tracing::error!(error = %ErrorChain(&error), "login failed");
             return Err(ApiError::internal());
         }
     };
@@ -317,7 +320,7 @@ async fn logout(State(state): State<HttpState>, headers: HeaderMap) -> Result<Re
         .logout(current.user.id)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "logout failed");
+            tracing::error!(error = %ErrorChain(&error), "logout failed");
             ApiError::internal()
         })?;
     let mut response = axum::http::StatusCode::NO_CONTENT.into_response();
@@ -362,7 +365,7 @@ async fn list_sessions(
         .list_sessions(current.user.id, current.token.expose_secret())
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "session listing failed");
+            tracing::error!(error = %ErrorChain(&error), "session listing failed");
             ApiError::internal()
         })?;
     let sessions = sessions
@@ -398,7 +401,7 @@ async fn revoke_session(
         Ok(RevokeSessionOutcome::Missing) => Err(ApiError::plain_not_found("no matching session")),
         Err(AuthServiceError::InvalidSessionId) => Err(ApiError::bad_request("invalid session ID")),
         Err(error) => {
-            tracing::error!(error = %error, "session revocation failed");
+            tracing::error!(error = %ErrorChain(&error), "session revocation failed");
             Err(ApiError::internal())
         }
     }
@@ -425,7 +428,7 @@ pub(crate) async fn current_session(
             Err(ApiError::unauthorized(NOT_AUTHENTICATED_DETAIL))
         }
         Err(error) => {
-            tracing::error!(error = %error, "session lookup failed");
+            tracing::error!(error = %ErrorChain(&error), "session lookup failed");
             Err(ApiError::internal())
         }
     }
@@ -450,7 +453,7 @@ pub(crate) async fn optional_session(
         })),
         Ok(SessionLookup::Expired | SessionLookup::Missing) => Ok(None),
         Err(error) => {
-            tracing::error!(error = %error, "optional session lookup failed");
+            tracing::error!(error = %ErrorChain(&error), "optional session lookup failed");
             Err(ApiError::internal())
         }
     }

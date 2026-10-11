@@ -67,7 +67,7 @@ async fn get_document_schema(
     authenticate(&state, &headers).await?;
     model::public_document_schema()
         .map(Json)
-        .map_err(|_| ApiError::internal())
+        .map_err(|error| ApiError::internal_from("authoring document schema failed", &error))
 }
 
 #[utoipa::path(

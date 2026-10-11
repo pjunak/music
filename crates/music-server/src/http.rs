@@ -336,7 +336,9 @@ async fn sync_state(
         .snapshot()
         .await
         .map_err(|_| ApiError::service_unavailable())?;
-    let canonical = canonical_state(&publication).map_err(|_| ApiError::internal())?;
+    let canonical = canonical_state(&publication).map_err(|error| {
+        ApiError::internal_from("canonical playback state could not be encoded", &error)
+    })?;
     let authenticated = crate::auth::optional_session(
         &state,
         &headers,

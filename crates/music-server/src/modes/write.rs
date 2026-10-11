@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -1073,7 +1074,7 @@ fn map_mutation_error(error: ModeMutationError) -> ApiError {
             ApiError::conflict(error.code)
         }
         ModeMutationFailureKind::Unavailable => {
-            tracing::error!(error = %error, "mode mutation failed");
+            tracing::error!(error = %ErrorChain(&error), "mode mutation failed");
             ApiError::service_unavailable()
         }
     }

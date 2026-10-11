@@ -7,6 +7,7 @@ use std::time::Duration;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use music_application::ErrorChain;
 use serde::Serialize;
 use serde_json::Value;
 use utoipa::ToSchema;
@@ -349,6 +350,14 @@ impl ApiError {
         }
     }
 
+    /// Log the full cause, then answer with the generic internal error. The
+    /// request span already carries the correlation ID returned to the client.
+    #[must_use]
+    pub fn internal_from<E: Error + ?Sized>(context: &'static str, error: &E) -> Self {
+        tracing::error!(error = %ErrorChain(error), "{context}");
+        Self::internal()
+    }
+
     #[must_use]
     pub const fn unauthorized(detail: &'static str) -> Self {
         Self::plain(StatusCode::UNAUTHORIZED, detail)
@@ -462,5 +471,29 @@ impl IntoResponse for ApiError {
             )
                 .into_response(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::io;
+
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    use super::ApiError;
+
+    #[tokio::test]
+    async fn internal_from_keeps_the_cause_out_of_the_response() -> Result<(), Box<dyn Error>> {
+        let cause = io::Error::other("/srv/private/app.db is locked");
+        let response = ApiError::internal_from("library read failed", &cause).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(response.into_body(), 4_096).await?;
+        let body = String::from_utf8(body.to_vec())?;
+        assert!(body.contains("internal_error"));
+        assert!(!body.contains("/srv/private"));
+        Ok(())
     }
 }

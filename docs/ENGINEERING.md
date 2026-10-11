@@ -165,6 +165,10 @@ is selected using [the validation matrix](VALIDATION.md).
   pre-migration backup. Databases from before the Rust server are not supported.
 - Runtime persistence is `app.db`, media directories, mode data, and the separately held Assistant
   key. Seed modes copy only when the target is empty.
+- Never drop an error's cause silently. Where a failure becomes a short public error
+  (`ApiError::internal_from`, `JobHandlerError::caused_by`, `log_dependency_failure`), the full
+  `ErrorChain` is logged at that point; responses and job records keep only the safe message.
+  Mapping parse failures to a validation response needs no log.
 - The reusable verification workflow validates Rust, the frontend, architecture boundaries,
   dependencies and tracked files; pull requests also verify the non-root image. The
   `main` workflow calls it, then builds, smoke-tests and publishes the image before dispatching

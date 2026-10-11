@@ -263,13 +263,16 @@ impl DurableEffectHandler {
             Ok(mut file) => {
                 file.write_all(b"applied")
                     .and_then(|()| file.sync_all())
-                    .map_err(|_| JobHandlerError::new("test effect write failed"))?;
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("test effect write failed", &error)
+                    })?;
                 self.effects.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                let contents = fs::read(&self.marker)
-                    .map_err(|_| JobHandlerError::new("test effect read failed"))?;
+                let contents = fs::read(&self.marker).map_err(|error| {
+                    JobHandlerError::caused_by("test effect read failed", &error)
+                })?;
                 if contents == b"applied" {
                     Ok(())
                 } else {

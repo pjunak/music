@@ -210,16 +210,16 @@ impl JobHandler for ContextAnalysisJobHandler {
             let started = Instant::now();
             let parameters =
                 serde_json::from_value::<ContextAnalysisParameters>(Value::Object(parameters))
-                    .map_err(|_| JobHandlerError::new("invalid context analysis parameters"))?;
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("invalid context analysis parameters", &error)
+                    })?;
             let scope = parameters
                 .scope
                 .to_scope()
-                .map_err(|_| JobHandlerError::new("invalid context analysis scope"))?;
-            let all_tracks = self
-                .repository
-                .all_tracks()
-                .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|()| JobHandlerError::new("invalid context analysis scope"))?;
+            let all_tracks = self.repository.all_tracks().await.map_err(|error| {
+                JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+            })?;
             let tracks = scope
                 .select(&all_tracks)
                 .into_iter()
@@ -230,12 +230,16 @@ impl JobHandler for ContextAnalysisJobHandler {
                 .repository
                 .context_states(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+                })?;
             let failures = self
                 .repository
                 .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+                })?;
             let state_by_track = context_by_track(&states);
             let failure_by_track = failures_by_track(&failures);
             let voice_signature = self.voice_analyzer.source_signature.as_deref();
@@ -257,7 +261,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                     LOCAL_CONTEXT_IMPLEMENTATION_ID,
                     voice_signature,
                 )
-                .map_err(|_| JobHandlerError::new("track context fingerprint failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::with_reason("track context fingerprint failed", &error)
+                })?;
                 let state = state_by_track.get(&track.id).copied();
                 let failure = failure_by_track.get(&track.id).copied();
                 let parsed = state
@@ -311,11 +317,13 @@ impl JobHandler for ContextAnalysisJobHandler {
             drop(failures);
 
             let starting = context.progress_current().max(checkpointed);
-            let signal_work_count = u64::try_from(signal_work.len())
-                .map_err(|_| JobHandlerError::new("context analysis is too large"))?;
+            let signal_work_count = u64::try_from(signal_work.len()).map_err(|error| {
+                JobHandlerError::caused_by("context analysis is too large", &error)
+            })?;
             let expected_voice_count = if voice_enabled {
-                u64::try_from(signal_work.len().saturating_add(initial_voice_work))
-                    .map_err(|_| JobHandlerError::new("context analysis is too large"))?
+                u64::try_from(signal_work.len().saturating_add(initial_voice_work)).map_err(
+                    |error| JobHandlerError::caused_by("context analysis is too large", &error),
+                )?
             } else {
                 0
             };
@@ -358,7 +366,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                         "Analyzing audio context",
                         format!("{} tracks need context analysis", signal_work.len()),
                     )
-                    .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("invalid context analysis progress", &error)
+                    })?,
                 )
                 .await
                 .map_err(JobHandlerError::from_execution)?;
@@ -400,7 +410,12 @@ impl JobHandler for ContextAnalysisJobHandler {
                                 &write,
                             )
                             .await
-                            .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                            .map_err(|error| {
+                                JobHandlerError::caused_by(
+                                    "context analysis storage failed",
+                                    error.as_ref(),
+                                )
+                            })?;
                         if stored {
                             audio_completed = audio_completed.saturating_add(1);
                         }
@@ -430,7 +445,12 @@ impl JobHandler for ContextAnalysisJobHandler {
                                 &failure,
                             )
                             .await
-                            .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                            .map_err(|error| {
+                                JobHandlerError::caused_by(
+                                    "context analysis storage failed",
+                                    error.as_ref(),
+                                )
+                            })?;
                         if stored {
                             audio_failed = audio_failed.saturating_add(1);
                         }
@@ -460,7 +480,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                                 tracks.len()
                             ),
                         )
-                        .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
+                        .map_err(|error| {
+                            JobHandlerError::caused_by("invalid context analysis progress", &error)
+                        })?,
                     )
                     .await
                     .map_err(JobHandlerError::from_execution)?;
@@ -472,12 +494,16 @@ impl JobHandler for ContextAnalysisJobHandler {
                 .repository
                 .context_states(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+                })?;
             let failures_after_signal = self
                 .repository
                 .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+                })?;
             let states_after_signal_by_track = context_by_track(&states_after_signal);
             let failures_after_signal_by_track = failures_by_track(&failures_after_signal);
             audio_completed = 0;
@@ -492,7 +518,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                     LOCAL_CONTEXT_IMPLEMENTATION_ID,
                     voice_signature,
                 )
-                .map_err(|_| JobHandlerError::new("track context fingerprint failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::with_reason("track context fingerprint failed", &error)
+                })?;
                 let current_state = states_after_signal_by_track
                     .get(&track.id)
                     .copied()
@@ -551,10 +579,10 @@ impl JobHandler for ContextAnalysisJobHandler {
                 None
             };
             let active_voice_workers = usize::from(voice_worker.is_some());
-            let voice_total = progress_current.saturating_add(
-                u64::try_from(voice_work.len())
-                    .map_err(|_| JobHandlerError::new("context analysis is too large"))?,
-            );
+            let voice_total =
+                progress_current.saturating_add(u64::try_from(voice_work.len()).map_err(
+                    |error| JobHandlerError::caused_by("context analysis is too large", &error),
+                )?);
             let mut voice_progress = if voice_enabled {
                 ContextPassProgress {
                     status: if voice_work.is_empty() {
@@ -593,7 +621,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                             "Optional voice detection is not enabled".to_owned()
                         },
                     )
-                    .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("invalid context analysis progress", &error)
+                    })?,
                 )
                 .await
                 .map_err(JobHandlerError::from_execution)?;
@@ -641,7 +671,12 @@ impl JobHandler for ContextAnalysisJobHandler {
                         &write,
                     )
                     .await
-                    .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                    .map_err(|error| {
+                        JobHandlerError::caused_by(
+                            "context analysis storage failed",
+                            error.as_ref(),
+                        )
+                    })?;
                 if stored {
                     if classified {
                         voice_completed = voice_completed.saturating_add(1);
@@ -675,7 +710,9 @@ impl JobHandler for ContextAnalysisJobHandler {
                                 tracks.len().saturating_sub(voice_skipped)
                             ),
                         )
-                        .map_err(|_| JobHandlerError::new("invalid context analysis progress"))?,
+                        .map_err(|error| {
+                            JobHandlerError::caused_by("invalid context analysis progress", &error)
+                        })?,
                     )
                     .await
                     .map_err(JobHandlerError::from_execution)?;
@@ -706,12 +743,16 @@ impl JobHandler for ContextAnalysisJobHandler {
                 .repository
                 .context_states(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+                })?;
             let final_failures = self
                 .repository
                 .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("context analysis storage failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
+                })?;
             context_result(
                 &tracks,
                 &final_states,
@@ -951,7 +992,9 @@ fn context_result(
     for track in tracks {
         let signature =
             context_source_signature(track, LOCAL_CONTEXT_IMPLEMENTATION_ID, voice_signature)
-                .map_err(|_| JobHandlerError::new("track context fingerprint failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::with_reason("track context fingerprint failed", &error)
+                })?;
         let current = state_by_track.get(&track.id).copied().filter(|state| {
             state.source_signature == signature && parse_context_state(state).is_some()
         });
@@ -986,8 +1029,9 @@ fn context_result(
             })
         })
         .collect::<Vec<_>>();
-    let scope = serde_json::to_value(scope)
-        .map_err(|_| JobHandlerError::new("context analysis scope could not be encoded"))?;
+    let scope = serde_json::to_value(scope).map_err(|error| {
+        JobHandlerError::caused_by("context analysis scope could not be encoded", &error)
+    })?;
     Ok(json!({
         "schema_version": "assistant-library-context-job-result/v3",
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,

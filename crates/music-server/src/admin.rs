@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -1756,7 +1757,7 @@ async fn download_backup(
         .as_ref()
         .ok_or_else(ApiError::service_unavailable)?;
     let prepared = service.prepare().await.map_err(|error| {
-        tracing::error!(error = %error, "state backup failed");
+        tracing::error!(error = %ErrorChain(&error), "state backup failed");
         ApiError::internal()
     })?;
     stream_backup(prepared).await
@@ -1766,16 +1767,16 @@ async fn stream_backup(prepared: PreparedBackup) -> Result<Response<Body>, ApiEr
     let file = tokio::fs::File::open(&prepared.archive_path)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "completed backup could not be opened");
+            tracing::error!(error = %ErrorChain(&error), "completed backup could not be opened");
             ApiError::internal()
         })?;
     let content_disposition = HeaderValue::from_str(&format!(
         "attachment; filename=\"{}\"",
         prepared.download_name
     ))
-    .map_err(|_| ApiError::internal())?;
+    .map_err(|error| ApiError::internal_from("backup download header is invalid", &error))?;
     let content_length = HeaderValue::from_str(&prepared.archive_bytes.to_string())
-        .map_err(|_| ApiError::internal())?;
+        .map_err(|error| ApiError::internal_from("backup length header is invalid", &error))?;
     let stream = stream::try_unfold(
         BackupStreamState {
             file,

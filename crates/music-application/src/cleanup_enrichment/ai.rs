@@ -86,12 +86,12 @@ impl CleanupAiJobHandler {
             return Err(JobHandlerError::new("cleanup_evidence_stale"));
         }
         let id = TrackId::new(parameters.track_id)
-            .map_err(|_| JobHandlerError::new("cleanup_track_invalid"))?;
+            .map_err(|error| JobHandlerError::caused_by("cleanup_track_invalid", &error))?;
         let tracks = self
             .cleanup
             .tracks(CleanupScope::All)
             .await
-            .map_err(|_| JobHandlerError::new("cleanup_track_unavailable"))?;
+            .map_err(|error| JobHandlerError::caused_by("cleanup_track_unavailable", &error))?;
         let track = tracks
             .iter()
             .find(|track| track.id == id)
@@ -103,7 +103,9 @@ impl CleanupAiJobHandler {
             .cache
             .catalog_evidence_revision()
             .await
-            .map_err(|_| JobHandlerError::new("cleanup_evidence_unavailable"))?;
+            .map_err(|error| {
+                JobHandlerError::caused_by("cleanup_evidence_unavailable", error.as_ref())
+            })?;
         if plan["source_signature"].as_str() != Some(&signature)
             || plan["indexed_folder_signature"].as_str() != Some(&folder_signature)
             || plan["evidence_revision"].as_i64() != Some(revision)
@@ -133,8 +135,9 @@ impl CleanupAiJobHandler {
             LibraryCleanupTask::Recording(
                 LibraryCleanupModelTask::new(
                     track,
-                    serde_json::from_value(plan["candidates"].clone())
-                        .map_err(|_| JobHandlerError::new("cleanup_candidates_invalid"))?,
+                    serde_json::from_value(plan["candidates"].clone()).map_err(|error| {
+                        JobHandlerError::caused_by("cleanup_candidates_invalid", &error)
+                    })?,
                 )
                 .map_err(|e| JobHandlerError::new(e.code))?,
             )
@@ -169,7 +172,7 @@ impl CleanupAiJobHandler {
             .cleanup
             .tracks(CleanupScope::All)
             .await
-            .map_err(|_| JobHandlerError::new("cleanup_track_unavailable"))?;
+            .map_err(|error| JobHandlerError::caused_by("cleanup_track_unavailable", &error))?;
         let current_role = self
             .quality
             .prepare_quality_gated_role_execution("library_cleanup", LIBRARY_CLEANUP_QUALITY_ID)
@@ -180,7 +183,9 @@ impl CleanupAiJobHandler {
                 .cache
                 .catalog_evidence_revision()
                 .await
-                .map_err(|_| JobHandlerError::new("cleanup_evidence_unavailable"))?
+                .map_err(|error| {
+                    JobHandlerError::caused_by("cleanup_evidence_unavailable", error.as_ref())
+                })?
                 != revision
             || current
                 .iter()
@@ -244,8 +249,9 @@ impl JobHandler for CleanupAiJobHandler {
         Box::pin(async move {
             self.run(
                 context,
-                serde_json::from_value(Value::Object(parameters))
-                    .map_err(|_| JobHandlerError::new("cleanup_model_parameters_invalid"))?,
+                serde_json::from_value(Value::Object(parameters)).map_err(|error| {
+                    JobHandlerError::caused_by("cleanup_model_parameters_invalid", &error)
+                })?,
             )
             .await
         })

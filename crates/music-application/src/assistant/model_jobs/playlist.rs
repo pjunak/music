@@ -137,7 +137,7 @@ impl ModelFeatureJobHandler {
             .assistant
             .tracks()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         let request = parameters.request.application_request()?;
         update_progress(
             context,
@@ -154,7 +154,7 @@ impl ModelFeatureJobHandler {
             .assistant
             .vocabulary()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         let task = ModelPlaylistTask::with_vocabulary(&tracks, &request, &vocabulary.document)
             .map_err(model_task_failure)?;
         let model_request = task.request();

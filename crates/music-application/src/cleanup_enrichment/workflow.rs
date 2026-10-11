@@ -79,7 +79,7 @@ impl CleanupEnrichmentJobHandler {
         let scope = parameters
             .scope
             .to_scope()
-            .map_err(|_| JobHandlerError::new("cleanup enrichment scope is invalid"))?;
+            .map_err(|()| JobHandlerError::new("cleanup enrichment scope is invalid"))?;
         let tracks =
             self.services.cleanup.tracks(scope).await.map_err(|_| {
                 JobHandlerError::new("cleanup enrichment scope could not be loaded")
@@ -111,7 +111,7 @@ impl CleanupEnrichmentJobHandler {
             .cleanup
             .tracks(CleanupScope::All)
             .await
-            .map_err(|_| JobHandlerError::new("folder context is unavailable"))?;
+            .map_err(|error| JobHandlerError::caused_by("folder context is unavailable", &error))?;
         let local_plans = music_domain::analyze_cleanup(
             &all_tracks,
             &all_tracks,
@@ -119,12 +119,9 @@ impl CleanupEnrichmentJobHandler {
             None,
         );
         let _source_lease = self.services.sources.execution_lease().await;
-        let source_states = self
-            .services
-            .sources
-            .sources()
-            .await
-            .map_err(|_| JobHandlerError::new("cleanup source settings are unavailable"))?;
+        let source_states = self.services.sources.sources().await.map_err(|error| {
+            JobHandlerError::caused_by("cleanup source settings are unavailable", &error)
+        })?;
         let source = |id: &str| source_states.iter().find(|source| source.id == id);
         let musicbrainz_enabled =
             source(MUSICBRAINZ_SOURCE_ID).is_some_and(|source| source.enabled && source.available);
@@ -142,7 +139,9 @@ impl CleanupEnrichmentJobHandler {
                 .sources
                 .saved_credential(ACOUSTID_SOURCE_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("AcoustID credential is unavailable"))?
+                .map_err(|error| {
+                    JobHandlerError::caused_by("AcoustID credential is unavailable", &error)
+                })?
         } else {
             None
         };
@@ -151,7 +150,9 @@ impl CleanupEnrichmentJobHandler {
                 .sources
                 .saved_credential(LASTFM_SOURCE_ID)
                 .await
-                .map_err(|_| JobHandlerError::new("Last.fm credential is unavailable"))?
+                .map_err(|error| {
+                    JobHandlerError::caused_by("Last.fm credential is unavailable", &error)
+                })?
         } else {
             None
         };
@@ -182,7 +183,12 @@ impl CleanupEnrichmentJobHandler {
             .cache
             .catalog_evidence_revision()
             .await
-            .map_err(|_| JobHandlerError::new("catalog evidence revision is unavailable"))?;
+            .map_err(|error| {
+                JobHandlerError::caused_by(
+                    "catalog evidence revision is unavailable",
+                    error.as_ref(),
+                )
+            })?;
         let catalog = CatalogAccess {
             evidence_revision,
             acoustid_enabled,
@@ -201,17 +207,21 @@ impl CleanupEnrichmentJobHandler {
                     .assistant
                     .vocabulary()
                     .await
-                    .map_err(|_| JobHandlerError::new("tag vocabulary is unavailable"))?,
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("tag vocabulary is unavailable", &error)
+                    })?,
             )
         } else {
             None
         };
-        let total = u64::try_from(tracks.len())
-            .map_err(|_| JobHandlerError::new("cleanup enrichment scope is too large"))?;
+        let total = u64::try_from(tracks.len()).map_err(|error| {
+            JobHandlerError::caused_by("cleanup enrichment scope is too large", &error)
+        })?;
         context
             .update_progress(
-                JobProgress::new(0, Some(total), "identify", "Preparing catalog lookup")
-                    .map_err(|_| JobHandlerError::new("job progress is invalid"))?,
+                JobProgress::new(0, Some(total), "identify", "Preparing catalog lookup").map_err(
+                    |error| JobHandlerError::caused_by("job progress is invalid", &error),
+                )?,
             )
             .await
             .map_err(JobHandlerError::from_execution)?;
@@ -232,7 +242,12 @@ impl CleanupEnrichmentJobHandler {
                 .cache
                 .catalog_evidence_revision()
                 .await
-                .map_err(|_| JobHandlerError::new("catalog evidence revision is unavailable"))?
+                .map_err(|error| {
+                    JobHandlerError::caused_by(
+                        "catalog evidence revision is unavailable",
+                        error.as_ref(),
+                    )
+                })?
                 != evidence_revision
             {
                 return Err(JobHandlerError::new(
@@ -315,7 +330,12 @@ impl CleanupEnrichmentJobHandler {
                     .cache
                     .cleanup_enrichment(track.id)
                     .await
-                    .map_err(|_| JobHandlerError::new("cleanup enrichment cache is unavailable"))?
+                    .map_err(|error| {
+                        JobHandlerError::caused_by(
+                            "cleanup enrichment cache is unavailable",
+                            error.as_ref(),
+                        )
+                    })?
                     .filter(|record| {
                         record.source_signature == signature
                             && record.evidence_revision == evidence_revision
@@ -415,7 +435,7 @@ impl CleanupEnrichmentJobHandler {
             }
             plans.push(Value::Object(result));
             let done = u64::try_from(index + 1)
-                .map_err(|_| JobHandlerError::new("job progress overflowed"))?;
+                .map_err(|error| JobHandlerError::caused_by("job progress overflowed", &error))?;
             context
                 .update_progress(
                     JobProgress::new(
@@ -424,7 +444,9 @@ impl CleanupEnrichmentJobHandler {
                         "identify",
                         format!("Processed {done} of {total} tracks"),
                     )
-                    .map_err(|_| JobHandlerError::new("job progress is invalid"))?,
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("job progress is invalid", &error)
+                    })?,
                 )
                 .await
                 .map_err(JobHandlerError::from_execution)?;
@@ -714,7 +736,9 @@ impl JobHandler for CleanupEnrichmentJobHandler {
             let parameters = serde_json::from_value::<EnrichmentParameters>(Value::Object(
                 parameters,
             ))
-            .map_err(|_| JobHandlerError::new("cleanup enrichment parameters are invalid"))?;
+            .map_err(|error| {
+                JobHandlerError::caused_by("cleanup enrichment parameters are invalid", &error)
+            })?;
             self.run(context, parameters).await.map(Value::Object)
         })
     }

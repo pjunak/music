@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -340,7 +341,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                 match devices.find(&client_id).await {
                     Ok(device) => device,
                     Err(error) => {
-                        tracing::error!(error = %error, "remembered-device lookup failed during registration");
+                        tracing::error!(error = %ErrorChain(&error), "remembered-device lookup failed during registration");
                         queue_error(writer, "device registration failed", None, cancellation).await;
                         return;
                     }
@@ -457,7 +458,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                     .await;
                 }
                 Err(error) => {
-                    tracing::warn!(error = %error, "active-output selection was rejected");
+                    tracing::warn!(error = %ErrorChain(&error), "active-output selection was rejected");
                     queue_error(writer, "playback action failed", None, cancellation).await;
                 }
             }
@@ -561,7 +562,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                 }
             };
             if let Err(error) = playback.ambient_skip_next(expected_track_id).await {
-                tracing::warn!(error = %error, "ambient skip was rejected");
+                tracing::warn!(error = %ErrorChain(&error), "ambient skip was rejected");
                 queue_error(writer, "playback action failed", None, cancellation).await;
             }
         }
@@ -941,7 +942,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                     .execute(ResolvedPlaybackCommand::direct(command))
                     .await
                 {
-                    tracing::warn!(error = %error, "authenticated playback action was rejected");
+                    tracing::warn!(error = %ErrorChain(&error), "authenticated playback action was rejected");
                     queue_error(writer, "playback action failed", None, cancellation).await;
                 }
             }
@@ -1473,7 +1474,7 @@ async fn refresh_authorization(
             ))
         }
         Err(error) => {
-            tracing::error!(error = %error, "WebSocket session recheck failed closed");
+            tracing::error!(error = %ErrorChain(&error), "WebSocket session recheck failed closed");
             authorization.downgrade();
             Some((
                 "session could not be verified — please sign in again",

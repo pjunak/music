@@ -15,6 +15,7 @@ pub mod cleanup;
 pub mod cleanup_enrichment;
 pub mod cleanup_sources;
 pub mod devices;
+mod error_chain;
 pub mod jobs;
 pub mod library;
 pub mod modes;
@@ -22,3 +23,5 @@ pub mod playback;
 pub mod playlists;
 pub mod recovery;
 pub mod sfx;
+
+pub use error_chain::{ErrorChain, log_dependency_failure};

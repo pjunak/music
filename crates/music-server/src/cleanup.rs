@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -1039,7 +1040,7 @@ fn map_cleanup_error(error: CleanupError) -> ApiError {
             ApiError::bad_request("scope.track_ids must be non-empty for a tracks scope")
         }
         CleanupError::Dependency { .. } => {
-            tracing::error!(error = %error, "library cleanup analysis failed");
+            tracing::error!(error = %ErrorChain(&error), "library cleanup analysis failed");
             ApiError::internal()
         }
     }
@@ -1049,7 +1050,7 @@ fn map_cleanup_verification_error(error: CleanupVerificationError) -> ApiError {
     match error {
         CleanupVerificationError::InvalidBatchSize => ApiError::validation(),
         CleanupVerificationError::Dependency { .. } => {
-            tracing::error!(error = %error, "library cleanup verification persistence failed");
+            tracing::error!(error = %ErrorChain(&error), "library cleanup verification persistence failed");
             ApiError::internal()
         }
     }
@@ -1070,7 +1071,7 @@ fn map_cleanup_source_error(error: CleanupSourceError) -> ApiError {
             "Encrypted credential storage is unavailable.",
         ),
         CleanupSourceError::Dependency => {
-            tracing::error!(error = %error, "cleanup source settings failed");
+            tracing::error!(error = %ErrorChain(&error), "cleanup source settings failed");
             ApiError::internal()
         }
     }
@@ -1090,7 +1091,7 @@ fn map_cleanup_apply_error(error: LibraryCoordinatorError) -> ApiError {
             ApiError::service_unavailable()
         }
         error => {
-            tracing::error!(error = %error, "library cleanup apply failed");
+            tracing::error!(error = %ErrorChain(&error), "library cleanup apply failed");
             ApiError::internal()
         }
     }
@@ -1109,7 +1110,7 @@ fn map_cleanup_revert_error(error: LibraryCoordinatorError) -> ApiError {
             ApiError::service_unavailable()
         }
         error => {
-            tracing::error!(error = %error, "library cleanup revert failed");
+            tracing::error!(error = %ErrorChain(&error), "library cleanup revert failed");
             ApiError::internal()
         }
     }

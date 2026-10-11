@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -146,7 +147,7 @@ async fn save_device(
             )
             .await
             .map_err(|error| {
-                tracing::error!(error = %error, "could not refresh connected device metadata");
+                tracing::error!(error = %ErrorChain(&error), "could not refresh connected device metadata");
                 ApiError::service_unavailable()
             })?;
     }
@@ -187,7 +188,7 @@ async fn forget_device(
             .refresh_client_metadata(client_id, None, false)
             .await
             .map_err(|error| {
-                tracing::error!(error = %error, "could not clear connected device metadata");
+                tracing::error!(error = %ErrorChain(&error), "could not clear connected device metadata");
                 ApiError::service_unavailable()
             })?;
     }
@@ -222,6 +223,6 @@ fn map_device_error(error: DeviceServiceError) -> ApiError {
 }
 
 fn device_internal(error: DeviceServiceError) -> ApiError {
-    tracing::error!(error = %error, "remembered-device operation failed");
+    tracing::error!(error = %ErrorChain(&error), "remembered-device operation failed");
     ApiError::internal()
 }

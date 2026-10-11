@@ -138,7 +138,10 @@ impl CleanupSourceService {
             .cleanup_source_enabled(MUSICBRAINZ_SOURCE_ID)
             .await
             .map(|stored| stored.unwrap_or(true))
-            .map_err(|_| CleanupSourceError::Dependency)
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })
     }
 
     pub async fn update(
@@ -159,7 +162,10 @@ impl CleanupSourceService {
         self.repository
             .set_cleanup_source_enabled(source_id, enabled)
             .await
-            .map_err(|_| CleanupSourceError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })?;
         self.source(source_id, enabled).await
     }
 
@@ -173,7 +179,10 @@ impl CleanupSourceService {
             .cleanup_source_enabled(source_id)
             .await
             .map(|stored| stored.unwrap_or(default))
-            .map_err(|_| CleanupSourceError::Dependency)
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })
     }
 
     async fn musicbrainz(&self) -> Result<CleanupSource, CleanupSourceError> {
@@ -223,18 +232,21 @@ impl CleanupSourceService {
         if !(1..=MAX_CREDENTIAL_CHARS).contains(&api_key.trim().chars().count()) {
             return Err(CleanupSourceError::InvalidCredential);
         }
-        let cipher = self
-            .credentials
-            .current_cipher()
-            .await
-            .map_err(|_| CleanupSourceError::CredentialStorage)?;
-        let credential = cipher
-            .encrypt(&subject, api_key)
-            .map_err(|_| CleanupSourceError::CredentialStorage)?;
+        let cipher = self.credentials.current_cipher().await.map_err(|error| {
+            crate::log_dependency_failure("cleanup source credential storage failed", &error);
+            CleanupSourceError::CredentialStorage
+        })?;
+        let credential = cipher.encrypt(&subject, api_key).map_err(|error| {
+            crate::log_dependency_failure("cleanup source credential storage failed", &error);
+            CleanupSourceError::CredentialStorage
+        })?;
         self.repository
             .store_cleanup_source_credential(source_id, &credential)
             .await
-            .map_err(|_| CleanupSourceError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })?;
         // Keep the vault read lease through the database write so a concurrent
         // complete reset cannot remove the master key between encryption and persistence.
         drop(cipher);
@@ -253,7 +265,10 @@ impl CleanupSourceService {
         self.repository
             .clear_cleanup_source_credential(source_id)
             .await
-            .map_err(|_| CleanupSourceError::Dependency)?;
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })?;
         self.source(source_id, self.enabled(source_id).await?).await
     }
 
@@ -266,19 +281,24 @@ impl CleanupSourceService {
             .repository
             .cleanup_source_credential(source_id)
             .await
-            .map_err(|_| CleanupSourceError::Dependency)?
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })?
         else {
             return Ok(None);
         };
-        let cipher = self
-            .credentials
-            .current_cipher()
-            .await
-            .map_err(|_| CleanupSourceError::CredentialStorage)?;
+        let cipher = self.credentials.current_cipher().await.map_err(|error| {
+            crate::log_dependency_failure("cleanup source credential storage failed", &error);
+            CleanupSourceError::CredentialStorage
+        })?;
         cipher
             .decrypt(&subject, &credential.ciphertext, &credential.nonce)
             .map(Some)
-            .map_err(|_| CleanupSourceError::CredentialStorage)
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source credential storage failed", &error);
+                CleanupSourceError::CredentialStorage
+            })
     }
 
     async fn credential_state(
@@ -289,7 +309,10 @@ impl CleanupSourceService {
             .repository
             .cleanup_source_credential(source_id)
             .await
-            .map_err(|_| CleanupSourceError::Dependency)?
+            .map_err(|error| {
+                crate::log_dependency_failure("cleanup source storage failed", &*error);
+                CleanupSourceError::Dependency
+            })?
         else {
             return Ok(CredentialState::environment(environment_configured(
                 source_id,

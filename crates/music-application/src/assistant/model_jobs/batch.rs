@@ -66,7 +66,9 @@ impl ModelFeatureJobHandler {
             .repository
             .create_model_batch(&record)
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?
+            .map_err(|error| {
+                JobHandlerError::caused_by("assistant_storage_failed", error.as_ref())
+            })?
         {
             return Err(JobHandlerError::new("model_batch_pending"));
         }
@@ -128,7 +130,7 @@ impl ModelFeatureJobHandler {
             abandon_uncertain: bool,
         }
         let action: Action = serde_json::from_value(Value::Object(parameters))
-            .map_err(|_| JobHandlerError::new("invalid_batch_action"))?;
+            .map_err(|error| JobHandlerError::caused_by("invalid_batch_action", &error))?;
         if action.role_id != "music_tagger" {
             return Err(JobHandlerError::new("invalid_batch_action"));
         }
@@ -140,7 +142,9 @@ impl ModelFeatureJobHandler {
             .repository
             .model_batch(&action.batch_id)
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?
+            .map_err(|error| {
+                JobHandlerError::caused_by("assistant_storage_failed", error.as_ref())
+            })?
             .ok_or_else(|| JobHandlerError::new("batch_not_found"))?;
         if !record.pending() {
             return Ok(record.document["result"].clone());
@@ -231,18 +235,18 @@ impl ModelFeatureJobHandler {
             }
             let parameters: ModelTaggingJobParameters =
                 serde_json::from_value(record.document["parameters"].clone())
-                    .map_err(|_| JobHandlerError::new("batch_record_invalid"))?;
+                    .map_err(|error| JobHandlerError::caused_by("batch_record_invalid", &error))?;
             let inputs: Vec<Value> = serde_json::from_value(record.document["inputs"].clone())
-                .map_err(|_| JobHandlerError::new("batch_record_invalid"))?;
+                .map_err(|error| JobHandlerError::caused_by("batch_record_invalid", &error))?;
             let templates: Vec<AnalysisWrite> =
                 serde_json::from_value(record.document["templates"].clone())
-                    .map_err(|_| JobHandlerError::new("batch_record_invalid"))?;
+                    .map_err(|error| JobHandlerError::caused_by("batch_record_invalid", &error))?;
             let ranges: Vec<std::ops::Range<usize>> =
                 serde_json::from_value(record.document["ranges"].clone())
-                    .map_err(|_| JobHandlerError::new("batch_record_invalid"))?;
+                    .map_err(|error| JobHandlerError::caused_by("batch_record_invalid", &error))?;
             let summary: ProviderUsageSummary =
                 serde_json::from_value(record.document["submission_usage"].clone())
-                    .map_err(|_| JobHandlerError::new("batch_record_invalid"))?;
+                    .map_err(|error| JobHandlerError::caused_by("batch_record_invalid", &error))?;
             let mut usage = ProviderUsageAccumulator::resume(summary);
             let mut responses = BTreeMap::new();
             for file in [&status.output_file_id, &status.error_file_id]
@@ -268,18 +272,17 @@ impl ModelFeatureJobHandler {
                     }
                 }
             }
-            let vocabulary = self
-                .assistant
-                .vocabulary()
-                .await
-                .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            let vocabulary =
+                self.assistant.vocabulary().await.map_err(|error| {
+                    JobHandlerError::caused_by("assistant_storage_failed", &error)
+                })?;
             // Collection cannot start new inference. Preserve paid results across
             // operational recertification while checking their inference identity.
             let current = services
                 .providers
                 .current_role_review_identity("music_tagger")
                 .await
-                .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?
+                .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?
                 .is_some_and(|role| role.inference_fingerprint == parameters.inference_fingerprint)
                 && vocabulary.fingerprint == parameters.vocabulary_fingerprint;
             let mut updated = 0;
@@ -348,7 +351,9 @@ impl ModelFeatureJobHandler {
                         &writes,
                     )
                     .await
-                    .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+                    .map_err(|error| {
+                        JobHandlerError::caused_by("assistant_storage_failed", error.as_ref())
+                    })?;
                 usage.set_feature_progress(json!({
                     "processed_tracks": processed, "tracks_with_suggestions": with_suggestions,
                     "tracks_without_suggestions": processed - with_suggestions, "suggested_tags": suggested_tags,
@@ -403,7 +408,7 @@ async fn persist(
         .repository
         .update_model_batch(&expected, record)
         .await
-        .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?
+        .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", error.as_ref()))?
     {
         return Err(JobHandlerError::new("batch_state_changed"));
     }

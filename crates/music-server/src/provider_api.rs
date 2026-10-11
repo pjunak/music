@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -103,7 +104,7 @@ impl RuntimeProviders {
             .saved_provider_credentials_exist()
             .await
             .map_err(|source| {
-                tracing::error!(error = %source, "provider credential status lookup failed");
+                tracing::error!(error = %ErrorChain(source.as_ref()), "provider credential status lookup failed");
                 ApiError::internal()
             })?;
         Ok(self.credentials.status(saved).await)
@@ -115,7 +116,7 @@ impl RuntimeProviders {
             .saved_provider_credentials_exist()
             .await
             .map_err(|source| {
-                tracing::error!(error = %source, "provider credential status lookup failed");
+                tracing::error!(error = %ErrorChain(source.as_ref()), "provider credential status lookup failed");
                 ApiError::internal()
             })?;
         self.credentials
@@ -970,7 +971,7 @@ async fn reset_credential_storage(
             ));
         }
         Err(PasswordConfirmationError::Internal(error)) => {
-            tracing::error!(error = %error, "provider credential reset authentication failed");
+            tracing::error!(error = %ErrorChain(&error), "provider credential reset authentication failed");
             return Err(ApiError::internal());
         }
     }
@@ -1553,7 +1554,7 @@ async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiErro
 
 pub(crate) fn map_provider_error(error: ProviderServiceError) -> ApiError {
     if error.kind() == ProviderServiceErrorKind::Dependency {
-        tracing::error!(error = %error, "provider request failed");
+        tracing::error!(error = %ErrorChain(&error), "provider request failed");
         return ApiError::internal();
     }
     let status = match error.kind() {
@@ -1568,7 +1569,7 @@ pub(crate) fn map_provider_error(error: ProviderServiceError) -> ApiError {
 
 pub(crate) fn map_model_quality_error(error: ModelQualityError) -> ApiError {
     if error.kind() == ProviderServiceErrorKind::Dependency {
-        tracing::error!(error = %error, "model quality request failed");
+        tracing::error!(error = %ErrorChain(&error), "model quality request failed");
         return ApiError::internal();
     }
     let status = match error.kind() {

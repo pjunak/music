@@ -28,10 +28,12 @@ pub struct FilesystemModeCatalogSource {
 
 impl FilesystemModeCatalogSource {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ModeSourceError> {
-        let root = fs::canonicalize(path.as_ref())
-            .map_err(|_| ModeSourceError::new("modes directory could not be resolved"))?;
-        let metadata = fs::metadata(&root)
-            .map_err(|_| ModeSourceError::new("modes directory could not be inspected"))?;
+        let root = fs::canonicalize(path.as_ref()).map_err(|error| {
+            ModeSourceError::caused_by("modes directory could not be resolved", &error)
+        })?;
+        let metadata = fs::metadata(&root).map_err(|error| {
+            ModeSourceError::caused_by("modes directory could not be inspected", &error)
+        })?;
         if !metadata.is_dir() {
             return Err(ModeSourceError::new("modes path is not a directory"));
         }
@@ -50,7 +52,9 @@ impl ModeCatalogSource for FilesystemModeCatalogSource {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || load_catalog(&root))
                 .await
-                .map_err(|_| ModeSourceError::new("mode loader worker did not complete"))?
+                .map_err(|error| {
+                    ModeSourceError::caused_by("mode loader worker did not complete", &error)
+                })?
         })
     }
 }
@@ -73,16 +77,19 @@ impl From<YamlDocumentError> for ModeBundleError {
 }
 
 fn load_catalog(root: &Path) -> Result<ModeLoadAttempt, ModeSourceError> {
-    let root_metadata = fs::metadata(root)
-        .map_err(|_| ModeSourceError::new("modes directory could not be inspected"))?;
+    let root_metadata = fs::metadata(root).map_err(|error| {
+        ModeSourceError::caused_by("modes directory could not be inspected", &error)
+    })?;
     if !root_metadata.is_dir() {
         return Err(ModeSourceError::new("modes path is not a directory"));
     }
     let mut entries = fs::read_dir(root)
-        .map_err(|_| ModeSourceError::new("modes directory could not be read"))?
+        .map_err(|error| ModeSourceError::caused_by("modes directory could not be read", &error))?
         .take(MAX_ROOT_ENTRIES + 1)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ModeSourceError::new("modes directory entry could not be read"))?;
+        .map_err(|error| {
+            ModeSourceError::caused_by("modes directory entry could not be read", &error)
+        })?;
     if entries.len() > MAX_ROOT_ENTRIES {
         return Err(ModeSourceError::new(
             "modes directory contains too many entries",

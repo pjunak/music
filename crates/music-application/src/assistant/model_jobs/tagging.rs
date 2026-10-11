@@ -328,7 +328,7 @@ impl ModelFeatureJobHandler {
             .assistant
             .vocabulary()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         if vocabulary.fingerprint != parameters.vocabulary_fingerprint {
             return Err(JobHandlerError::new("tag_vocabulary_changed"));
         }
@@ -336,7 +336,7 @@ impl ModelFeatureJobHandler {
             .assistant
             .tracks()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         let library_tracks = tracks.len();
         let scope = parameters.scope.application_scope()?;
         let scoped = tracks
@@ -351,7 +351,7 @@ impl ModelFeatureJobHandler {
             .local_analysis
             .current_contexts(&indexed)
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         let planned = scoped
             .iter()
             .copied()
@@ -374,7 +374,7 @@ impl ModelFeatureJobHandler {
                     track.catalog_evidence.as_ref(),
                 )
                 .map(|signature| (track.track.id, signature))
-                .map_err(|_| JobHandlerError::new("model_tag_source_invalid"))
+                .map_err(|reason| JobHandlerError::with_reason("model_tag_source_invalid", &reason))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
         let work = planned
@@ -465,7 +465,9 @@ impl ModelFeatureJobHandler {
                 .repository
                 .pending_model_batch()
                 .await
-                .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?
+                .map_err(|error| {
+                    JobHandlerError::caused_by("assistant_storage_failed", error.as_ref())
+                })?
                 .is_some()
         {
             return Err(JobHandlerError::new("model_batch_pending"));
@@ -625,7 +627,9 @@ impl ModelFeatureJobHandler {
                     &writes,
                 )
                 .await
-                .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+                .map_err(|error| {
+                    JobHandlerError::caused_by("assistant_storage_failed", error.as_ref())
+                })?;
             updated = updated.saturating_add(stored);
             skipped_changed = skipped_changed.saturating_add(batch.len().saturating_sub(stored));
             let batch_tags = profiles

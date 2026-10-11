@@ -337,6 +337,22 @@ impl JobHandlerError {
         }
     }
 
+    /// A failed job whose cause is logged here; only the short detail is stored.
+    #[must_use]
+    pub fn caused_by<E: Error + ?Sized>(detail: impl Into<String>, cause: &E) -> Self {
+        let error = Self::new(detail);
+        tracing::warn!(cause = %crate::ErrorChain(cause), "{}", error.detail);
+        error
+    }
+
+    /// Like [`Self::caused_by`] for causes reported as plain text.
+    #[must_use]
+    pub fn with_reason(detail: impl Into<String>, reason: &str) -> Self {
+        let error = Self::new(detail);
+        tracing::warn!(%reason, "{}", error.detail);
+        error
+    }
+
     #[must_use]
     pub fn from_execution(error: JobExecutionError) -> Self {
         let kind = match error {
@@ -475,7 +491,7 @@ impl JobService {
             .repository
             .create_unique_active(&job)
             .await
-            .map_err(|_| JobServiceError::Dependency)?;
+            .map_err(service_dependency)?;
         if result.1 {
             self.wake(job.definition.lane);
         }
@@ -483,17 +499,14 @@ impl JobService {
     }
 
     pub async fn get(&self, id: &str) -> Result<Option<JobRecord>, JobServiceError> {
-        self.repository
-            .get(id)
-            .await
-            .map_err(|_| JobServiceError::Dependency)
+        self.repository.get(id).await.map_err(service_dependency)
     }
 
     pub async fn list(&self, filter: &JobListFilter) -> Result<Vec<JobRecord>, JobServiceError> {
         self.repository
             .list(filter)
             .await
-            .map_err(|_| JobServiceError::Dependency)
+            .map_err(service_dependency)
     }
 
     pub async fn cancel(&self, id: &str) -> Result<JobRecord, JobServiceError> {
@@ -501,7 +514,7 @@ impl JobService {
             .repository
             .request_cancellation(id)
             .await
-            .map_err(|_| JobServiceError::Dependency)?
+            .map_err(service_dependency)?
         else {
             return Err(JobServiceError::JobNotFound);
         };
@@ -567,7 +580,7 @@ impl JobService {
             .repository
             .create(&job)
             .await
-            .map_err(|_| JobServiceError::Dependency)?;
+            .map_err(service_dependency)?;
         self.wake(job.definition.lane);
         Ok(record)
     }
@@ -625,7 +638,7 @@ impl JobExecutionContext {
             self.repository
                 .update_progress(&self.claim, &progress)
                 .await
-                .map_err(|_| JobExecutionError::Dependency)?,
+                .map_err(execution_dependency)?,
         )
     }
 
@@ -634,7 +647,7 @@ impl JobExecutionContext {
             self.repository
                 .checkpoint(&self.claim, &result)
                 .await
-                .map_err(|_| JobExecutionError::Dependency)?,
+                .map_err(execution_dependency)?,
         )
     }
 
@@ -646,15 +659,12 @@ impl JobExecutionContext {
             self.repository
                 .lease_state(&self.claim.job.id, &self.claim.execution_id)
                 .await
-                .map_err(|_| JobExecutionError::Dependency)?,
+                .map_err(execution_dependency)?,
         )
     }
 
     pub async fn related_job(&self, id: &str) -> Result<Option<JobRecord>, JobExecutionError> {
-        self.repository
-            .get(id)
-            .await
-            .map_err(|_| JobExecutionError::Dependency)
+        self.repository.get(id).await.map_err(execution_dependency)
     }
 
     fn ensure_active(&self, state: JobLeaseState) -> Result<(), JobExecutionError> {
@@ -718,11 +728,17 @@ pub async fn start_job_coordinator(
     repository: Arc<dyn JobRepository>,
     handlers: Vec<Arc<dyn JobHandler>>,
 ) -> Result<SpawnedJobCoordinator, JobCoordinatorError> {
-    let registry = Arc::new(JobRegistry::new(handlers).map_err(|_| JobCoordinatorError::Recovery)?);
+    let registry = Arc::new(JobRegistry::new(handlers).map_err(|error| {
+        crate::log_dependency_failure("job handler registration failed", &error);
+        JobCoordinatorError::Recovery
+    })?);
     repository
         .recover_interrupted(registry.definitions())
         .await
-        .map_err(|_| JobCoordinatorError::Recovery)?;
+        .map_err(|error| {
+            crate::log_dependency_failure("interrupted job recovery failed", error.as_ref());
+            JobCoordinatorError::Recovery
+        })?;
     let service = Arc::new(JobService::new(repository, registry));
     let local_task = tokio::spawn(run_lane(Arc::clone(&service), JobLane::Local));
     let provider_task = tokio::spawn(run_lane(Arc::clone(&service), JobLane::Provider));
@@ -742,7 +758,7 @@ async fn run_lane(service: Arc<JobService>, lane: JobLane) -> Result<(), JobCoor
             .repository
             .claim_next(lane)
             .await
-            .map_err(|_| JobCoordinatorError::Dependency)?;
+            .map_err(coordinator_dependency)?;
         if let Some(claim) = claim {
             execute_claim(&service, claim).await?;
             continue;
@@ -767,7 +783,7 @@ async fn execute_claim(
                 &JobFinish::Failed("No handler is registered for this job type.".to_owned()),
             )
             .await
-            .map_err(|_| JobCoordinatorError::Dependency)?;
+            .map_err(coordinator_dependency)?;
         return Ok(());
     };
     let definition = handler.definition();
@@ -782,7 +798,7 @@ async fn execute_claim(
                 &JobFinish::Failed("Stored job contract is no longer available.".to_owned()),
             )
             .await
-            .map_err(|_| JobCoordinatorError::Dependency)?;
+            .map_err(coordinator_dependency)?;
         return Ok(());
     }
     let context = JobExecutionContext {
@@ -823,8 +839,23 @@ async fn execute_claim(
         .repository
         .finish(&claim, &finish)
         .await
-        .map_err(|_| JobCoordinatorError::Dependency)?;
+        .map_err(coordinator_dependency)?;
     Ok(())
+}
+
+fn service_dependency(error: JobDependencyError) -> JobServiceError {
+    crate::log_dependency_failure("job storage failed", error.as_ref());
+    JobServiceError::Dependency
+}
+
+fn execution_dependency(error: JobDependencyError) -> JobExecutionError {
+    crate::log_dependency_failure("job execution storage failed", error.as_ref());
+    JobExecutionError::Dependency
+}
+
+fn coordinator_dependency(error: JobDependencyError) -> JobCoordinatorError {
+    crate::log_dependency_failure("job coordinator storage failed", error.as_ref());
+    JobCoordinatorError::Dependency
 }
 
 fn truncate_utf8(mut value: String, maximum_bytes: usize) -> String {

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use music_application::ErrorChain;
 use music_application::modes::{
     CueDocument, CueLoopDocument, CueSfxDocument, EffectDocument, InterruptDocument, ModeBundle,
     ModeCatalog, ModeDocument, ModeImportPlaylist, ModeMutation, ModeMutationError,
@@ -393,7 +394,7 @@ fn map_mutation_error(error: ModeMutationError) -> ApiError {
             ApiError::conflict(error.code)
         }
         ModeMutationFailureKind::Unavailable => {
-            tracing::error!(error = %error, "authoring import mutation failed");
+            tracing::error!(error = %ErrorChain(&error), "authoring import mutation failed");
             ApiError::service_unavailable()
         }
     }

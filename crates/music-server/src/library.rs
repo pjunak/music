@@ -1,3 +1,4 @@
+use music_application::ErrorChain;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -713,7 +714,7 @@ async fn search(
     .map_err(|_| ApiError::validation())?;
     let library = library(&state)?;
     let result = library.service.search(&request).await.map_err(|error| {
-        tracing::error!(error = %error, "library search failed");
+        tracing::error!(error = %ErrorChain(error.as_ref()), "library search failed");
         ApiError::internal()
     })?;
     let tracks = result
@@ -759,7 +760,7 @@ async fn tree(
         .tracks_in_directory(directory.as_ref())
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "library tree query failed");
+            tracing::error!(error = %ErrorChain(error.as_ref()), "library tree query failed");
             ApiError::internal()
         })?
         .into_iter()
@@ -789,11 +790,11 @@ async fn folders(
     let directories = directories
         .map_err(map_media_worker_error)?
         .map_err(|error| {
-            tracing::error!(error = %error, "library directory enumeration failed");
+            tracing::error!(error = %ErrorChain(&error), "library directory enumeration failed");
             ApiError::internal()
         })?;
     let counts = counts.map_err(|error| {
-        tracing::error!(error = %error, "library folder count query failed");
+        tracing::error!(error = %ErrorChain(error.as_ref()), "library folder count query failed");
         ApiError::internal()
     })?;
     Ok(Json(FoldersResponse {
@@ -939,7 +940,7 @@ async fn tracks_batch(
         .tracks_by_ids(&ids)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "library batch query failed");
+            tracing::error!(error = %ErrorChain(error.as_ref()), "library batch query failed");
             ApiError::internal()
         })?
         .into_iter()
@@ -984,7 +985,7 @@ async fn bulk_update_metadata(
         .tracks_by_ids(&supplied_ids)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "bulk metadata track lookup failed");
+            tracing::error!(error = %ErrorChain(error.as_ref()), "bulk metadata track lookup failed");
             ApiError::internal()
         })?;
     if matched.is_empty() {
@@ -998,7 +999,7 @@ async fn bulk_update_metadata(
         .update_tracks_metadata(matched_ids, patch)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "bulk metadata coordinator failed");
+            tracing::error!(error = %ErrorChain(&error), "bulk metadata coordinator failed");
             ApiError::internal()
         })?;
 
@@ -1054,7 +1055,7 @@ async fn bulk_move_tracks(
             continue;
         };
         let Some(track) = library.service.track(track_id).await.map_err(|error| {
-            tracing::error!(error = %error, "bulk move track lookup failed");
+            tracing::error!(error = %ErrorChain(error.as_ref()), "bulk move track lookup failed");
             ApiError::internal()
         })?
         else {
@@ -1077,7 +1078,7 @@ async fn bulk_move_tracks(
         .move_tracks(requests)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "bulk track move coordinator failed");
+            tracing::error!(error = %ErrorChain(&error), "bulk track move coordinator failed");
             ApiError::internal()
         })?;
     let mut moved = Vec::new();
@@ -1129,7 +1130,7 @@ async fn bulk_delete_tracks(
         .delete_tracks(track_ids)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "bulk track deletion coordinator failed");
+            tracing::error!(error = %ErrorChain(&error), "bulk track deletion coordinator failed");
             ApiError::internal()
         })?;
     let mut deleted_ids = Vec::new();
@@ -1503,7 +1504,7 @@ fn map_media_worker_error(error: BlockingMediaError) -> ApiError {
     if error == BlockingMediaError::Busy {
         return ApiError::service_unavailable();
     }
-    tracing::error!(error = %error, "library media worker failed");
+    tracing::error!(error = %ErrorChain(&error), "library media worker failed");
     ApiError::internal()
 }
 
@@ -1523,7 +1524,7 @@ async fn rescan(
         .reconcile()
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "library reconciliation request failed");
+            tracing::error!(error = %ErrorChain(&error), "library reconciliation request failed");
             ApiError::internal()
         })?;
     Ok(Json(RescanResponse {
@@ -1617,7 +1618,7 @@ async fn stage_upload_field(
 ) -> Result<StagedUpload, ApiError> {
     let staged = upload_stage_path(&requested)?;
     let absolute = root.resolve_for_creation(&staged).map_err(|error| {
-        tracing::error!(error = %error, "upload staging path resolution failed");
+        tracing::error!(error = %ErrorChain(&error), "upload staging path resolution failed");
         ApiError::internal()
     })?;
     let guard = StagedUpload {
@@ -1631,7 +1632,7 @@ async fn stage_upload_field(
         .open(&absolute)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "upload staging file creation failed");
+            tracing::error!(error = %ErrorChain(&error), "upload staging file creation failed");
             ApiError::internal()
         })?;
     let mut written = 0_u64;
@@ -1649,16 +1650,16 @@ async fn stage_upload_field(
             ));
         }
         output.write_all(&chunk).await.map_err(|error| {
-            tracing::error!(error = %error, "upload staging write failed");
+            tracing::error!(error = %ErrorChain(&error), "upload staging write failed");
             ApiError::internal()
         })?;
     }
     output.flush().await.map_err(|error| {
-        tracing::error!(error = %error, "upload staging flush failed");
+        tracing::error!(error = %ErrorChain(&error), "upload staging flush failed");
         ApiError::internal()
     })?;
     output.sync_all().await.map_err(|error| {
-        tracing::error!(error = %error, "upload staging synchronization failed");
+        tracing::error!(error = %ErrorChain(&error), "upload staging synchronization failed");
         ApiError::internal()
     })?;
     drop(output);
@@ -1874,7 +1875,7 @@ async fn indexed_track(state: &HttpState, raw_track_id: i64) -> Result<IndexedTr
         .track(track_id)
         .await
         .map_err(|error| {
-            tracing::error!(error = %error, "library track query failed");
+            tracing::error!(error = %ErrorChain(error.as_ref()), "library track query failed");
             ApiError::internal()
         })?
         .ok_or_else(|| ApiError::plain_not_found("track not found"))

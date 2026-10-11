@@ -64,7 +64,7 @@ impl ModelRunManifest {
         review_destination: ModelReviewDestination,
     ) -> Result<Self, JobHandlerError> {
         let max_attempts = u64::try_from(max_attempts)
-            .map_err(|_| JobHandlerError::new("model_run_budget_overflow"))?;
+            .map_err(|error| JobHandlerError::caused_by("model_run_budget_overflow", &error))?;
         let max_output_tokens = effective_output_allowance(role);
         let output_token_ceiling = max_attempts
             .checked_mul(u64::from(max_output_tokens))
@@ -103,8 +103,9 @@ fn effective_output_allowance(role: &ResolvedRoleExecution) -> u32 {
 }
 
 pub fn model_input_fingerprint(value: &impl Serialize) -> Result<String, JobHandlerError> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|_| JobHandlerError::new("model_run_manifest_encoding_failed"))?;
+    let bytes = serde_json::to_vec(value).map_err(|error| {
+        JobHandlerError::caused_by("model_run_manifest_encoding_failed", &error)
+    })?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 

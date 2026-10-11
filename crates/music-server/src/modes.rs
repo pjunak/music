@@ -7,6 +7,7 @@ use axum::extract::{Path, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
+use music_application::ErrorChain;
 use music_application::auth::SessionTouch;
 use music_application::modes::{
     CueDocument, CueLoopDocument, CueSfxDocument, EffectDocument, IntegrationsDocument,
@@ -331,7 +332,7 @@ async fn reload_modes(
 ) -> Result<Json<ReloadResult>, ApiError> {
     current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let result = modes(&state)?.reload().await.map_err(|error| {
-        tracing::error!(error = %error, "mode reload failed");
+        tracing::error!(error = %ErrorChain(&error), "mode reload failed");
         ApiError::service_unavailable()
     })?;
     Ok(Json(ReloadResult {
@@ -472,7 +473,7 @@ fn map_active_mode_error(error: PlaybackActorError) -> ApiError {
 }
 
 fn playback_unavailable(error: PlaybackActorError) -> ApiError {
-    tracing::error!(error = %error, "playback owner rejected a mode request");
+    tracing::error!(error = %ErrorChain(&error), "playback owner rejected a mode request");
     ApiError::service_unavailable()
 }
 

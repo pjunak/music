@@ -238,7 +238,9 @@ impl JobHandler for ModelEvaluationJobHandler {
         Box::pin(async move {
             let parameters =
                 serde_json::from_value::<ModelEvaluationJobParameters>(Value::Object(parameters))
-                    .map_err(|_| JobHandlerError::new("invalid model evaluation parameters"))?;
+                    .map_err(|error| {
+                    JobHandlerError::caused_by("invalid model evaluation parameters", &error)
+                })?;
             let result = match self.kind {
                 EvaluationKind::Playlist => self.execute_playlist(context, &parameters).await,
                 EvaluationKind::Tagging => self.execute_tagging(context, &parameters).await,
@@ -342,8 +344,9 @@ async fn load_tagging_baseline(
         .iter()
         .cloned()
         .map(|value| {
-            serde_json::from_value::<TagQualityCaseResult>(value)
-                .map_err(|_| JobHandlerError::new("evaluation_retest_baseline_unavailable"))
+            serde_json::from_value::<TagQualityCaseResult>(value).map_err(|error| {
+                JobHandlerError::caused_by("evaluation_retest_baseline_unavailable", &error)
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let expected = suite
@@ -449,13 +452,17 @@ impl JobHandler for ModelFeatureJobHandler {
                     self.collect_tagging_batch(context, parameters).await
                 }
                 FeatureKind::Playlist => {
-                    let parameters = serde_json::from_value(Value::Object(parameters))
-                        .map_err(|_| JobHandlerError::new("invalid playlist model parameters"))?;
+                    let parameters =
+                        serde_json::from_value(Value::Object(parameters)).map_err(|error| {
+                            JobHandlerError::caused_by("invalid playlist model parameters", &error)
+                        })?;
                     self.execute_playlist(context, parameters).await
                 }
                 FeatureKind::Eq => {
-                    let parameters = serde_json::from_value(Value::Object(parameters))
-                        .map_err(|_| JobHandlerError::new("invalid EQ model parameters"))?;
+                    let parameters =
+                        serde_json::from_value(Value::Object(parameters)).map_err(|error| {
+                            JobHandlerError::caused_by("invalid EQ model parameters", &error)
+                        })?;
                     self.execute_eq(context, parameters).await
                 }
                 FeatureKind::TagCleanup => {
@@ -466,8 +473,10 @@ impl JobHandler for ModelFeatureJobHandler {
                     self.execute_tag_cleanup(context, parameters).await
                 }
                 FeatureKind::Tagging => {
-                    let parameters = serde_json::from_value(Value::Object(parameters))
-                        .map_err(|_| JobHandlerError::new("invalid music tagging parameters"))?;
+                    let parameters =
+                        serde_json::from_value(Value::Object(parameters)).map_err(|error| {
+                            JobHandlerError::caused_by("invalid music tagging parameters", &error)
+                        })?;
                     self.execute_tagging(context, parameters).await
                 }
             }
@@ -536,12 +545,14 @@ impl PlaylistRequestParameters {
                 .iter()
                 .map(|track_id| music_domain::TrackId::new(*track_id))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| JobHandlerError::new("invalid playlist model parameters"))?,
+                .map_err(|error| {
+                    JobHandlerError::caused_by("invalid playlist model parameters", &error)
+                })?,
             energy_curve: self.energy_curve,
         };
-        request
-            .validate()
-            .map_err(|_| JobHandlerError::new("invalid playlist model parameters"))?;
+        request.validate().map_err(|reason| {
+            JobHandlerError::with_reason("invalid playlist model parameters", &reason)
+        })?;
         Ok(request)
     }
 }
@@ -626,10 +637,9 @@ impl ModelTaggingScopeParameters {
                 let path = if self.path.is_empty() {
                     None
                 } else {
-                    Some(
-                        LibraryPath::parse(&self.path)
-                            .map_err(|_| JobHandlerError::new("invalid music tagging scope"))?,
-                    )
+                    Some(LibraryPath::parse(&self.path).map_err(|error| {
+                        JobHandlerError::caused_by("invalid music tagging scope", &error)
+                    })?)
                 };
                 Ok(ContextScope::Folder {
                     path,
@@ -642,7 +652,9 @@ impl ModelTaggingScopeParameters {
                         .iter()
                         .map(|id| music_domain::TrackId::new(*id))
                         .collect::<Result<Vec<_>, _>>()
-                        .map_err(|_| JobHandlerError::new("invalid music tagging scope"))?,
+                        .map_err(|error| {
+                            JobHandlerError::caused_by("invalid music tagging scope", &error)
+                        })?,
                 ))
             }
             _ => Err(JobHandlerError::new("invalid music tagging scope")),
@@ -743,7 +755,7 @@ async fn ensure_vocabulary_unchanged(
     let current = assistant
         .vocabulary()
         .await
-        .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+        .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
     if current.fingerprint != fingerprint {
         return Err(JobHandlerError::new("tag_vocabulary_changed"));
     }
@@ -757,11 +769,12 @@ async fn update_progress(
     phase: &str,
     message: impl Into<String>,
 ) -> Result<(), JobHandlerError> {
-    let current =
-        u64::try_from(current).map_err(|_| JobHandlerError::new("job progress overflow"))?;
-    let total = u64::try_from(total).map_err(|_| JobHandlerError::new("job progress overflow"))?;
+    let current = u64::try_from(current)
+        .map_err(|error| JobHandlerError::caused_by("job progress overflow", &error))?;
+    let total = u64::try_from(total)
+        .map_err(|error| JobHandlerError::caused_by("job progress overflow", &error))?;
     let progress = JobProgress::new(current, Some(total), phase, message)
-        .map_err(|_| JobHandlerError::new("invalid job progress"))?;
+        .map_err(|error| JobHandlerError::caused_by("invalid job progress", &error))?;
     context
         .update_progress(progress)
         .await

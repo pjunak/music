@@ -111,14 +111,14 @@ impl ModelFeatureJobHandler {
             .assistant
             .tag_usage()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         let vocabulary = self
             .assistant
             .vocabulary()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         let current_catalog_signature = catalog_signature(&usage_snapshot)
-            .map_err(|_| JobHandlerError::new("tag_catalog_invalid"))?;
+            .map_err(|error| JobHandlerError::caused_by("tag_catalog_invalid", &error))?;
         if current_catalog_signature != parameters.catalog_signature {
             return Err(JobHandlerError::new("tag_catalog_changed"));
         }
@@ -212,9 +212,9 @@ impl ModelFeatureJobHandler {
             .assistant
             .tag_usage()
             .await
-            .map_err(|_| JobHandlerError::new("assistant_storage_failed"))?;
+            .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", &error))?;
         if catalog_signature(&final_usage)
-            .map_err(|_| JobHandlerError::new("tag_catalog_invalid"))?
+            .map_err(|error| JobHandlerError::caused_by("tag_catalog_invalid", &error))?
             != parameters.catalog_signature
         {
             return Err(JobHandlerError::new("tag_catalog_changed"));
@@ -224,7 +224,7 @@ impl ModelFeatureJobHandler {
             .map(|item| (item.tag.as_str(), item.track_count))
             .collect::<BTreeMap<_, _>>();
         let local_pairs = build_cleanup_preview(&usage_snapshot, &vocabulary)
-            .map_err(|_| JobHandlerError::new("tag_cleanup_preview_failed"))?
+            .map_err(|error| JobHandlerError::caused_by("tag_cleanup_preview_failed", &error))?
             .suggestions
             .into_iter()
             .map(|item| (item.source, item.target))

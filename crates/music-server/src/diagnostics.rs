@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use music_application::ErrorChain;
 use music_application::auth::SessionTouch;
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -66,7 +67,7 @@ async fn get_diagnostics(
         .ok_or_else(ApiError::service_unavailable)?;
     let library_status = library.coordinator.status();
     let snapshot = playback.snapshot().await.map_err(|error| {
-        tracing::error!(error = %error, "diagnostics playback snapshot failed");
+        tracing::error!(error = %ErrorChain(&error), "diagnostics playback snapshot failed");
         ApiError::internal()
     })?;
 
