@@ -212,7 +212,10 @@ before publishing the next revision.
 
 WebSocket actions follow the same rule as HTTP orchestration: mode and soundboard selection,
 preset activation, direct track and queue changes, recursive folder playback, and interrupt
-takeovers are resolved against immutable catalog views before admission. Queue requests validate
+takeovers are resolved against immutable catalog views before admission. That resolution and its
+single stale-catalog retry live in `music-application`'s `CatalogCommands`; the WebSocket adapter
+only validates protocol values and translates each action into a `CatalogRequest` or a direct
+command. Queue requests validate
 the complete set before changing state, and selecting an output validates only newly added IDs
 against the actor-owned live connection set. Compatibility errors therefore do not leave partial
 playback or device state behind.

@@ -11,10 +11,10 @@ use music_analysis::{
     VoiceWorker, VoiceWorkerFactory,
 };
 use music_application::assistant::{
-    AnalysisFailureState, AnalysisFailureWrite, ContextScope, ContextState, ContextWrite,
-    CurrentTrackContext, LIBRARY_CONTEXT_JOB_KIND, LOCAL_CONTEXT_ANALYZER_ID,
-    LOCAL_CONTEXT_IMPLEMENTATION_ID, LocalAnalysisRepository, VoiceAnalyzerStatus,
-    context_source_signature, parse_context_state,
+    AnalysisFailureState, AnalysisFailureWrite, AssistantDependencyError, ContextScope,
+    ContextState, ContextWrite, CurrentTrackContext, LIBRARY_CONTEXT_JOB_KIND,
+    LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LocalAnalysisRepository,
+    VoiceAnalyzerStatus, context_source_signature, parse_context_state,
 };
 use music_application::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
@@ -217,542 +217,45 @@ impl JobHandler for ContextAnalysisJobHandler {
                 .scope
                 .to_scope()
                 .map_err(|()| JobHandlerError::new("invalid context analysis scope"))?;
-            let all_tracks = self.repository.all_tracks().await.map_err(|error| {
-                JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-            })?;
+            let run = ContextRun {
+                handler: self,
+                context,
+                voice_signature: self.voice_analyzer.source_signature.as_deref(),
+                voice_enabled: self.voice_analyzer.is_ready()
+                    && self.voice_worker_factory.is_some(),
+            };
+            let all_tracks = self.repository.all_tracks().await.map_err(storage_failed)?;
             let tracks = scope
                 .select(&all_tracks)
                 .into_iter()
                 .cloned()
                 .collect::<Vec<_>>();
             drop(all_tracks);
-            let states = self
-                .repository
-                .context_states(LOCAL_CONTEXT_ANALYZER_ID)
-                .await
-                .map_err(|error| {
-                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-                })?;
-            let failures = self
-                .repository
-                .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
-                .await
-                .map_err(|error| {
-                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-                })?;
-            let state_by_track = context_by_track(&states);
-            let failure_by_track = failures_by_track(&failures);
-            let voice_signature = self.voice_analyzer.source_signature.as_deref();
-            let voice_enabled =
-                self.voice_analyzer.is_ready() && self.voice_worker_factory.is_some();
             let retry_jobs = if parameters.force {
                 self.retry_job_ids(context).await?
             } else {
                 BTreeSet::new()
             };
-            let mut signal_work = Vec::new();
-            let mut audio_completed = 0_usize;
-            let mut audio_failed = 0_usize;
-            let mut initial_voice_work = 0_usize;
-            let mut checkpointed = 0_u64;
-            for track in &tracks {
-                let signature = context_source_signature(
-                    track,
-                    LOCAL_CONTEXT_IMPLEMENTATION_ID,
-                    voice_signature,
-                )
-                .map_err(|error| {
-                    JobHandlerError::with_reason("track context fingerprint failed", &error)
-                })?;
-                let state = state_by_track.get(&track.id).copied();
-                let failure = failure_by_track.get(&track.id).copied();
-                let parsed = state
-                    .filter(|state| state.source_signature == signature)
-                    .and_then(parse_context_state);
-                let current_failure =
-                    failure.is_some_and(|failure| failure.source_signature == signature);
-                let completed_by_job = state.is_some_and(|state| {
-                    state.job_id == context.job_id()
-                        && state.source_signature == signature
-                        && parse_context_state(state).is_some()
-                }) || failure.is_some_and(|failure| {
-                    failure.job_id == context.job_id() && failure.source_signature == signature
-                });
-                if completed_by_job {
-                    checkpointed = checkpointed.saturating_add(1);
-                }
-                let completed_by_retry =
-                    state.is_some_and(|state| retry_jobs.contains(&state.job_id));
-                // A partial row is the durable boundary between the signal and
-                // voice passes. Preserve it even for a forced retry so a
-                // cancelled voice pass never causes another signal decode.
-                let signal_is_current = parsed.as_ref().is_some_and(|parsed| {
-                    parsed.completeness == "partial"
-                        || !parameters.force
-                        || completed_by_job
-                        || completed_by_retry
-                });
-                if signal_is_current && !current_failure {
-                    audio_completed = audio_completed.saturating_add(1);
-                    if voice_enabled
-                        && state.zip(parsed.as_ref()).is_some_and(|(state, parsed)| {
-                            voice_needs_attempt(parsed, state, context.job_id())
-                        })
-                    {
-                        initial_voice_work = initial_voice_work.saturating_add(1);
-                    }
-                    continue;
-                }
-                if current_failure
-                    && failure.is_some_and(|failure| failure.job_id == context.job_id())
-                {
-                    audio_failed = audio_failed.saturating_add(1);
-                    continue;
-                }
-                signal_work.push((track.id, track.path.clone(), signature));
-            }
-            drop(state_by_track);
-            drop(failure_by_track);
-            drop(states);
-            drop(failures);
 
-            let starting = context.progress_current().max(checkpointed);
-            let signal_work_count = u64::try_from(signal_work.len()).map_err(|error| {
-                JobHandlerError::caused_by("context analysis is too large", &error)
-            })?;
-            let expected_voice_count = if voice_enabled {
-                u64::try_from(signal_work.len().saturating_add(initial_voice_work)).map_err(
-                    |error| JobHandlerError::caused_by("context analysis is too large", &error),
-                )?
-            } else {
-                0
-            };
-            let initial_total = starting
-                .saturating_add(signal_work_count)
-                .saturating_add(expected_voice_count);
-            let active_workers = self.executor.worker_count().min(signal_work.len());
-            let stream_concurrency = active_workers.max(1);
-            let initial_audio = ContextPassProgress {
-                status: if signal_work.is_empty() {
-                    "complete"
-                } else {
-                    "running"
-                },
-                completed: audio_completed,
-                failed: audio_failed,
-                skipped: 0,
-                total: tracks.len(),
-            };
-            let initial_voice = if voice_enabled {
-                ContextPassProgress {
-                    status: "waiting",
-                    completed: 0,
-                    failed: 0,
-                    skipped: 0,
-                    total: tracks.len(),
-                }
-            } else {
-                ContextPassProgress::not_available(tracks.len())
-            };
-            context
-                .checkpoint(context_checkpoint(initial_audio, initial_voice))
-                .await
-                .map_err(JobHandlerError::from_execution)?;
-            context
-                .update_progress(
-                    JobProgress::new(
-                        starting,
-                        Some(initial_total),
-                        "Analyzing audio context",
-                        format!("{} tracks need context analysis", signal_work.len()),
-                    )
-                    .map_err(|error| {
-                        JobHandlerError::caused_by("invalid context analysis progress", &error)
-                    })?,
-                )
-                .await
-                .map_err(JobHandlerError::from_execution)?;
-
-            let signal_started = Instant::now();
-            let mut progress_current = starting;
-            let mut performance = ContextPerformanceAggregate::default();
-            let mut results = stream::iter(signal_work.into_iter().map(
-                |(track_id, track_path, signature)| async move {
-                    let analysis = match self.root.resolve_existing(&track_path) {
-                        Ok(path) => self.analyze_track(context, path).await,
-                        Err(_) => Ok(Err(AudioContextError::MissingFile)),
-                    };
-                    (track_id, signature, analysis)
-                },
-            ))
-            .buffer_unordered(stream_concurrency);
-            while let Some((track_id, signature, analysis)) = results.next().await {
-                match analysis? {
-                    Ok(document) => {
-                        performance.observe(&document.performance);
-                        let write = ContextWrite {
-                            track_id,
-                            source_signature: signature,
-                            completeness: document.completeness.to_owned(),
-                            summary: document.summary,
-                            timeline: document.timeline,
-                            sections: document.sections,
-                            technical: document.technical,
-                            stages: document.stages,
-                        };
-                        let stored = self
-                            .repository
-                            .store_context(
-                                LOCAL_CONTEXT_ANALYZER_ID,
-                                LOCAL_CONTEXT_IMPLEMENTATION_ID,
-                                voice_signature,
-                                context.job_id(),
-                                &write,
-                            )
-                            .await
-                            .map_err(|error| {
-                                JobHandlerError::caused_by(
-                                    "context analysis storage failed",
-                                    error.as_ref(),
-                                )
-                            })?;
-                        if stored {
-                            audio_completed = audio_completed.saturating_add(1);
-                        }
-                    }
-                    Err(AudioContextError::Cancelled) => {
-                        context
-                            .check_cancelled()
-                            .await
-                            .map_err(JobHandlerError::from_execution)?;
-                        return Err(JobHandlerError::new(
-                            "context analysis stopped unexpectedly",
-                        ));
-                    }
-                    Err(error) => {
-                        let failure = AnalysisFailureWrite {
-                            track_id,
-                            source_signature: signature,
-                            error: format!("AudioContextError: {error}"),
-                        };
-                        let stored = self
-                            .repository
-                            .store_context_failure(
-                                LOCAL_CONTEXT_ANALYZER_ID,
-                                LOCAL_CONTEXT_IMPLEMENTATION_ID,
-                                voice_signature,
-                                context.job_id(),
-                                &failure,
-                            )
-                            .await
-                            .map_err(|error| {
-                                JobHandlerError::caused_by(
-                                    "context analysis storage failed",
-                                    error.as_ref(),
-                                )
-                            })?;
-                        if stored {
-                            audio_failed = audio_failed.saturating_add(1);
-                        }
-                    }
-                }
-                progress_current = progress_current.saturating_add(1);
-                let audio_progress = ContextPassProgress {
-                    status: "running",
-                    completed: audio_completed,
-                    failed: audio_failed,
-                    skipped: 0,
-                    total: tracks.len(),
-                };
-                context
-                    .checkpoint(context_checkpoint(audio_progress, initial_voice))
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-                context
-                    .update_progress(
-                        JobProgress::new(
-                            progress_current.min(initial_total),
-                            Some(initial_total),
-                            "Analyzing audio context",
-                            format!(
-                                "Audio context: {} of {} tracks processed",
-                                audio_completed.saturating_add(audio_failed),
-                                tracks.len()
-                            ),
-                        )
-                        .map_err(|error| {
-                            JobHandlerError::caused_by("invalid context analysis progress", &error)
-                        })?,
-                    )
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-            }
-            drop(results);
-            let signal_wall_seconds = signal_started.elapsed().as_secs_f64();
-
-            let states_after_signal = self
-                .repository
-                .context_states(LOCAL_CONTEXT_ANALYZER_ID)
-                .await
-                .map_err(|error| {
-                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-                })?;
-            let failures_after_signal = self
-                .repository
-                .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
-                .await
-                .map_err(|error| {
-                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-                })?;
-            let states_after_signal_by_track = context_by_track(&states_after_signal);
-            let failures_after_signal_by_track = failures_by_track(&failures_after_signal);
-            audio_completed = 0;
-            audio_failed = 0;
-            let mut voice_work = Vec::new();
-            let mut voice_completed = 0_usize;
-            let mut voice_failed = 0_usize;
-            let mut voice_skipped = 0_usize;
-            for track in &tracks {
-                let signature = context_source_signature(
-                    track,
-                    LOCAL_CONTEXT_IMPLEMENTATION_ID,
-                    voice_signature,
-                )
-                .map_err(|error| {
-                    JobHandlerError::with_reason("track context fingerprint failed", &error)
-                })?;
-                let current_state = states_after_signal_by_track
-                    .get(&track.id)
-                    .copied()
-                    .filter(|state| state.source_signature == signature);
-                let parsed = current_state.and_then(parse_context_state);
-                if let (Some(state), Some(parsed)) = (current_state, parsed) {
-                    audio_completed = audio_completed.saturating_add(1);
-                    if voice_enabled {
-                        if voice_needs_attempt(&parsed, state, context.job_id()) {
-                            voice_work.push((track.id, track.path.clone(), state.clone()));
-                            continue;
-                        }
-                        match context_voice_stage_status(&parsed) {
-                            Some("unavailable") => {
-                                voice_failed = voice_failed.saturating_add(1);
-                            }
-                            Some("not_configured") | None => {
-                                voice_skipped = voice_skipped.saturating_add(1);
-                            }
-                            Some(_) => {
-                                voice_completed = voice_completed.saturating_add(1);
-                            }
-                        }
-                    }
-                } else if failures_after_signal_by_track
-                    .get(&track.id)
-                    .is_some_and(|failure| failure.source_signature == signature)
-                {
-                    audio_failed = audio_failed.saturating_add(1);
-                    if voice_enabled {
-                        voice_skipped = voice_skipped.saturating_add(1);
-                    }
-                } else if voice_enabled {
-                    voice_skipped = voice_skipped.saturating_add(1);
-                }
-            }
-            drop(states_after_signal_by_track);
-            drop(failures_after_signal_by_track);
-            drop(states_after_signal);
-            drop(failures_after_signal);
-            let audio_progress = ContextPassProgress {
-                status: if audio_failed == 0 {
-                    "complete"
-                } else {
-                    "complete_with_failures"
-                },
-                completed: audio_completed,
-                failed: audio_failed,
-                skipped: 0,
-                total: tracks.len(),
-            };
-
-            let voice_worker = if voice_enabled && !voice_work.is_empty() {
-                self.start_voice_worker().await
-            } else {
-                None
-            };
-            let active_voice_workers = usize::from(voice_worker.is_some());
-            let voice_total =
-                progress_current.saturating_add(u64::try_from(voice_work.len()).map_err(
-                    |error| JobHandlerError::caused_by("context analysis is too large", &error),
-                )?);
-            let mut voice_progress = if voice_enabled {
-                ContextPassProgress {
-                    status: if voice_work.is_empty() {
-                        "complete"
-                    } else {
-                        "running"
-                    },
-                    completed: voice_completed,
-                    failed: voice_failed,
-                    skipped: voice_skipped,
-                    total: tracks.len(),
-                }
-            } else {
-                ContextPassProgress::not_available(tracks.len())
-            };
-            context
-                .checkpoint(context_checkpoint(audio_progress, voice_progress))
-                .await
-                .map_err(JobHandlerError::from_execution)?;
-            context
-                .update_progress(
-                    JobProgress::new(
-                        progress_current,
-                        Some(voice_total),
-                        if voice_enabled {
-                            "Detecting voice"
-                        } else {
-                            "Analyzing audio context"
-                        },
-                        if voice_enabled {
-                            format!(
-                                "Voice detection: {} eligible tracks remain",
-                                voice_work.len()
-                            )
-                        } else {
-                            "Optional voice detection is not enabled".to_owned()
-                        },
-                    )
-                    .map_err(|error| {
-                        JobHandlerError::caused_by("invalid context analysis progress", &error)
-                    })?,
-                )
-                .await
-                .map_err(JobHandlerError::from_execution)?;
-
-            let voice_started = Instant::now();
-            let mut voice_performance = VoicePerformanceAggregate::default();
-            for (track_id, track_path, state) in voice_work {
-                context
-                    .check_cancelled()
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-                let attempt_started = Instant::now();
-                let analysis = match self.root.resolve_existing(&track_path) {
-                    Ok(path) => match voice_worker.as_ref() {
-                        Some(worker) => self.analyze_voice_track(context, worker, path).await?,
-                        None => Err(VoiceAnalysisError::WorkerUnavailable),
-                    },
-                    Err(_) => Err(VoiceAnalysisError::MissingFile),
-                };
-                let document = match analysis {
-                    Ok(document) => document,
-                    Err(VoiceAnalysisError::Cancelled) => {
-                        context
-                            .check_cancelled()
-                            .await
-                            .map_err(JobHandlerError::from_execution)?;
-                        return Err(JobHandlerError::new("voice analysis stopped unexpectedly"));
-                    }
-                    Err(error) => VoiceAnalysisDocument::unavailable(
-                        &error,
-                        attempt_started.elapsed().as_secs_f64(),
-                    ),
-                };
-                voice_performance.observe(document.elapsed_seconds);
-                let classified =
-                    document.summary.get("status").and_then(Value::as_str) == Some("classified");
-                let write = context_with_voice(track_id, &state, document)?;
-                let stored = self
-                    .repository
-                    .store_context(
-                        LOCAL_CONTEXT_ANALYZER_ID,
-                        LOCAL_CONTEXT_IMPLEMENTATION_ID,
-                        voice_signature,
-                        context.job_id(),
-                        &write,
-                    )
-                    .await
-                    .map_err(|error| {
-                        JobHandlerError::caused_by(
-                            "context analysis storage failed",
-                            error.as_ref(),
-                        )
-                    })?;
-                if stored {
-                    if classified {
-                        voice_completed = voice_completed.saturating_add(1);
-                    } else {
-                        voice_failed = voice_failed.saturating_add(1);
-                    }
-                } else {
-                    voice_skipped = voice_skipped.saturating_add(1);
-                }
-                progress_current = progress_current.saturating_add(1);
-                voice_progress = ContextPassProgress {
-                    status: "running",
-                    completed: voice_completed,
-                    failed: voice_failed,
-                    skipped: voice_skipped,
-                    total: tracks.len(),
-                };
-                context
-                    .checkpoint(context_checkpoint(audio_progress, voice_progress))
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-                context
-                    .update_progress(
-                        JobProgress::new(
-                            progress_current.min(voice_total),
-                            Some(voice_total),
-                            "Detecting voice",
-                            format!(
-                                "Voice detection: {} of {} eligible tracks processed",
-                                voice_completed.saturating_add(voice_failed),
-                                tracks.len().saturating_sub(voice_skipped)
-                            ),
-                        )
-                        .map_err(|error| {
-                            JobHandlerError::caused_by("invalid context analysis progress", &error)
-                        })?,
-                    )
-                    .await
-                    .map_err(JobHandlerError::from_execution)?;
-            }
-            if let Some(worker) = voice_worker {
-                self.stop_voice_worker(worker).await;
-            }
-            let voice_wall_seconds = voice_started.elapsed().as_secs_f64();
-            if voice_enabled {
-                voice_progress = ContextPassProgress {
-                    status: if voice_failed == 0 && voice_skipped == 0 {
-                        "complete"
-                    } else {
-                        "complete_with_failures"
-                    },
-                    completed: voice_completed,
-                    failed: voice_failed,
-                    skipped: voice_skipped,
-                    total: tracks.len(),
-                };
-            }
-            context
-                .checkpoint(context_checkpoint(audio_progress, voice_progress))
-                .await
-                .map_err(JobHandlerError::from_execution)?;
+            let plan = run
+                .plan_signal(&tracks, parameters.force, &retry_jobs)
+                .await?;
+            let signal = run.signal_pass(tracks.len(), plan).await?;
+            let voice_plan = run.plan_voice(&tracks).await?;
+            let voice = run
+                .voice_pass(tracks.len(), voice_plan, signal.progress_current)
+                .await?;
 
             let final_states = self
                 .repository
                 .context_states(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|error| {
-                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-                })?;
+                .map_err(storage_failed)?;
             let final_failures = self
                 .repository
                 .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
                 .await
-                .map_err(|error| {
-                    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
-                })?;
+                .map_err(storage_failed)?;
             context_result(
                 &tracks,
                 &final_states,
@@ -760,18 +263,550 @@ impl JobHandler for ContextAnalysisJobHandler {
                 context.job_id(),
                 &parameters.scope,
                 &self.voice_analyzer,
-                active_workers,
-                active_voice_workers,
-                &performance,
-                signal_wall_seconds,
-                &voice_performance,
-                voice_wall_seconds,
-                audio_progress,
-                voice_progress,
-                started.elapsed().as_secs_f64(),
+                &ContextRunReport {
+                    signal,
+                    voice,
+                    total_wall_seconds: started.elapsed().as_secs_f64(),
+                },
             )
         })
     }
+}
+
+/// One execution of the library context job: a parallel signal pass over the
+/// tracks that need it, then a sequential voice pass over the eligible ones.
+/// Every stored track is a durable checkpoint, so recovery resumes instead of
+/// decoding audio again.
+struct ContextRun<'a> {
+    handler: &'a ContextAnalysisJobHandler,
+    context: &'a JobExecutionContext,
+    voice_signature: Option<&'a str>,
+    voice_enabled: bool,
+}
+
+/// Tracks whose signal analysis must run, and what earlier attempts settled.
+struct SignalPlan {
+    work: Vec<(music_domain::TrackId, music_domain::LibraryPath, String)>,
+    completed: usize,
+    failed: usize,
+    pending_voice: usize,
+    checkpointed: u64,
+}
+
+struct SignalOutcome {
+    progress_current: u64,
+    performance: ContextPerformanceAggregate,
+    wall_seconds: f64,
+    workers: usize,
+}
+
+/// The audio pass as stored after signal analysis, and the voice work left.
+struct VoicePlan {
+    audio: ContextPassProgress,
+    work: Vec<(
+        music_domain::TrackId,
+        music_domain::LibraryPath,
+        ContextState,
+    )>,
+    completed: usize,
+    failed: usize,
+    skipped: usize,
+}
+
+struct VoiceOutcome {
+    audio: ContextPassProgress,
+    progress: ContextPassProgress,
+    performance: VoicePerformanceAggregate,
+    wall_seconds: f64,
+    workers: usize,
+}
+
+struct ContextRunReport {
+    signal: SignalOutcome,
+    voice: VoiceOutcome,
+    total_wall_seconds: f64,
+}
+
+impl ContextRun<'_> {
+    fn job_id(&self) -> &str {
+        self.context.job_id()
+    }
+
+    fn signature(&self, track: &music_domain::IndexedTrack) -> Result<String, JobHandlerError> {
+        context_source_signature(track, LOCAL_CONTEXT_IMPLEMENTATION_ID, self.voice_signature)
+            .map_err(|error| {
+                JobHandlerError::with_reason("track context fingerprint failed", &error)
+            })
+    }
+
+    async fn stored_states(
+        &self,
+    ) -> Result<(Vec<ContextState>, Vec<AnalysisFailureState>), JobHandlerError> {
+        let repository = &self.handler.repository;
+        let states = repository
+            .context_states(LOCAL_CONTEXT_ANALYZER_ID)
+            .await
+            .map_err(storage_failed)?;
+        let failures = repository
+            .analysis_failures(LOCAL_CONTEXT_ANALYZER_ID)
+            .await
+            .map_err(storage_failed)?;
+        Ok((states, failures))
+    }
+
+    async fn store(&self, write: &ContextWrite) -> Result<bool, JobHandlerError> {
+        self.handler
+            .repository
+            .store_context(
+                LOCAL_CONTEXT_ANALYZER_ID,
+                LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                self.voice_signature,
+                self.job_id(),
+                write,
+            )
+            .await
+            .map_err(storage_failed)
+    }
+
+    async fn checkpoint(
+        &self,
+        audio: ContextPassProgress,
+        voice: ContextPassProgress,
+    ) -> Result<(), JobHandlerError> {
+        self.context
+            .checkpoint(context_checkpoint(audio, voice))
+            .await
+            .map_err(JobHandlerError::from_execution)
+    }
+
+    async fn report(
+        &self,
+        current: u64,
+        total: u64,
+        phase: &str,
+        message: String,
+    ) -> Result<(), JobHandlerError> {
+        let progress = JobProgress::new(current, Some(total), phase, message).map_err(|error| {
+            JobHandlerError::caused_by("invalid context analysis progress", &error)
+        })?;
+        self.context
+            .update_progress(progress)
+            .await
+            .map_err(JobHandlerError::from_execution)
+    }
+
+    /// Decide which tracks need signal analysis. A forced run repeats current
+    /// results, except those this job or its retried predecessors produced.
+    async fn plan_signal(
+        &self,
+        tracks: &[music_domain::IndexedTrack],
+        force: bool,
+        retry_jobs: &BTreeSet<String>,
+    ) -> Result<SignalPlan, JobHandlerError> {
+        let (states, failures) = self.stored_states().await?;
+        let state_by_track = context_by_track(&states);
+        let failure_by_track = failures_by_track(&failures);
+        let job_id = self.job_id();
+        let mut plan = SignalPlan {
+            work: Vec::new(),
+            completed: 0,
+            failed: 0,
+            pending_voice: 0,
+            checkpointed: 0,
+        };
+        for track in tracks {
+            let signature = self.signature(track)?;
+            let state = state_by_track.get(&track.id).copied();
+            let failure = failure_by_track.get(&track.id).copied();
+            let parsed = state
+                .filter(|state| state.source_signature == signature)
+                .and_then(parse_context_state);
+            let current_failure =
+                failure.is_some_and(|failure| failure.source_signature == signature);
+            let completed_by_job = state.is_some_and(|state| {
+                state.job_id == job_id
+                    && state.source_signature == signature
+                    && parse_context_state(state).is_some()
+            }) || failure.is_some_and(|failure| {
+                failure.job_id == job_id && failure.source_signature == signature
+            });
+            if completed_by_job {
+                plan.checkpointed = plan.checkpointed.saturating_add(1);
+            }
+            let completed_by_retry = state.is_some_and(|state| retry_jobs.contains(&state.job_id));
+            // A partial row is the durable boundary between the signal and
+            // voice passes. Preserve it even for a forced retry so a
+            // cancelled voice pass never causes another signal decode.
+            let signal_is_current = parsed.as_ref().is_some_and(|parsed| {
+                parsed.completeness == "partial" || !force || completed_by_job || completed_by_retry
+            });
+            if signal_is_current && !current_failure {
+                plan.completed = plan.completed.saturating_add(1);
+                if self.voice_enabled
+                    && state
+                        .zip(parsed.as_ref())
+                        .is_some_and(|(state, parsed)| voice_needs_attempt(parsed, state, job_id))
+                {
+                    plan.pending_voice = plan.pending_voice.saturating_add(1);
+                }
+                continue;
+            }
+            if current_failure && failure.is_some_and(|failure| failure.job_id == job_id) {
+                plan.failed = plan.failed.saturating_add(1);
+                continue;
+            }
+            plan.work.push((track.id, track.path.clone(), signature));
+        }
+        Ok(plan)
+    }
+
+    /// Analyze the planned tracks on the bounded CPU executor, storing each
+    /// result or failure as soon as it arrives.
+    async fn signal_pass(
+        &self,
+        track_count: usize,
+        plan: SignalPlan,
+    ) -> Result<SignalOutcome, JobHandlerError> {
+        let SignalPlan {
+            work,
+            mut completed,
+            mut failed,
+            pending_voice,
+            checkpointed,
+        } = plan;
+        let starting = self.context.progress_current().max(checkpointed);
+        let work_count = u64::try_from(work.len())
+            .map_err(|error| JobHandlerError::caused_by("context analysis is too large", &error))?;
+        let expected_voice = if self.voice_enabled {
+            u64::try_from(work.len().saturating_add(pending_voice)).map_err(|error| {
+                JobHandlerError::caused_by("context analysis is too large", &error)
+            })?
+        } else {
+            0
+        };
+        let total = starting
+            .saturating_add(work_count)
+            .saturating_add(expected_voice);
+        let workers = self.handler.executor.worker_count().min(work.len());
+        let initial_voice = if self.voice_enabled {
+            ContextPassProgress::new(PassStatus::Waiting, 0, 0, 0, track_count)
+        } else {
+            ContextPassProgress::not_available(track_count)
+        };
+        let status = if work.is_empty() {
+            PassStatus::Complete
+        } else {
+            PassStatus::Running
+        };
+        self.checkpoint(
+            ContextPassProgress::new(status, completed, failed, 0, track_count),
+            initial_voice,
+        )
+        .await?;
+        self.report(
+            starting,
+            total,
+            "Analyzing audio context",
+            format!("{} tracks need context analysis", work.len()),
+        )
+        .await?;
+
+        let started = Instant::now();
+        let mut progress_current = starting;
+        let mut performance = ContextPerformanceAggregate::default();
+        let handler = self.handler;
+        let context = self.context;
+        let mut results = stream::iter(work.into_iter().map(
+            |(track_id, track_path, signature)| async move {
+                let analysis = match handler.root.resolve_existing(&track_path) {
+                    Ok(path) => handler.analyze_track(context, path).await,
+                    Err(_) => Ok(Err(AudioContextError::MissingFile)),
+                };
+                (track_id, signature, analysis)
+            },
+        ))
+        .buffer_unordered(workers.max(1));
+        while let Some((track_id, signature, analysis)) = results.next().await {
+            match analysis? {
+                Ok(document) => {
+                    performance.observe(&document.performance);
+                    let write = ContextWrite {
+                        track_id,
+                        source_signature: signature,
+                        completeness: document.completeness.to_owned(),
+                        summary: document.summary,
+                        timeline: document.timeline,
+                        sections: document.sections,
+                        technical: document.technical,
+                        stages: document.stages,
+                    };
+                    if self.store(&write).await? {
+                        completed = completed.saturating_add(1);
+                    }
+                }
+                Err(AudioContextError::Cancelled) => {
+                    self.context
+                        .check_cancelled()
+                        .await
+                        .map_err(JobHandlerError::from_execution)?;
+                    return Err(JobHandlerError::new(
+                        "context analysis stopped unexpectedly",
+                    ));
+                }
+                Err(error) => {
+                    let failure = AnalysisFailureWrite {
+                        track_id,
+                        source_signature: signature,
+                        error: format!("AudioContextError: {error}"),
+                    };
+                    let stored = self
+                        .handler
+                        .repository
+                        .store_context_failure(
+                            LOCAL_CONTEXT_ANALYZER_ID,
+                            LOCAL_CONTEXT_IMPLEMENTATION_ID,
+                            self.voice_signature,
+                            self.job_id(),
+                            &failure,
+                        )
+                        .await
+                        .map_err(storage_failed)?;
+                    if stored {
+                        failed = failed.saturating_add(1);
+                    }
+                }
+            }
+            progress_current = progress_current.saturating_add(1);
+            self.checkpoint(
+                ContextPassProgress::new(PassStatus::Running, completed, failed, 0, track_count),
+                initial_voice,
+            )
+            .await?;
+            self.report(
+                progress_current.min(total),
+                total,
+                "Analyzing audio context",
+                format!(
+                    "Audio context: {} of {} tracks processed",
+                    completed.saturating_add(failed),
+                    track_count
+                ),
+            )
+            .await?;
+        }
+        Ok(SignalOutcome {
+            progress_current,
+            performance,
+            wall_seconds: started.elapsed().as_secs_f64(),
+            workers,
+        })
+    }
+
+    /// Recount both passes from storage after the signal pass and collect the
+    /// tracks whose voice stage still needs an attempt.
+    async fn plan_voice(
+        &self,
+        tracks: &[music_domain::IndexedTrack],
+    ) -> Result<VoicePlan, JobHandlerError> {
+        let (states, failures) = self.stored_states().await?;
+        let state_by_track = context_by_track(&states);
+        let failure_by_track = failures_by_track(&failures);
+        let mut audio_completed = 0_usize;
+        let mut audio_failed = 0_usize;
+        let mut plan = VoicePlan {
+            audio: ContextPassProgress::not_available(tracks.len()),
+            work: Vec::new(),
+            completed: 0,
+            failed: 0,
+            skipped: 0,
+        };
+        for track in tracks {
+            let signature = self.signature(track)?;
+            let current_state = state_by_track
+                .get(&track.id)
+                .copied()
+                .filter(|state| state.source_signature == signature);
+            let parsed = current_state.and_then(parse_context_state);
+            if let (Some(state), Some(parsed)) = (current_state, parsed) {
+                audio_completed = audio_completed.saturating_add(1);
+                if self.voice_enabled {
+                    if voice_needs_attempt(&parsed, state, self.job_id()) {
+                        plan.work
+                            .push((track.id, track.path.clone(), state.clone()));
+                        continue;
+                    }
+                    match context_voice_stage_status(&parsed) {
+                        Some("unavailable") => plan.failed = plan.failed.saturating_add(1),
+                        Some("not_configured") | None => {
+                            plan.skipped = plan.skipped.saturating_add(1);
+                        }
+                        Some(_) => plan.completed = plan.completed.saturating_add(1),
+                    }
+                }
+            } else if failure_by_track
+                .get(&track.id)
+                .is_some_and(|failure| failure.source_signature == signature)
+            {
+                audio_failed = audio_failed.saturating_add(1);
+                if self.voice_enabled {
+                    plan.skipped = plan.skipped.saturating_add(1);
+                }
+            } else if self.voice_enabled {
+                plan.skipped = plan.skipped.saturating_add(1);
+            }
+        }
+        let status = if audio_failed == 0 {
+            PassStatus::Complete
+        } else {
+            PassStatus::CompleteWithFailures
+        };
+        plan.audio =
+            ContextPassProgress::new(status, audio_completed, audio_failed, 0, tracks.len());
+        Ok(plan)
+    }
+
+    /// Run voice inference one track at a time on the single model worker.
+    async fn voice_pass(
+        &self,
+        track_count: usize,
+        plan: VoicePlan,
+        mut progress_current: u64,
+    ) -> Result<VoiceOutcome, JobHandlerError> {
+        let VoicePlan {
+            audio,
+            work,
+            mut completed,
+            mut failed,
+            mut skipped,
+        } = plan;
+        let worker = if self.voice_enabled && !work.is_empty() {
+            self.handler.start_voice_worker().await
+        } else {
+            None
+        };
+        let workers = usize::from(worker.is_some());
+        let total =
+            progress_current.saturating_add(u64::try_from(work.len()).map_err(|error| {
+                JobHandlerError::caused_by("context analysis is too large", &error)
+            })?);
+        let mut progress = if self.voice_enabled {
+            let status = if work.is_empty() {
+                PassStatus::Complete
+            } else {
+                PassStatus::Running
+            };
+            ContextPassProgress::new(status, completed, failed, skipped, track_count)
+        } else {
+            ContextPassProgress::not_available(track_count)
+        };
+        self.checkpoint(audio, progress).await?;
+        let (phase, message) = if self.voice_enabled {
+            (
+                "Detecting voice",
+                format!("Voice detection: {} eligible tracks remain", work.len()),
+            )
+        } else {
+            (
+                "Analyzing audio context",
+                "Optional voice detection is not enabled".to_owned(),
+            )
+        };
+        self.report(progress_current, total, phase, message).await?;
+
+        let started = Instant::now();
+        let mut performance = VoicePerformanceAggregate::default();
+        for (track_id, track_path, state) in work {
+            self.context
+                .check_cancelled()
+                .await
+                .map_err(JobHandlerError::from_execution)?;
+            let attempt_started = Instant::now();
+            let analysis = match self.handler.root.resolve_existing(&track_path) {
+                Ok(path) => match worker.as_ref() {
+                    Some(worker) => {
+                        self.handler
+                            .analyze_voice_track(self.context, worker, path)
+                            .await?
+                    }
+                    None => Err(VoiceAnalysisError::WorkerUnavailable),
+                },
+                Err(_) => Err(VoiceAnalysisError::MissingFile),
+            };
+            let document = match analysis {
+                Ok(document) => document,
+                Err(VoiceAnalysisError::Cancelled) => {
+                    self.context
+                        .check_cancelled()
+                        .await
+                        .map_err(JobHandlerError::from_execution)?;
+                    return Err(JobHandlerError::new("voice analysis stopped unexpectedly"));
+                }
+                Err(error) => VoiceAnalysisDocument::unavailable(
+                    &error,
+                    attempt_started.elapsed().as_secs_f64(),
+                ),
+            };
+            performance.observe(document.elapsed_seconds);
+            let classified =
+                document.summary.get("status").and_then(Value::as_str) == Some("classified");
+            if self
+                .store(&context_with_voice(track_id, &state, document)?)
+                .await?
+            {
+                if classified {
+                    completed = completed.saturating_add(1);
+                } else {
+                    failed = failed.saturating_add(1);
+                }
+            } else {
+                skipped = skipped.saturating_add(1);
+            }
+            progress_current = progress_current.saturating_add(1);
+            progress = ContextPassProgress::new(
+                PassStatus::Running,
+                completed,
+                failed,
+                skipped,
+                track_count,
+            );
+            self.checkpoint(audio, progress).await?;
+            self.report(
+                progress_current.min(total),
+                total,
+                "Detecting voice",
+                format!(
+                    "Voice detection: {} of {} eligible tracks processed",
+                    completed.saturating_add(failed),
+                    track_count.saturating_sub(skipped)
+                ),
+            )
+            .await?;
+        }
+        if let Some(worker) = worker {
+            self.handler.stop_voice_worker(worker).await;
+        }
+        let wall_seconds = started.elapsed().as_secs_f64();
+        if self.voice_enabled {
+            let status = if failed == 0 && skipped == 0 {
+                PassStatus::Complete
+            } else {
+                PassStatus::CompleteWithFailures
+            };
+            progress = ContextPassProgress::new(status, completed, failed, skipped, track_count);
+        }
+        self.checkpoint(audio, progress).await?;
+        Ok(VoiceOutcome {
+            audio,
+            progress,
+            performance,
+            wall_seconds,
+            workers,
+        })
+    }
+}
+
+fn storage_failed(error: AssistantDependencyError) -> JobHandlerError {
+    JobHandlerError::caused_by("context analysis storage failed", error.as_ref())
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -863,9 +898,31 @@ fn context_by_track(states: &[ContextState]) -> BTreeMap<music_domain::TrackId, 
     states.iter().map(|state| (state.track_id, state)).collect()
 }
 
+/// The state of one pass, as checkpointed and reported to the UI.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum PassStatus {
+    Waiting,
+    Running,
+    Complete,
+    CompleteWithFailures,
+    NotAvailable,
+}
+
+impl PassStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::Running => "running",
+            Self::Complete => "complete",
+            Self::CompleteWithFailures => "complete_with_failures",
+            Self::NotAvailable => "not_available",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ContextPassProgress {
-    status: &'static str,
+    status: PassStatus,
     completed: usize,
     failed: usize,
     skipped: usize,
@@ -873,19 +930,29 @@ struct ContextPassProgress {
 }
 
 impl ContextPassProgress {
-    const fn not_available(total: usize) -> Self {
+    const fn new(
+        status: PassStatus,
+        completed: usize,
+        failed: usize,
+        skipped: usize,
+        total: usize,
+    ) -> Self {
         Self {
-            status: "not_available",
-            completed: 0,
-            failed: 0,
-            skipped: total,
+            status,
+            completed,
+            failed,
+            skipped,
             total,
         }
     }
 
+    const fn not_available(total: usize) -> Self {
+        Self::new(PassStatus::NotAvailable, 0, 0, total, total)
+    }
+
     fn as_value(self) -> Value {
         json!({
-            "status": self.status,
+            "status": self.status.as_str(),
             "completed_tracks": self.completed,
             "failed_tracks": self.failed,
             "skipped_tracks": self.skipped,
@@ -964,7 +1031,6 @@ fn context_with_voice(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn context_result(
     tracks: &[music_domain::IndexedTrack],
     states: &[ContextState],
@@ -972,16 +1038,13 @@ fn context_result(
     job_id: &str,
     scope: &ContextScopeParameters,
     voice_analyzer: &VoiceAnalyzerStatus,
-    worker_count: usize,
-    voice_worker_count: usize,
-    performance: &ContextPerformanceAggregate,
-    signal_wall_seconds: f64,
-    voice_performance: &VoicePerformanceAggregate,
-    voice_wall_seconds: f64,
-    audio_progress: ContextPassProgress,
-    voice_progress: ContextPassProgress,
-    total_wall_seconds: f64,
+    report: &ContextRunReport,
 ) -> Result<Value, JobHandlerError> {
+    let ContextRunReport {
+        signal,
+        voice,
+        total_wall_seconds,
+    } = report;
     let state_by_track = context_by_track(states);
     let failure_by_track = failures_by_track(failures);
     let voice_signature = voice_analyzer.source_signature.as_deref();
@@ -1037,11 +1100,11 @@ fn context_result(
         "analyzer": LOCAL_CONTEXT_ANALYZER_ID,
         "scope": scope,
         "tracks": tracks.len(),
-        "analysis_workers": worker_count,
-        "voice_workers": voice_worker_count,
+        "analysis_workers": signal.workers,
+        "voice_workers": voice.workers,
         "passes": {
-            "audio_context": audio_progress.as_value(),
-            "voice_detection": voice_progress.as_value(),
+            "audio_context": voice.audio.as_value(),
+            "voice_detection": voice.progress.as_value(),
         },
         "updated": updated,
         "failed": failed,
@@ -1049,14 +1112,14 @@ fn context_result(
         "current_contexts": current_contexts.len(),
         "current_failures": current_failures.len(),
         "failure_samples": failure_samples,
-        "performance": performance.as_value(signal_wall_seconds),
+        "performance": signal.performance.as_value(signal.wall_seconds),
         "voice_performance": {
             "schema_version": "library-context-voice-performance/v1",
-            "tracks_profiled": voice_performance.tracks_profiled,
-            "wall_seconds": round_seconds(voice_wall_seconds),
-            "worker_seconds": round_seconds(voice_performance.worker_seconds),
+            "tracks_profiled": voice.performance.tracks_profiled,
+            "wall_seconds": round_seconds(voice.wall_seconds),
+            "worker_seconds": round_seconds(voice.performance.worker_seconds),
         },
-        "wall_seconds": round_seconds(total_wall_seconds),
+        "wall_seconds": round_seconds(*total_wall_seconds),
     }))
 }
 
@@ -1156,7 +1219,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ContextPassProgress, ContextPerformanceAggregate, VoicePerformanceAggregate,
+        ContextPassProgress, ContextPerformanceAggregate, PassStatus, VoicePerformanceAggregate,
         context_checkpoint, context_with_voice,
     };
 
@@ -1281,13 +1344,7 @@ mod tests {
     #[test]
     fn progress_checkpoint_keeps_both_passes_independently_auditable() {
         let checkpoint = context_checkpoint(
-            ContextPassProgress {
-                status: "complete",
-                completed: 3,
-                failed: 1,
-                skipped: 0,
-                total: 4,
-            },
+            ContextPassProgress::new(PassStatus::Complete, 3, 1, 0, 4),
             ContextPassProgress::not_available(4),
         );
         assert_eq!(
