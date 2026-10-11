@@ -122,7 +122,7 @@ mod tests {
         use base64::{Engine, engine::general_purpose::STANDARD};
         use lofty::tag::TagExt;
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../contracts/reference/v1/metadata.examples.json"
+            "../../../../contracts/fixtures/metadata.examples.json"
         ))?;
         let dir = tempfile::tempdir()?;
         let mut checked = 0;

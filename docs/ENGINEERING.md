@@ -83,8 +83,7 @@ is selected using [the validation matrix](VALIDATION.md).
 
 - Activation, output-by-default designation, and volume are separate:
   - `active_output_device_ids` is live session state.
-  - SQLite stores operator-curated remembered devices and default-on; `devices.json` is only a
-    preserved one-time migration input.
+  - SQLite stores operator-curated remembered devices and default-on.
   - `device_volumes` stores canonical absolute software levels by `client_id`.
 - Any connected device may be activated. Designation only auto-activates a
   device when it connects and must not gate manual activation.
@@ -161,21 +160,19 @@ is selected using [the validation matrix](VALIDATION.md).
   Keep `jobs timing` diagnostics read-only and bounded; never load job payloads or
   treat missing, unfinished, or restarted-job timing as zero. Follow
   [`docs/JOB_DIAGNOSTICS.md`](JOB_DIAGNOSTICS.md) before changing lane fairness.
-- SQLx owns an ordered migration ledger. The schema doctor accepts only documented legacy/additive
-  shapes; renames, drops, type changes, and future versions require a deliberate migration and a
-  verified pre-migration backup.
+- SQLx owns the ordered migration ledger and is the schema authority. Applied migrations are
+  immutable (checksums are verified); every change is a new migration, applied after a verified
+  pre-migration backup. Databases from before the Rust server are not supported.
 - Runtime persistence is `app.db`, media directories, mode data, and the separately held Assistant
-  key. A legacy `devices.json` may be imported but is never a second authority. Seed modes copy
-  only when the target is empty.
+  key. Seed modes copy only when the target is empty.
 - The reusable verification workflow validates Rust, the frontend, architecture boundaries,
-  dependencies and the final Rust-only tree; pull requests also verify the non-root image. The
+  dependencies and tracked files; pull requests also verify the non-root image. The
   `main` workflow calls it, then builds, smoke-tests and publishes the image before dispatching
   infrastructure deployment.
 - Private-library context/voice runs, long resource soaks, and physical-speaker checks are useful
   post-cutover operational checks for this personal deployment, not merge blockers. Keep failures
   visible and fix them normally; never weaken model or protocol contracts merely to make a check pass.
-- `rewrite-tree.mts final` protects the completed language boundary. Do not weaken its allowlist to
-  make a stale runtime, workflow, generated artifact, or transition tool pass.
+- `tracked-files.mts` keeps build output, databases, media, environment files and keys out of Git.
 - This repository does not SSH to production. Deployment rollout, reverse
   proxy, bind mounts, and production `.env` live in the infrastructure repository
   (`pjunak/infra`).

@@ -33,7 +33,6 @@ pub enum StorageError {
     InvalidStorageRevision(i64),
     StorageRevisionOverflow,
     InvalidTimestamp,
-    InvalidLegacyDeviceImport,
     InvalidDeviceTransfer(&'static str),
     InvalidLibraryPath(music_domain::MediaPathError),
     InvalidLibraryRecord(&'static str),
@@ -69,7 +68,7 @@ impl Display for StorageError {
             Self::Database(_) => formatter.write_str("SQLite operation failed"),
             Self::Migration(_) => formatter.write_str("SQLite migration failed"),
             Self::IncompatibleSchema(report) => {
-                if let Some(issue) = report.errors().next() {
+                if let Some(issue) = report.issues.first() {
                     write!(
                         formatter,
                         "database schema is incompatible: {}",
@@ -116,9 +115,6 @@ impl Display for StorageError {
             }
             Self::StorageRevisionOverflow => formatter.write_str("storage revision overflow"),
             Self::InvalidTimestamp => formatter.write_str("stored timestamp is invalid"),
-            Self::InvalidLegacyDeviceImport => {
-                formatter.write_str("legacy device import record is invalid")
-            }
             Self::InvalidDeviceTransfer(detail) => {
                 write!(formatter, "remembered-device transfer is invalid: {detail}")
             }
@@ -177,7 +173,6 @@ impl Error for StorageError {
             | Self::InvalidStorageRevision(_)
             | Self::StorageRevisionOverflow
             | Self::InvalidTimestamp
-            | Self::InvalidLegacyDeviceImport
             | Self::InvalidDeviceTransfer(_)
             | Self::InvalidLibraryRecord(_)
             | Self::InvalidLibraryState(_)

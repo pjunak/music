@@ -8,125 +8,104 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Executor, SqlSafeStr, SqlitePool};
+use sqlx::{SqlSafeStr, SqlitePool};
 
 use crate::schema::{CURRENT_SCHEMA_VERSION, SchemaCompatibility, SchemaReport, inspect_database};
 use crate::{SqliteStorageOptions, StorageError};
 
-const BASELINE_MIGRATION_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
-const LIBRARY_STATE_MIGRATION_SQL: &str = include_str!("../migrations/0002_library_state.sql");
-const LIBRARY_CATALOG_COUNT_MIGRATION_SQL: &str =
-    include_str!("../migrations/0003_library_catalog_count.sql");
-const DURABLE_JOBS_MIGRATION_SQL: &str = include_str!("../migrations/0004_durable_jobs.sql");
-const LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL: &str =
-    include_str!("../migrations/0005_remove_legacy_alembic_ledger.sql");
-const LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL: &str =
-    include_str!("../migrations/0006_remove_legacy_known_devices.sql");
-const CLEANUP_SOURCE_POLICIES_MIGRATION_SQL: &str =
-    include_str!("../migrations/0007_cleanup_source_policies.sql");
-const CLEANUP_ENRICHMENTS_MIGRATION_SQL: &str =
-    include_str!("../migrations/0008_cleanup_enrichments.sql");
-const CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL: &str =
-    include_str!("../migrations/0009_cleanup_source_credentials.sql");
-const CATALOG_EVIDENCE_MIGRATION_SQL: &str =
-    include_str!("../migrations/0010_catalog_evidence_revision.sql");
-const HASHED_SESSIONS_MIGRATION_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
-const MODEL_BATCH_MIGRATION_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
-const CLEANUP_REJECTIONS_MIGRATION_SQL: &str =
-    include_str!("../migrations/0013_cleanup_rejections.sql");
-
-const RICH_TRACK_METADATA_MIGRATION_SQL: &str =
-    include_str!("../migrations/0014_rich_track_metadata.sql");
-
-const TAG_DECISIONS_SQL: &str = include_str!("../migrations/0016_tag_decisions.sql");
-const SONG_EVIDENCE_REBUILD_SQL: &str =
-    include_str!("../migrations/0015_song_evidence_rebuild.sql");
-
-const BACKUP_KIND: &str = "pre-rust-migration";
-const BACKUP_FORMAT_VERSION: u8 = 1;
-const BACKUP_NAME_ATTEMPTS: u16 = 100;
-const BASELINE_MIGRATION_VERSION: i64 = 1;
-const LIBRARY_STATE_MIGRATION_VERSION: i64 = 2;
-const LIBRARY_CATALOG_COUNT_MIGRATION_VERSION: i64 = 3;
-const DURABLE_JOBS_MIGRATION_VERSION: i64 = 4;
-const LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION: i64 = 5;
-const LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION: i64 = 6;
-const CLEANUP_SOURCE_POLICIES_MIGRATION_VERSION: i64 = 7;
-const CLEANUP_ENRICHMENTS_MIGRATION_VERSION: i64 = 8;
-const CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION: i64 = 9;
-
-const ADDITIVE_MIGRATIONS: &[(&str, &str, &str)] = &[
+/// Every embedded migration, in order. Applied migrations are immutable: SQLx
+/// stores each checksum and refuses a database whose history differs.
+pub(crate) const MIGRATIONS: &[(i64, &str, &str)] = &[
     (
-        "tracks",
-        "display_title",
-        "ALTER TABLE tracks ADD COLUMN display_title VARCHAR(512) NOT NULL DEFAULT ''",
+        1,
+        "rust baseline",
+        include_str!("../migrations/0001_rust_baseline.sql"),
     ),
     (
-        "tracks",
-        "origin",
-        "ALTER TABLE tracks ADD COLUMN origin VARCHAR(512) NOT NULL DEFAULT ''",
+        2,
+        "library reconciliation state",
+        include_str!("../migrations/0002_library_state.sql"),
     ),
     (
-        "track_analyses",
-        "metrics_json",
-        "ALTER TABLE track_analyses ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'",
+        3,
+        "library catalog count backfill",
+        include_str!("../migrations/0003_library_catalog_count.sql"),
     ),
     (
-        "assistant_model_roles",
-        "conformance_status",
-        "ALTER TABLE assistant_model_roles ADD COLUMN conformance_status VARCHAR(16) NOT NULL DEFAULT 'never'",
+        4,
+        "durable job execution leases",
+        include_str!("../migrations/0004_durable_jobs.sql"),
     ),
     (
-        "assistant_model_roles",
-        "conformance_error_code",
-        "ALTER TABLE assistant_model_roles ADD COLUMN conformance_error_code VARCHAR(64)",
+        5,
+        "remove legacy alembic ledger",
+        include_str!("../migrations/0005_remove_legacy_alembic_ledger.sql"),
     ),
     (
-        "assistant_model_roles",
-        "conformance_fingerprint",
-        "ALTER TABLE assistant_model_roles ADD COLUMN conformance_fingerprint VARCHAR(64)",
+        6,
+        "remove legacy known devices table",
+        include_str!("../migrations/0006_remove_legacy_known_devices.sql"),
     ),
     (
-        "assistant_model_roles",
-        "last_conformance_at",
-        "ALTER TABLE assistant_model_roles ADD COLUMN last_conformance_at DATETIME",
+        7,
+        "cleanup source policies",
+        include_str!("../migrations/0007_cleanup_source_policies.sql"),
     ),
     (
-        "assistant_model_roles",
-        "thinking_mode",
-        "ALTER TABLE assistant_model_roles ADD COLUMN thinking_mode VARCHAR(24) NOT NULL DEFAULT 'provider_default'",
+        8,
+        "cleanup track enrichment cache",
+        include_str!("../migrations/0008_cleanup_enrichments.sql"),
     ),
     (
-        "assistant_provider_connections",
-        "verified_capabilities_json",
-        "ALTER TABLE assistant_provider_connections ADD COLUMN verified_capabilities_json TEXT NOT NULL DEFAULT '[]'",
+        9,
+        "encrypted cleanup source credentials",
+        include_str!("../migrations/0009_cleanup_source_credentials.sql"),
     ),
     (
-        "playlists",
-        "automatic_rule_json",
-        "ALTER TABLE playlists ADD COLUMN automatic_rule_json TEXT NOT NULL DEFAULT ''",
+        10,
+        "catalog evidence provenance",
+        include_str!("../migrations/0010_catalog_evidence_revision.sql"),
     ),
     (
-        "playlists",
-        "automatic_source_signature",
-        "ALTER TABLE playlists ADD COLUMN automatic_source_signature VARCHAR(64)",
+        11,
+        "hashed sessions and independent management IDs",
+        include_str!("../migrations/0011_hashed_sessions.sql"),
     ),
     (
-        "playlists",
-        "automatic_refreshed_at",
-        "ALTER TABLE playlists ADD COLUMN automatic_refreshed_at DATETIME",
+        12,
+        "durable model batches",
+        include_str!("../migrations/0012_model_batches.sql"),
     ),
     (
-        "assistant_tag_vocabularies",
-        "seed_version",
-        "ALTER TABLE assistant_tag_vocabularies ADD COLUMN seed_version INTEGER NOT NULL DEFAULT 1",
+        13,
+        "recoverable cleanup rejections",
+        include_str!("../migrations/0013_cleanup_rejections.sql"),
     ),
     (
-        "playback_state",
-        "storage_revision",
-        "ALTER TABLE playback_state ADD COLUMN storage_revision INTEGER NOT NULL DEFAULT 0",
+        14,
+        "rich track metadata",
+        include_str!("../migrations/0014_rich_track_metadata.sql"),
+    ),
+    (
+        15,
+        "song evidence rebuild",
+        include_str!("../migrations/0015_song_evidence_rebuild.sql"),
+    ),
+    (
+        16,
+        "per-tag decisions",
+        include_str!("../migrations/0016_tag_decisions.sql"),
+    ),
+    (
+        17,
+        "remove legacy device import ledger",
+        include_str!("../migrations/0017_remove_legacy_device_imports.sql"),
     ),
 ];
+
+const BACKUP_KIND: &str = "pre-migration";
+const BACKUP_FORMAT_VERSION: u8 = 1;
+const BACKUP_NAME_ATTEMPTS: u16 = 100;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct MigrationBackup {
@@ -185,9 +164,6 @@ pub(crate) async fn bootstrap(
         .await?;
 
     let migration_result = async {
-        if schema_before.migration_required {
-            normalize_legacy_schema(&pool).await?;
-        }
         migrator().run(&pool).await?;
         let schema_after = crate::schema::inspect_pool(&pool, true).await?;
         if schema_after.compatibility != SchemaCompatibility::Current {
@@ -214,150 +190,21 @@ pub(crate) async fn bootstrap(
     }
 }
 
-fn migrator() -> Migrator {
-    Migrator::with_migrations(vec![
-        Migration::new(
-            BASELINE_MIGRATION_VERSION,
-            "rust baseline".into(),
-            MigrationType::Simple,
-            BASELINE_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            LIBRARY_STATE_MIGRATION_VERSION,
-            "library reconciliation state".into(),
-            MigrationType::Simple,
-            LIBRARY_STATE_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            LIBRARY_CATALOG_COUNT_MIGRATION_VERSION,
-            "library catalog count backfill".into(),
-            MigrationType::Simple,
-            LIBRARY_CATALOG_COUNT_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            DURABLE_JOBS_MIGRATION_VERSION,
-            "durable job execution leases".into(),
-            MigrationType::Simple,
-            DURABLE_JOBS_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION,
-            "remove legacy alembic ledger".into(),
-            MigrationType::Simple,
-            LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION,
-            "remove legacy known devices table".into(),
-            MigrationType::Simple,
-            LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            CLEANUP_SOURCE_POLICIES_MIGRATION_VERSION,
-            "cleanup source policies".into(),
-            MigrationType::Simple,
-            CLEANUP_SOURCE_POLICIES_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            CLEANUP_ENRICHMENTS_MIGRATION_VERSION,
-            "cleanup track enrichment cache".into(),
-            MigrationType::Simple,
-            CLEANUP_ENRICHMENTS_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION,
-            "encrypted cleanup source credentials".into(),
-            MigrationType::Simple,
-            CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            10,
-            "catalog evidence provenance".into(),
-            MigrationType::Simple,
-            CATALOG_EVIDENCE_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            11,
-            "hashed sessions and independent management IDs".into(),
-            MigrationType::Simple,
-            HASHED_SESSIONS_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            12,
-            "durable model batches".into(),
-            MigrationType::Simple,
-            MODEL_BATCH_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            13,
-            "recoverable cleanup rejections".into(),
-            MigrationType::Simple,
-            CLEANUP_REJECTIONS_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            14,
-            "rich track metadata".into(),
-            MigrationType::Simple,
-            RICH_TRACK_METADATA_MIGRATION_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            15,
-            "song evidence rebuild".into(),
-            MigrationType::Simple,
-            SONG_EVIDENCE_REBUILD_SQL.into_sql_str(),
-            false,
-        ),
-        Migration::new(
-            16,
-            "per-tag decisions".into(),
-            MigrationType::Simple,
-            TAG_DECISIONS_SQL.into_sql_str(),
-            false,
-        ),
-    ])
-}
-
-async fn normalize_legacy_schema(pool: &SqlitePool) -> Result<(), StorageError> {
-    let mut transaction = pool.begin().await?;
-    for (table, column, statement) in ADDITIVE_MIGRATIONS {
-        let table_exists = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = ?",
-        )
-        .bind(table)
-        .fetch_one(&mut *transaction)
-        .await?
-            != 0;
-        if !table_exists {
-            continue;
-        }
-        let column_exists = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-        )
-        .bind(table)
-        .bind(column)
-        .fetch_one(&mut *transaction)
-        .await?
-            != 0;
-        if !column_exists {
-            transaction.execute(*statement).await?;
-        }
-    }
-    transaction.commit().await?;
-    Ok(())
+pub(crate) fn migrator() -> Migrator {
+    Migrator::with_migrations(
+        MIGRATIONS
+            .iter()
+            .map(|(version, description, sql)| {
+                Migration::new(
+                    *version,
+                    (*description).into(),
+                    MigrationType::Simple,
+                    sql.into_sql_str(),
+                    false,
+                )
+            })
+            .collect(),
+    )
 }
 
 async fn create_verified_backup(
@@ -456,7 +303,7 @@ fn reserve_backup_paths(database_path: &Path) -> Result<BackupPaths, StorageErro
     for attempt in 0..BACKUP_NAME_ATTEMPTS {
         let mut backup_name = OsString::from(file_name);
         backup_name.push(format!(
-            ".pre-rust-v{CURRENT_SCHEMA_VERSION}-{created_unix_seconds}-{process_id}-{attempt}.bak"
+            ".pre-v{CURRENT_SCHEMA_VERSION}-{created_unix_seconds}-{process_id}-{attempt}.bak"
         ));
         let database = database_path.with_file_name(&backup_name);
         let mut temporary_name = OsString::from(&backup_name);
@@ -567,17 +414,7 @@ fn file_name_text(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BASELINE_MIGRATION_SQL, BASELINE_MIGRATION_VERSION, CLEANUP_ENRICHMENTS_MIGRATION_SQL,
-        CLEANUP_ENRICHMENTS_MIGRATION_VERSION, CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL,
-        CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION, CLEANUP_SOURCE_POLICIES_MIGRATION_SQL,
-        CLEANUP_SOURCE_POLICIES_MIGRATION_VERSION, DURABLE_JOBS_MIGRATION_SQL,
-        DURABLE_JOBS_MIGRATION_VERSION, LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL,
-        LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION, LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL,
-        LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION, LIBRARY_CATALOG_COUNT_MIGRATION_SQL,
-        LIBRARY_CATALOG_COUNT_MIGRATION_VERSION, LIBRARY_STATE_MIGRATION_SQL,
-        LIBRARY_STATE_MIGRATION_VERSION, migrator,
-    };
+    use super::{MIGRATIONS, migrator};
 
     #[tokio::test]
     async fn rich_metadata_migrates_years_and_backs_up_the_old_schema()
@@ -646,38 +483,18 @@ mod tests {
     }
 
     #[test]
-    fn embedded_migration_is_cross_platform_stable() {
-        assert!(!super::HASHED_SESSIONS_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(11));
-        assert_eq!(BASELINE_MIGRATION_VERSION, 1);
-        assert!(!BASELINE_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(BASELINE_MIGRATION_VERSION));
-        assert_eq!(LIBRARY_STATE_MIGRATION_VERSION, 2);
-        assert!(!LIBRARY_STATE_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(LIBRARY_STATE_MIGRATION_VERSION));
-        assert_eq!(LIBRARY_CATALOG_COUNT_MIGRATION_VERSION, 3);
-        assert!(!LIBRARY_CATALOG_COUNT_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(LIBRARY_CATALOG_COUNT_MIGRATION_VERSION));
-        assert_eq!(DURABLE_JOBS_MIGRATION_VERSION, 4);
-        assert!(!DURABLE_JOBS_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(DURABLE_JOBS_MIGRATION_VERSION));
-        assert_eq!(LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION, 5);
-        assert!(!LEGACY_ALEMBIC_CLEANUP_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(LEGACY_ALEMBIC_CLEANUP_MIGRATION_VERSION));
-        assert_eq!(LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION, 6);
-        assert!(!LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(LEGACY_KNOWN_DEVICES_CLEANUP_MIGRATION_VERSION));
-        assert_eq!(CLEANUP_SOURCE_POLICIES_MIGRATION_VERSION, 7);
-        assert!(!CLEANUP_SOURCE_POLICIES_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(CLEANUP_SOURCE_POLICIES_MIGRATION_VERSION));
-        assert_eq!(CLEANUP_ENRICHMENTS_MIGRATION_VERSION, 8);
-        assert!(!CLEANUP_ENRICHMENTS_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(CLEANUP_ENRICHMENTS_MIGRATION_VERSION));
-        assert_eq!(CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION, 9);
-        assert!(!CLEANUP_SOURCE_CREDENTIALS_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(CLEANUP_SOURCE_CREDENTIALS_MIGRATION_VERSION));
-        assert!(!super::CATALOG_EVIDENCE_MIGRATION_SQL.contains('\r'));
-        assert!(migrator().version_exists(10));
+    fn embedded_migrations_are_ordered_and_cross_platform_stable() {
+        for (index, (version, _, sql)) in MIGRATIONS.iter().enumerate() {
+            assert_eq!(usize::try_from(*version).ok(), Some(index + 1));
+            assert!(
+                !sql.contains('\r'),
+                "migration {version} has CRLF line endings"
+            );
+        }
+        assert_eq!(
+            usize::try_from(crate::CURRENT_SCHEMA_VERSION).ok(),
+            Some(MIGRATIONS.len())
+        );
     }
 
     async fn version_ten_fixture(
@@ -716,12 +533,7 @@ mod tests {
         version_ten_fixture(&path).await?;
         let before = inspect_database(&path).await?;
         assert!(before.is_compatible());
-        assert!(
-            before
-                .issues
-                .iter()
-                .any(|issue| issue.code == "legacy_plaintext_sessions")
-        );
+        assert!(before.pending_migrations.contains(&11));
         let storage = SqliteStorage::open(SqliteStorageOptions::new(&path)).await?;
         assert_eq!(
             storage.migration_outcome().schema_after.migration_version,
@@ -789,33 +601,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn session_migration_refuses_legacy_shape_drift_or_a_current_ledger_with_legacy_tokens()
-    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-        for mismatch in [
-            "ALTER TABLE auth_sessions ADD COLUMN unexpected TEXT",
-            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) VALUES (11, 'synthetic drift', 1, X'00', 0)",
-        ] {
-            let directory = tempfile::tempdir()?;
-            let path = directory.path().join("app.db");
-            version_ten_fixture(&path).await?;
-            let pool = SqlitePoolOptions::new()
-                .max_connections(1)
-                .connect_with(SqliteConnectOptions::new().filename(&path))
-                .await?;
-            sqlx::raw_sql(sqlx::AssertSqlSafe(mismatch))
-                .execute(&pool)
-                .await?;
-            pool.close().await;
-            assert!(!crate::inspect_database(&path).await?.is_compatible());
-            assert!(matches!(
-                crate::SqliteStorage::open(crate::SqliteStorageOptions::new(&path)).await,
-                Err(crate::StorageError::IncompatibleSchema(_))
-            ));
-        }
-        Ok(())
-    }
     #[tokio::test]
     async fn song_evidence_cutover_clears_only_generated_state_once()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

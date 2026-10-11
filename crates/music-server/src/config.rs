@@ -18,7 +18,6 @@ const ENVIRONMENT_NAMES: &[&str] = &[
     "MUSIC_DIR",
     "SFX_LIBRARY_DIR",
     "MODES_DIR",
-    "DEVICES_FILE",
     "MODES_SEED_DIR",
     "ADVANCER_ENABLED",
     "ALLOWED_ORIGINS",
@@ -68,7 +67,6 @@ pub struct AppConfig {
     pub music_dir: PathBuf,
     pub sfx_library_dir: PathBuf,
     pub modes_dir: PathBuf,
-    pub devices_file: PathBuf,
     pub modes_seed_dir: Option<PathBuf>,
     pub advancer_enabled: bool,
     pub allowed_origins: Vec<String>,
@@ -189,7 +187,6 @@ impl AppConfig {
             music_dir: required_path(values, "MUSIC_DIR", "./music")?,
             sfx_library_dir: required_path(values, "SFX_LIBRARY_DIR", "./sfx")?,
             modes_dir: required_path(values, "MODES_DIR", "../modes")?,
-            devices_file: required_path(values, "DEVICES_FILE", "./devices.json")?,
             modes_seed_dir: optional_path(values, "MODES_SEED_DIR"),
             advancer_enabled: parse_bool(values, "ADVANCER_ENABLED", true)?,
             allowed_origins: parse_origins(value(
@@ -529,7 +526,6 @@ mod tests {
         assert_eq!(config.music_dir, std::path::Path::new("./music"));
         assert_eq!(config.sfx_library_dir, std::path::Path::new("./sfx"));
         assert_eq!(config.modes_dir, std::path::Path::new("../modes"));
-        assert_eq!(config.devices_file, std::path::Path::new("./devices.json"));
         assert!(config.modes_seed_dir.is_none());
         assert!(config.advancer_enabled);
         assert_eq!(config.allowed_origins, ["http://localhost:5173"]);

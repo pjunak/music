@@ -1906,10 +1906,6 @@ mod tests {
                 root.join("modes").display().to_string(),
             ),
             (
-                "DEVICES_FILE".to_owned(),
-                root.join("devices.json").display().to_string(),
-            ),
-            (
                 "STATIC_DIR".to_owned(),
                 root.join("missing-static").display().to_string(),
             ),

@@ -1,24 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
+use serde::Serialize;
 
 use crate::http::openapi_document;
 
 const TYPESCRIPT_PATH: &str = "frontend/src/generated/protocol.ts";
 const OPENAPI_PATH: &str = "contracts/generated/rust/openapi.json";
-const COMPATIBILITY_PATH: &str = "contracts/generated/rust/openapi-compatibility.json";
-const REFERENCE_OPENAPI_PATH: &str = "contracts/reference/v1/openapi.json";
-const COMPATIBILITY_REVIEW_PATH: &str = "contracts/openapi-compatibility-review.json";
-const HTTP_METHODS: [&str; 8] = [
-    "get", "put", "post", "delete", "options", "head", "patch", "trace",
-];
 
 #[derive(Debug)]
 pub enum ContractError {
@@ -31,10 +22,7 @@ pub enum ContractError {
         document: &'static str,
         source: serde_json::Error,
     },
-    InvalidOpenApi {
-        document: &'static str,
-        detail: &'static str,
-    },
+    InvalidArtifactPath(&'static str),
 }
 
 impl Display for ContractError {
@@ -44,13 +32,10 @@ impl Display for ContractError {
                 operation, path, ..
             } => write!(formatter, "failed to {operation} {}", path.display()),
             Self::Json { document, .. } => {
-                write!(
-                    formatter,
-                    "failed to process the {document} OpenAPI document"
-                )
+                write!(formatter, "failed to render the {document} contract")
             }
-            Self::InvalidOpenApi { document, detail } => {
-                write!(formatter, "invalid {document} OpenAPI document: {detail}")
+            Self::InvalidArtifactPath(path) => {
+                write!(formatter, "generated contract path has no parent: {path}")
             }
         }
     }
@@ -61,7 +46,7 @@ impl Error for ContractError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Json { source, .. } => Some(source),
-            Self::InvalidOpenApi { .. } => None,
+            Self::InvalidArtifactPath(_) => None,
         }
     }
 }
@@ -73,22 +58,7 @@ pub struct ContractArtifact {
 }
 
 /// Render every checked-in contract from the authoritative Rust declarations.
-pub fn render_contracts(repository_root: &Path) -> Result<Vec<ContractArtifact>, ContractError> {
-    let reference_path = repository_root.join(REFERENCE_OPENAPI_PATH);
-    let reference_json = read_to_string(&reference_path, "read")?;
-    let reference: Value =
-        serde_json::from_str(&reference_json).map_err(|source| ContractError::Json {
-            document: "reference",
-            source,
-        })?;
-
-    let candidate =
-        serde_json::to_value(openapi_document()).map_err(|source| ContractError::Json {
-            document: "Rust",
-            source,
-        })?;
-    let compatibility = compare_openapi(&reference, &candidate)?;
-
+pub fn render_contracts() -> Result<Vec<ContractArtifact>, ContractError> {
     Ok(vec![
         ContractArtifact {
             relative_path: TYPESCRIPT_PATH,
@@ -96,11 +66,16 @@ pub fn render_contracts(repository_root: &Path) -> Result<Vec<ContractArtifact>,
         },
         ContractArtifact {
             relative_path: OPENAPI_PATH,
-            content: pretty_json(&candidate, "Rust")?,
-        },
-        ContractArtifact {
-            relative_path: COMPATIBILITY_PATH,
-            content: pretty_json(&compatibility, "compatibility report")?,
+            // Going through `Value` sorts object keys, keeping the file stable.
+            content: pretty_json(
+                &serde_json::to_value(openapi_document()).map_err(|source| {
+                    ContractError::Json {
+                        document: "OpenAPI",
+                        source,
+                    }
+                })?,
+                "OpenAPI",
+            )?,
         },
     ])
 }
@@ -108,15 +83,14 @@ pub fn render_contracts(repository_root: &Path) -> Result<Vec<ContractArtifact>,
 /// Write only changed generated artifacts and return their relative paths.
 pub fn export_contracts(repository_root: &Path) -> Result<Vec<PathBuf>, ContractError> {
     let mut changed = Vec::new();
-    for artifact in render_contracts(repository_root)? {
+    for artifact in render_contracts()? {
         let path = repository_root.join(artifact.relative_path);
         if read_optional(&path)?.as_deref() == Some(artifact.content.as_str()) {
             continue;
         }
-        let parent = path.parent().ok_or(ContractError::InvalidOpenApi {
-            document: "generated",
-            detail: "artifact path has no parent directory",
-        })?;
+        let parent = path
+            .parent()
+            .ok_or(ContractError::InvalidArtifactPath(artifact.relative_path))?;
         fs::create_dir_all(parent).map_err(|source| ContractError::Io {
             operation: "create contract directory",
             path: parent.to_owned(),
@@ -135,40 +109,13 @@ pub fn export_contracts(repository_root: &Path) -> Result<Vec<PathBuf>, Contract
 /// Return generated files that are missing or differ from authoritative Rust.
 pub fn check_contracts(repository_root: &Path) -> Result<Vec<PathBuf>, ContractError> {
     let mut drifted = Vec::new();
-    for artifact in render_contracts(repository_root)? {
-        if artifact.relative_path == COMPATIBILITY_PATH {
-            let report: OpenApiCompatibilityReport = serde_json::from_str(&artifact.content)
-                .map_err(|source| ContractError::Json {
-                    document: "compatibility report",
-                    source,
-                })?;
-            let review_json = read_to_string(
-                &repository_root.join(COMPATIBILITY_REVIEW_PATH),
-                "read compatibility review",
-            )?;
-            let review: BTreeMap<String, AcceptedDifference> =
-                serde_json::from_str(&review_json).map_err(|source| ContractError::Json {
-                    document: "compatibility review",
-                    source,
-                })?;
-            if !differences_reviewed(&report, &review) {
-                drifted.push(PathBuf::from(COMPATIBILITY_REVIEW_PATH));
-            }
-        }
+    for artifact in render_contracts()? {
         let path = repository_root.join(artifact.relative_path);
         if read_optional(&path)?.as_deref() != Some(artifact.content.as_str()) {
             drifted.push(PathBuf::from(artifact.relative_path));
         }
     }
     Ok(drifted)
-}
-
-fn read_to_string(path: &Path, operation: &'static str) -> Result<String, ContractError> {
-    fs::read_to_string(path).map_err(|source| ContractError::Io {
-        operation,
-        path: path.to_owned(),
-        source,
-    })
 }
 
 fn read_optional(path: &Path) -> Result<Option<String>, ContractError> {
@@ -190,444 +137,12 @@ fn pretty_json<T: Serialize>(value: &T, document: &'static str) -> Result<String
     Ok(rendered)
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct OpenApiCompatibilityReport {
-    schema_version: String,
-    verdict: String,
-    reference_operation_count: usize,
-    candidate_operation_count: usize,
-    matched_operation_count: usize,
-    fully_compatible_operation_count: usize,
-    missing_operations: Vec<String>,
-    candidate_only_operations: Vec<String>,
-    parameter_mismatches: Vec<String>,
-    request_body_mismatches: Vec<String>,
-    response_mismatches: Vec<String>,
-    security_mismatches: Vec<String>,
-    difference_fingerprints: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AcceptedDifference {
-    sha256: String,
-    reason: String,
-}
-
-fn differences_reviewed(
-    report: &OpenApiCompatibilityReport,
-    review: &BTreeMap<String, AcceptedDifference>,
-) -> bool {
-    report.security_mismatches.is_empty()
-        && report.missing_operations.iter().all(|key| {
-            report
-                .difference_fingerprints
-                .contains_key(&format!("{key}#retired"))
-        })
-        && report.difference_fingerprints.len() == review.len()
-        && report.difference_fingerprints.iter().all(|(key, digest)| {
-            review.get(key).is_some_and(|accepted| {
-                accepted.sha256 == *digest && !accepted.reason.trim().is_empty()
-            })
-        })
-}
-
-fn contract_digest(value: &impl Serialize) -> Result<String, ContractError> {
-    let bytes = serde_json::to_vec(value).map_err(|source| ContractError::Json {
-        document: "compatibility fingerprint",
-        source,
-    })?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
-}
-
-#[derive(Debug, Eq, PartialEq, Serialize)]
-struct OperationContract {
-    parameters: Value,
-    request_body: Value,
-    responses: Value,
-    security: Value,
-}
-
-fn compare_openapi(
-    reference: &Value,
-    candidate: &Value,
-) -> Result<OpenApiCompatibilityReport, ContractError> {
-    let reference_operations = operation_contracts(reference, "reference")?;
-    let candidate_operations = operation_contracts(candidate, "Rust")?;
-    let reference_keys = reference_operations
-        .keys()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let candidate_keys = candidate_operations
-        .keys()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let missing_operations = reference_keys
-        .difference(&candidate_keys)
-        .cloned()
-        .collect::<Vec<_>>();
-    let candidate_only_operations = candidate_keys
-        .difference(&reference_keys)
-        .cloned()
-        .collect::<Vec<_>>();
-    let matched = reference_keys
-        .intersection(&candidate_keys)
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let mut fully_compatible_operation_count = 0;
-    let mut parameter_mismatches = Vec::new();
-    let mut request_body_mismatches = Vec::new();
-    let mut response_mismatches = Vec::new();
-    let mut security_mismatches = Vec::new();
-    let mut difference_fingerprints = BTreeMap::new();
-    // An intentional retirement is reviewed against the exact removed contract.
-    for key in &missing_operations {
-        if let Some(operation) = reference_operations.get(key) {
-            difference_fingerprints.insert(format!("{key}#retired"), contract_digest(operation)?);
-        }
-    }
-    for key in &candidate_only_operations {
-        if let Some(operation) = candidate_operations.get(key) {
-            difference_fingerprints.insert(format!("{key}#operation"), contract_digest(operation)?);
-        }
-    }
-    for key in &matched {
-        let Some(reference_operation) = reference_operations.get(key) else {
-            continue;
-        };
-        let Some(candidate_operation) = candidate_operations.get(key) else {
-            continue;
-        };
-        let parameters_match = reference_operation.parameters == candidate_operation.parameters;
-        let request_body_matches =
-            reference_operation.request_body == candidate_operation.request_body;
-        let responses_match = reference_operation.responses == candidate_operation.responses;
-        let security_matches = reference_operation.security == candidate_operation.security;
-        if !parameters_match {
-            parameter_mismatches.push(key.clone());
-            difference_fingerprints.insert(
-                format!("{key}#parameters"),
-                contract_digest(&candidate_operation.parameters)?,
-            );
-        }
-        if !request_body_matches {
-            request_body_mismatches.push(key.clone());
-            difference_fingerprints.insert(
-                format!("{key}#request_body"),
-                contract_digest(&candidate_operation.request_body)?,
-            );
-        }
-        if !responses_match {
-            response_mismatches.push(key.clone());
-            difference_fingerprints.insert(
-                format!("{key}#responses"),
-                contract_digest(&candidate_operation.responses)?,
-            );
-        }
-        if !security_matches {
-            security_mismatches.push(key.clone());
-        }
-        if parameters_match && request_body_matches && responses_match && security_matches {
-            fully_compatible_operation_count += 1;
-        }
-    }
-
-    let compatible = missing_operations.is_empty()
-        && parameter_mismatches.is_empty()
-        && request_body_mismatches.is_empty()
-        && response_mismatches.is_empty()
-        && security_mismatches.is_empty();
-    Ok(OpenApiCompatibilityReport {
-        schema_version: "openapi-compatibility/v2".to_owned(),
-        verdict: if compatible {
-            "compatible"
-        } else {
-            "incomplete"
-        }
-        .to_owned(),
-        reference_operation_count: reference_operations.len(),
-        candidate_operation_count: candidate_operations.len(),
-        matched_operation_count: matched.len(),
-        fully_compatible_operation_count,
-        missing_operations,
-        candidate_only_operations,
-        parameter_mismatches,
-        request_body_mismatches,
-        response_mismatches,
-        security_mismatches,
-        difference_fingerprints,
-    })
-}
-
-fn operation_contracts(
-    document: &Value,
-    document_name: &'static str,
-) -> Result<BTreeMap<String, OperationContract>, ContractError> {
-    let paths =
-        document
-            .get("paths")
-            .and_then(Value::as_object)
-            .ok_or(ContractError::InvalidOpenApi {
-                document: document_name,
-                detail: "paths must be an object",
-            })?;
-    let root_security = document
-        .get("security")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(Vec::new()));
-    let mut contracts = BTreeMap::new();
-    for (path, path_item) in paths {
-        let Some(path_object) = path_item.as_object() else {
-            continue;
-        };
-        for method in HTTP_METHODS {
-            let Some(operation) = path_object.get(method).and_then(Value::as_object) else {
-                continue;
-            };
-            let parameters = merged_parameters(document, path_object, operation);
-            let request_body = operation
-                .get("requestBody")
-                .map_or(Value::Null, |value| normalize(document, value, None));
-            let responses = operation
-                .get("responses")
-                .map_or(Value::Null, |value| normalize(document, value, None));
-            let security = operation.get("security").unwrap_or(&root_security);
-            contracts.insert(
-                format!("{} {path}", method.to_ascii_uppercase()),
-                OperationContract {
-                    parameters,
-                    request_body,
-                    responses,
-                    security: normalize(document, security, Some("security")),
-                },
-            );
-        }
-    }
-    Ok(contracts)
-}
-
-fn merged_parameters(
-    document: &Value,
-    path_item: &Map<String, Value>,
-    operation: &Map<String, Value>,
-) -> Value {
-    let mut parameters = BTreeMap::<String, Value>::new();
-    for source in [path_item.get("parameters"), operation.get("parameters")]
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_array)
-    {
-        for parameter in source {
-            let normalized = normalize(document, parameter, None);
-            let name = normalized.get("name").and_then(Value::as_str).unwrap_or("");
-            let location = normalized.get("in").and_then(Value::as_str).unwrap_or("");
-            let key = if name.is_empty() && location.is_empty() {
-                serde_json::to_string(&normalized).unwrap_or_default()
-            } else {
-                format!("{location}:{name}")
-            };
-            parameters.insert(key, normalized);
-        }
-    }
-    Value::Array(parameters.into_values().collect())
-}
-
-fn normalize(document: &Value, value: &Value, parent_key: Option<&str>) -> Value {
-    normalize_inner(document, value, parent_key, &mut BTreeSet::new())
-}
-
-fn normalize_inner(
-    document: &Value,
-    value: &Value,
-    parent_key: Option<&str>,
-    resolving: &mut BTreeSet<String>,
-) -> Value {
-    match value {
-        Value::Object(object) => {
-            if let Some(reference) = object.get("$ref").and_then(Value::as_str)
-                && let Some(pointer) = reference.strip_prefix('#')
-                && resolving.insert(reference.to_owned())
-            {
-                let resolved = document.pointer(pointer).map_or_else(
-                    || value.clone(),
-                    |target| normalize_inner(document, target, parent_key, resolving),
-                );
-                resolving.remove(reference);
-                if object.len() == 1 {
-                    return resolved;
-                }
-                let siblings = object
-                    .iter()
-                    .filter(|(key, _)| key.as_str() != "$ref")
-                    .map(|(key, value)| {
-                        (
-                            key.clone(),
-                            normalize_inner(document, value, Some(key), resolving),
-                        )
-                    })
-                    .collect::<Map<_, _>>();
-                return Value::Object(Map::from_iter([(
-                    "allOf".to_owned(),
-                    Value::Array(vec![resolved, Value::Object(siblings)]),
-                )]));
-            }
-
-            let normalized = object
-                .iter()
-                .filter(|(key, _)| !is_descriptive_key(key))
-                .map(|(key, value)| {
-                    (
-                        key.clone(),
-                        normalize_inner(document, value, Some(key), resolving),
-                    )
-                })
-                .collect::<Map<_, _>>();
-            Value::Object(normalized)
-        }
-        Value::Array(values) => {
-            let mut normalized = values
-                .iter()
-                .map(|value| normalize_inner(document, value, None, resolving))
-                .collect::<Vec<_>>();
-            if parent_key.is_some_and(is_unordered_array) {
-                normalized.sort_by_key(|value| serde_json::to_string(value).unwrap_or_default());
-                normalized.dedup();
-            }
-            Value::Array(normalized)
-        }
-        Value::Number(number) if parent_key.is_some_and(is_numeric_constraint) => {
-            normalize_numeric_constraint(number).map_or_else(|| value.clone(), Value::Number)
-        }
-        _ => value.clone(),
-    }
-}
-
-fn is_descriptive_key(key: &str) -> bool {
-    matches!(
-        key,
-        "description" | "summary" | "title" | "operationId" | "tags" | "example" | "examples"
-    )
-}
-
-fn is_unordered_array(key: &str) -> bool {
-    matches!(
-        key,
-        "required" | "enum" | "allOf" | "anyOf" | "oneOf" | "security"
-    )
-}
-
-fn is_numeric_constraint(key: &str) -> bool {
-    matches!(
-        key,
-        "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" | "multipleOf"
-    )
-}
-
-fn normalize_numeric_constraint(number: &serde_json::Number) -> Option<serde_json::Number> {
-    if !number.is_f64() {
-        return Some(number.clone());
-    }
-    let value = number.as_f64()?;
-    if value.fract() != 0.0 {
-        return serde_json::Number::from_f64(value);
-    }
-    if value.is_sign_negative() {
-        #[allow(clippy::cast_possible_truncation)]
-        let integer = value as i64;
-        ((integer as f64) == value).then(|| serde_json::Number::from(integer))
-    } else {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let integer = value as u64;
-        ((integer as f64) == value).then(|| serde_json::Number::from(integer))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::error::Error;
     use std::io;
 
-    use serde_json::json;
-
-    use super::{compare_openapi, openapi_document};
-
-    #[test]
-    fn compatibility_review_binds_exact_shapes_and_rejects_regressions()
-    -> Result<(), Box<dyn Error>> {
-        let reference = json!({"paths": {"/thing": {"get": {"responses": {"200": {"content": {"application/json": {"schema": {"type": "string"}}}}}}}}});
-        let mut candidate = reference.clone();
-        candidate["paths"]["/thing"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
-            ["type"] = json!("integer");
-        let report = compare_openapi(&reference, &candidate)?;
-        let mut review = std::collections::BTreeMap::new();
-        assert!(!super::differences_reviewed(&report, &review));
-        for (key, digest) in &report.difference_fingerprints {
-            review.insert(
-                key.clone(),
-                super::AcceptedDifference {
-                    sha256: digest.clone(),
-                    reason: "Reviewed typed response".to_owned(),
-                },
-            );
-        }
-        assert!(super::differences_reviewed(&report, &review));
-        candidate["paths"]["/thing"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
-            ["type"] = json!("boolean");
-        assert!(!super::differences_reviewed(
-            &compare_openapi(&reference, &candidate)?,
-            &review
-        ));
-        assert!(!super::differences_reviewed(
-            &compare_openapi(&reference, &json!({"paths": {}}))?,
-            &review
-        ));
-        let mut security = reference.clone();
-        security["paths"]["/thing"]["get"]["security"] = json!([{"session": []}]);
-        assert!(!super::differences_reviewed(
-            &compare_openapi(&reference, &security)?,
-            &std::collections::BTreeMap::new()
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn operation_retirement_requires_explicit_review_of_the_removed_contract()
-    -> Result<(), Box<dyn Error>> {
-        let reference = json!({"paths":{"/retired":{"get":{"responses":{"200":{"description":"old result"}}}}}});
-        let candidate = json!({"paths":{}});
-        let report = compare_openapi(&reference, &candidate)?;
-        assert_eq!(report.missing_operations, vec!["GET /retired"]);
-        let key = "GET /retired#retired";
-        let digest = report
-            .difference_fingerprints
-            .get(key)
-            .ok_or("missing retirement digest")?;
-        let mut review = std::collections::BTreeMap::new();
-        assert!(!super::differences_reviewed(&report, &review));
-        review.insert(
-            key.to_owned(),
-            super::AcceptedDifference {
-                sha256: digest.clone(),
-                reason: "Replaced by the current analysis contract".to_owned(),
-            },
-        );
-        assert!(super::differences_reviewed(&report, &review));
-        let mut different = reference.clone();
-        different["paths"]["/retired"]["get"]["responses"]["201"] =
-            json!({"description":"another result"});
-        assert!(!super::differences_reviewed(
-            &compare_openapi(&different, &candidate)?,
-            &review
-        ));
-        assert!(!super::differences_reviewed(
-            &compare_openapi(&reference, &reference)?,
-            &review
-        ));
-        review.get_mut(key).ok_or("review missing")?.reason.clear();
-        assert!(!super::differences_reviewed(&report, &review));
-        Ok(())
-    }
+    use super::openapi_document;
 
     #[test]
     fn route_registration_is_the_openapi_source_of_truth() -> Result<(), Box<dyn Error>> {
@@ -683,42 +198,6 @@ mod tests {
         assert!(paths.contains_key("/api/modes/{mode_id}/theme.css"));
         assert!(!paths.contains_key("/health"));
         assert!(!paths.contains_key("/api/ws"));
-        Ok(())
-    }
-
-    #[test]
-    fn semantic_comparison_ignores_docs_and_resolves_local_schema_refs()
-    -> Result<(), Box<dyn Error>> {
-        let reference = json!({
-            "openapi": "3.1.0",
-            "paths": {"/thing": {"get": {
-                "summary": "old words",
-                "responses": {"200": {"description": "ok", "content": {
-                    "application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}
-                }}}
-            }}},
-            "components": {"schemas": {"Thing": {
-                "type": "object", "properties": {"id": {
-                    "type": "integer", "minimum": 0.0, "maximum": 9999.0
-                }}, "required": ["id"]
-            }}}
-        });
-        let candidate = json!({
-            "openapi": "3.1.0",
-            "paths": {"/thing": {"get": {
-                "summary": "new words",
-                "responses": {"200": {"description": "different", "content": {
-                    "application/json": {"schema": {
-                        "title": "Thing", "required": ["id"], "properties": {"id": {
-                            "type": "integer", "minimum": 0, "maximum": 9999
-                        }}, "type": "object"
-                    }}
-                }}}
-            }}}
-        });
-        let report = compare_openapi(&reference, &candidate)?;
-        assert_eq!(report.verdict, "compatible");
-        assert_eq!(report.fully_compatible_operation_count, 1);
         Ok(())
     }
 }

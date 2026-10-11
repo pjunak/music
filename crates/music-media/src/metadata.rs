@@ -1173,7 +1173,7 @@ mod tests {
     };
 
     const METADATA_EXAMPLES: &str =
-        include_str!("../../../contracts/reference/v1/metadata.examples.json");
+        include_str!("../../../contracts/fixtures/metadata.examples.json");
 
     #[derive(Deserialize)]
     struct MetadataFixture {

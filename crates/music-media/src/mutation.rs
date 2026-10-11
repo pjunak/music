@@ -1326,7 +1326,7 @@ mod tests {
     async fn metadata_effects_replace_verified_media_and_replay_forward()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../contracts/reference/v1/metadata.examples.json"
+            "../../../contracts/fixtures/metadata.examples.json"
         ))?;
         let wav = fixture["cases"]
             .as_array()
@@ -1456,7 +1456,7 @@ mod tests {
     async fn upload_effects_resolve_publish_replace_skip_and_replay()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../contracts/reference/v1/metadata.examples.json"
+            "../../../contracts/fixtures/metadata.examples.json"
         ))?;
         let wav = fixture["cases"]
             .as_array()

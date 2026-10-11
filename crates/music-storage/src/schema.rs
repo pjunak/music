@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 use std::path::Path;
 use std::time::Duration;
@@ -8,126 +8,21 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 
 use crate::StorageError;
+use crate::migration::{MIGRATIONS, migrator};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 16;
+/// The newest embedded migration. The SQLx ledger is the schema authority.
+pub const CURRENT_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
-const BASELINE_SCHEMA_SQL: &str = include_str!("../migrations/0001_rust_baseline.sql");
-const LIBRARY_STATE_SCHEMA_SQL: &str = include_str!("../migrations/0002_library_state.sql");
-const DURABLE_JOBS_SCHEMA_SQL: &str = include_str!("../migrations/0004_durable_jobs.sql");
-const LEGACY_ALEMBIC_CLEANUP_SCHEMA_SQL: &str =
-    include_str!("../migrations/0005_remove_legacy_alembic_ledger.sql");
-const LEGACY_KNOWN_DEVICES_CLEANUP_SCHEMA_SQL: &str =
-    include_str!("../migrations/0006_remove_legacy_known_devices.sql");
-const CLEANUP_SOURCE_POLICIES_SCHEMA_SQL: &str =
-    include_str!("../migrations/0007_cleanup_source_policies.sql");
-const CLEANUP_ENRICHMENTS_SCHEMA_SQL: &str =
-    include_str!("../migrations/0008_cleanup_enrichments.sql");
-const CLEANUP_SOURCE_CREDENTIALS_SCHEMA_SQL: &str =
-    include_str!("../migrations/0009_cleanup_source_credentials.sql");
-const CATALOG_EVIDENCE_SCHEMA_SQL: &str =
-    include_str!("../migrations/0010_catalog_evidence_revision.sql");
-const HASHED_SESSIONS_SCHEMA_SQL: &str = include_str!("../migrations/0011_hashed_sessions.sql");
-const MODEL_BATCH_SCHEMA_SQL: &str = include_str!("../migrations/0012_model_batches.sql");
-const CLEANUP_REJECTIONS_SCHEMA_SQL: &str =
-    include_str!("../migrations/0013_cleanup_rejections.sql");
-const RICH_TRACK_METADATA_SCHEMA_SQL: &str =
-    include_str!("../migrations/0014_rich_track_metadata.sql");
-const TAG_DECISIONS_SQL: &str = include_str!("../migrations/0016_tag_decisions.sql");
-const SONG_EVIDENCE_REBUILD_SQL: &str =
-    include_str!("../migrations/0015_song_evidence_rebuild.sql");
 const INSPECTION_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const SQLX_MIGRATION_TABLE: &str = "_sqlx_migrations";
-const LEGACY_ALEMBIC_MIGRATION_TABLE: &str = "alembic_version";
-const LEGACY_KNOWN_DEVICES_TABLE: &str = "known_devices";
-
-#[cfg(test)]
-pub(crate) const LEGACY_ALEMBIC_FIXTURE_SQL: &str = "\
-    CREATE TABLE alembic_version (\
-        version_num VARCHAR(32) NOT NULL,\
-        CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)\
-    );\
-    INSERT INTO alembic_version (version_num) VALUES ('legacy-python-head');";
-
-#[cfg(test)]
-pub(crate) const LEGACY_KNOWN_DEVICES_FIXTURE_SQL: &str = "\
-    CREATE TABLE known_devices (\
-        client_id VARCHAR(64) NOT NULL,\
-        name VARCHAR(128) NOT NULL,\
-        is_output BOOLEAN NOT NULL,\
-        created_at DATETIME NOT NULL,\
-        last_seen DATETIME NOT NULL,\
-        PRIMARY KEY (client_id)\
-    );\
-    INSERT INTO known_devices \
-        (client_id, name, is_output, created_at, last_seen) \
-    VALUES \
-        ('legacy-tv', 'Legacy TV', 1, '2026-01-01 12:00:00', '2026-01-02 12:00:00');";
-
-#[cfg(test)]
-pub(crate) fn python_fixture_with_track_unique_constraint(fixture: &str, column: &str) -> String {
-    const MARKER: &str = "\
-        \tadded_at DATETIME NOT NULL,\n\
-        \tPRIMARY KEY (id)\n\
-        );\n\
-        INSERT INTO \"tracks\"";
-    let normalized = fixture.replace("\r\n", "\n");
-    let replacement = format!(
-        "\tadded_at DATETIME NOT NULL,\n\tPRIMARY KEY (id),\n\tUNIQUE ({column})\n);\nINSERT INTO \"tracks\""
-    );
-    let production = normalized.replacen(MARKER, &replacement, 1);
-    assert_ne!(production, normalized, "tracks fixture marker is stale");
-    production
-}
-
-#[cfg(test)]
-pub(crate) fn python_fixture_with_non_unique_track_index(fixture: &str) -> String {
-    const UNIQUE_INDEX: &str = "CREATE UNIQUE INDEX ix_tracks_path ON tracks (path);";
-    const NON_UNIQUE_INDEX: &str = "CREATE INDEX ix_tracks_path ON tracks (path);";
-    let production = fixture.replacen(UNIQUE_INDEX, NON_UNIQUE_INDEX, 1);
-    assert_ne!(production, fixture, "tracks index fixture marker is stale");
-    production
-}
-
-#[cfg(test)]
-pub(crate) fn python_fixture_with_legacy_track_uniqueness(fixture: &str) -> String {
-    let production = python_fixture_with_track_unique_constraint(fixture, "path");
-    python_fixture_with_non_unique_track_index(&production)
-}
-
-const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
-    ("cleanup_track_enrichments", "evidence_revision"),
-    ("tracks", "display_title"),
-    ("tracks", "origin"),
-    ("tracks", "release_date"),
-    ("tracks", "original_release_date"),
-    ("tracks", "composer"),
-    ("track_analyses", "metrics_json"),
-    ("assistant_model_roles", "conformance_status"),
-    ("assistant_model_roles", "conformance_error_code"),
-    ("assistant_model_roles", "conformance_fingerprint"),
-    ("assistant_model_roles", "last_conformance_at"),
-    ("assistant_model_roles", "thinking_mode"),
-    (
-        "assistant_provider_connections",
-        "verified_capabilities_json",
-    ),
-    ("playlists", "automatic_rule_json"),
-    ("playlists", "automatic_source_signature"),
-    ("playlists", "automatic_refreshed_at"),
-    ("assistant_tag_vocabularies", "seed_version"),
-    ("playback_state", "storage_revision"),
-    ("background_jobs", "lane"),
-    ("background_jobs", "schema_version"),
-    ("background_jobs", "restartable"),
-    ("background_jobs", "checkpoint_policy"),
-    ("background_jobs", "execution_id"),
-];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SchemaCompatibility {
+    /// No application tables yet; migrations create the schema.
     Empty,
-    CompatibleLegacy,
+    /// A valid ledger with embedded migrations still to apply.
+    Outdated,
     Current,
     Incompatible,
 }
@@ -136,33 +31,17 @@ impl Display for SchemaCompatibility {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Empty => "empty",
-            Self::CompatibleLegacy => "compatible_legacy",
+            Self::Outdated => "outdated",
             Self::Current => "current",
             Self::Incompatible => "incompatible",
         })
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SchemaIssueLevel {
-    Warning,
-    Error,
-}
-
-impl Display for SchemaIssueLevel {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Warning => "warning",
-            Self::Error => "error",
-        })
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+/// A problem that makes the database unusable by this server.
 pub struct SchemaIssue {
-    pub level: SchemaIssueLevel,
-    pub code: String,
+    pub code: &'static str,
     pub detail: String,
 }
 
@@ -173,6 +52,8 @@ pub struct SchemaReport {
     pub sqlite_version: Option<String>,
     pub migration_version: Option<i64>,
     pub current_schema_version: i64,
+    /// Embedded migrations not yet recorded in the ledger, oldest first.
+    pub pending_migrations: Vec<i64>,
     pub table_count: usize,
     pub integrity_ok: bool,
     pub foreign_key_violations: usize,
@@ -185,50 +66,11 @@ impl SchemaReport {
     pub fn is_compatible(&self) -> bool {
         self.compatibility != SchemaCompatibility::Incompatible
     }
-
-    pub fn errors(&self) -> impl Iterator<Item = &SchemaIssue> {
-        self.issues
-            .iter()
-            .filter(|issue| issue.level == SchemaIssueLevel::Error)
-    }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-struct ColumnShape {
-    data_type: String,
-    not_null: bool,
-    primary_key_position: i64,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-struct ForeignKeyShape {
-    source_column: String,
-    target_table: String,
-    target_column: String,
-    on_update: String,
-    on_delete: String,
-    match_mode: String,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct TableShape {
-    columns: BTreeMap<String, ColumnShape>,
-    foreign_keys: BTreeSet<ForeignKeyShape>,
-    unique_constraints: BTreeSet<Vec<String>>,
-    normalized_create_sql: String,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct IndexShape {
-    table: String,
-    unique: bool,
-    columns: Vec<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct DatabaseShape {
-    tables: BTreeMap<String, TableShape>,
-    indexes: BTreeMap<String, IndexShape>,
+struct AppliedMigration {
+    success: bool,
+    checksum: Vec<u8>,
 }
 
 pub async fn inspect_database(path: &Path) -> Result<SchemaReport, StorageError> {
@@ -258,19 +100,27 @@ pub async fn inspect_database(path: &Path) -> Result<SchemaReport, StorageError>
     report
 }
 
+/// Compare the database's SQLx ledger with the embedded migrations and run
+/// SQLite's own integrity checks. Applied migrations are trusted to have
+/// produced their schema; their checksums detect edited migration files.
 pub(crate) async fn inspect_pool(
     pool: &SqlitePool,
     database_exists: bool,
 ) -> Result<SchemaReport, StorageError> {
-    let (expected, legacy_sessions, superseded_contexts, superseded_analyses) =
-        expected_shape().await?;
-    let actual = read_shape(pool).await?;
     let sqlite_version = sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
         .fetch_one(pool)
         .await?;
+    let tables = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    let has_ledger = tables.iter().any(|table| table == SQLX_MIGRATION_TABLE);
+    let table_count = tables
+        .iter()
+        .filter(|table| *table != SQLX_MIGRATION_TABLE)
+        .count();
     let mut issues = Vec::new();
-    let migration_version = migration_version(pool, &actual, &mut issues).await;
-    let mut requires_migration = false;
 
     let integrity_rows = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
         .fetch_all(pool)
@@ -279,12 +129,10 @@ pub(crate) async fn inspect_pool(
     if !integrity_ok {
         issue(
             &mut issues,
-            SchemaIssueLevel::Error,
             "integrity_check_failed",
             "SQLite quick_check did not return ok",
         );
     }
-
     let foreign_key_violations = sqlx::query("PRAGMA foreign_key_check")
         .fetch_all(pool)
         .await?
@@ -292,307 +140,73 @@ pub(crate) async fn inspect_pool(
     if foreign_key_violations != 0 {
         issue(
             &mut issues,
-            SchemaIssueLevel::Error,
             "foreign_key_violation",
             format!("found {foreign_key_violations} foreign-key violation(s)"),
         );
     }
 
-    for (table, actual_table) in &actual.tables {
-        if table == SQLX_MIGRATION_TABLE {
-            continue;
-        }
-        if table == LEGACY_ALEMBIC_MIGRATION_TABLE {
-            requires_migration = true;
-            if is_legacy_alembic_ledger(actual_table) {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Warning,
-                    "legacy_migration_ledger",
-                    "migration will remove the legacy Python Alembic migration ledger",
-                );
-            } else {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Error,
-                    "invalid_legacy_migration_ledger",
-                    "legacy Alembic migration ledger has an incompatible shape",
-                );
-            }
-            continue;
-        }
-        if table == LEGACY_KNOWN_DEVICES_TABLE {
-            requires_migration = true;
-            if is_legacy_known_devices_table(actual_table) {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Warning,
-                    "legacy_known_devices_table",
-                    "migration will remove the obsolete Python known-devices table",
-                );
-            } else {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Error,
-                    "invalid_legacy_known_devices_table",
-                    "legacy known-devices table has an incompatible shape",
-                );
-            }
-            continue;
-        }
-        if !expected.tables.contains_key(table) {
-            issue(
-                &mut issues,
-                SchemaIssueLevel::Error,
-                "unknown_table",
-                format!("unexpected table {table}"),
-            );
-        }
+    let applied = if has_ledger {
+        applied_migrations(pool).await?
+    } else {
+        BTreeMap::new()
+    };
+    if !has_ledger && table_count != 0 {
+        issue(
+            &mut issues,
+            "unversioned_database",
+            "the database has no migration ledger; databases from before the Rust server are not supported",
+        );
     }
 
-    for (table_name, expected_table) in &expected.tables {
-        let Some(actual_table) = actual.tables.get(table_name) else {
-            requires_migration = true;
+    let known = migrator();
+    for (version, record) in &applied {
+        if !record.success {
             issue(
                 &mut issues,
-                SchemaIssueLevel::Warning,
-                "missing_table",
-                format!("migration will create table {table_name}"),
-            );
-            continue;
-        };
-
-        // Only the exact historical table may take the deliberate session-reset
-        // migration. Other column/constraint drift must still fail inspection.
-        if table_name == "auth_sessions"
-            && actual_table == &legacy_sessions
-            && migration_version.is_none_or(|version| version < 11)
-        {
-            requires_migration = true;
-            issue(
-                &mut issues,
-                SchemaIssueLevel::Warning,
-                "legacy_plaintext_sessions",
-                "migration revokes existing sessions; clients must sign in again",
-            );
-            continue;
-        }
-
-        if table_name == "track_contexts"
-            && actual_table == &superseded_contexts
-            && migration_version.is_none_or(|version| version < 15)
-        {
-            requires_migration = true;
-            issue(
-                &mut issues,
-                SchemaIssueLevel::Warning,
-                "song_evidence_rebuild",
-                "migration clears generated analysis and requires fresh audio analysis; authored tags are preserved",
-            );
-            continue;
-        }
-
-        if table_name == "track_analyses"
-            && actual_table == &superseded_analyses
-            && migration_version.is_none_or(|version| version < 16)
-        {
-            requires_migration = true;
-            issue(
-                &mut issues,
-                SchemaIssueLevel::Warning,
-                "tag_decisions_rebuild",
-                "migration replaces generated tag decisions; accepted tags are preserved",
-            );
-            continue;
-        }
-
-        for column in actual_table.columns.keys() {
-            if !expected_table.columns.contains_key(column) {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Error,
-                    "unknown_column",
-                    format!("unexpected column {table_name}.{column}"),
-                );
-            }
-        }
-
-        for (column_name, expected_column) in &expected_table.columns {
-            let Some(actual_column) = actual_table.columns.get(column_name) else {
-                if is_additive_column(table_name, column_name) {
-                    requires_migration = true;
-                    issue(
-                        &mut issues,
-                        SchemaIssueLevel::Warning,
-                        "missing_additive_column",
-                        format!("migration will add {table_name}.{column_name}"),
-                    );
-                } else {
-                    issue(
-                        &mut issues,
-                        SchemaIssueLevel::Error,
-                        "missing_required_column",
-                        format!("required column {table_name}.{column_name} is absent"),
-                    );
-                }
-                continue;
-            };
-            if actual_column != expected_column {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Error,
-                    "column_shape_mismatch",
-                    format!("column {table_name}.{column_name} has an incompatible shape"),
-                );
-            }
-        }
-
-        if actual_table.foreign_keys != expected_table.foreign_keys {
-            issue(
-                &mut issues,
-                SchemaIssueLevel::Error,
-                "foreign_key_shape_mismatch",
-                format!("table {table_name} has incompatible foreign keys"),
+                "failed_migration",
+                format!("migration {version} is recorded as failed"),
             );
         }
-        if !expected_table
-            .unique_constraints
-            .is_subset(&actual_table.unique_constraints)
-        {
-            issue(
+        match known.iter().find(|migration| migration.version == *version) {
+            None if *version > CURRENT_SCHEMA_VERSION => issue(
                 &mut issues,
-                SchemaIssueLevel::Error,
-                "unique_constraint_mismatch",
-                format!("table {table_name} has incompatible unique constraints"),
-            );
-        }
-        for columns in actual_table
-            .unique_constraints
-            .difference(&expected_table.unique_constraints)
-        {
-            if is_redundant_unique_constraint(&expected, table_name, columns) {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Warning,
-                    "redundant_unique_constraint",
-                    format!(
-                        "table {table_name} preserves a redundant unique constraint on {}",
-                        columns.join(", ")
-                    ),
-                );
-            } else {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Error,
-                    "unique_constraint_mismatch",
-                    format!("table {table_name} has incompatible unique constraints"),
-                );
-            }
-        }
-        for required_check in required_check_fragments(table_name) {
-            if !actual_table.normalized_create_sql.contains(required_check) {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Error,
-                    "check_constraint_mismatch",
-                    format!("table {table_name} is missing a required check constraint"),
-                );
-            }
-        }
-    }
-
-    for (index_name, expected_index) in &expected.indexes {
-        match actual.indexes.get(index_name) {
-            Some(actual_index) if actual_index == expected_index => {}
-            Some(actual_index)
-                if is_index_uniqueness_backed_by_constraint(
-                    &actual,
-                    expected_index,
-                    actual_index,
-                ) =>
-            {
-                issue(
-                    &mut issues,
-                    SchemaIssueLevel::Warning,
-                    "index_uniqueness_backed_by_constraint",
-                    format!(
-                        "index {index_name} is non-unique but its exact columns are protected by a table unique constraint"
-                    ),
-                );
-            }
-            Some(_) => issue(
-                &mut issues,
-                SchemaIssueLevel::Error,
-                "index_shape_mismatch",
-                format!("index {index_name} has an incompatible shape"),
+                "future_migration_version",
+                format!("migration {version} comes from a newer server version"),
             ),
-            None => {
-                requires_migration = true;
+            None => issue(
+                &mut issues,
+                "unknown_migration",
+                format!("migration {version} is not part of this server"),
+            ),
+            Some(migration) if migration.checksum.as_ref() != record.checksum.as_slice() => {
                 issue(
                     &mut issues,
-                    SchemaIssueLevel::Warning,
-                    "missing_index",
-                    format!("migration will create index {index_name}"),
+                    "migration_checksum_mismatch",
+                    format!("migration {version} differs from the one that was applied"),
                 );
             }
+            Some(_) => {}
         }
     }
-    for index_name in actual.indexes.keys() {
-        if !expected.indexes.contains_key(index_name) {
-            issue(
-                &mut issues,
-                SchemaIssueLevel::Warning,
-                "additional_index",
-                format!("additional compatible index {index_name} will be preserved"),
-            );
-        }
-    }
-
-    if migration_version.is_none() {
-        requires_migration = true;
-    }
-    if migration_version.is_some_and(|version| version > CURRENT_SCHEMA_VERSION) {
-        issue(
-            &mut issues,
-            SchemaIssueLevel::Error,
-            "future_migration_version",
-            "database was migrated by a newer Rust schema version",
-        );
-    }
-
-    let table_count = actual
-        .tables
-        .keys()
-        .filter(|table| {
-            !matches!(
-                table.as_str(),
-                SQLX_MIGRATION_TABLE | LEGACY_ALEMBIC_MIGRATION_TABLE | LEGACY_KNOWN_DEVICES_TABLE
-            )
-        })
-        .count();
-    let has_errors = issues
+    let pending_migrations = known
         .iter()
-        .any(|issue| issue.level == SchemaIssueLevel::Error);
-    if migration_version == Some(CURRENT_SCHEMA_VERSION) && requires_migration && !has_errors {
-        issue(
-            &mut issues,
-            SchemaIssueLevel::Error,
-            "migration_schema_drift",
-            "migration ledger is current but required schema objects are missing",
-        );
-    }
-
-    let has_errors = issues
+        .map(|migration| migration.version)
+        .filter(|version| !applied.contains_key(version))
+        .collect::<Vec<_>>();
+    let migration_version = applied
         .iter()
-        .any(|issue| issue.level == SchemaIssueLevel::Error);
-    let compatibility = if has_errors {
+        .filter(|(_, record)| record.success)
+        .map(|(version, _)| *version)
+        .max();
+
+    let compatibility = if !issues.is_empty() {
         SchemaCompatibility::Incompatible
     } else if table_count == 0 {
         SchemaCompatibility::Empty
-    } else if migration_version == Some(CURRENT_SCHEMA_VERSION) && !requires_migration {
+    } else if pending_migrations.is_empty() {
         SchemaCompatibility::Current
     } else {
-        SchemaCompatibility::CompatibleLegacy
+        SchemaCompatibility::Outdated
     };
 
     Ok(SchemaReport {
@@ -601,12 +215,32 @@ pub(crate) async fn inspect_pool(
         sqlite_version: Some(sqlite_version),
         migration_version,
         current_schema_version: CURRENT_SCHEMA_VERSION,
+        pending_migrations,
         table_count,
         integrity_ok,
         foreign_key_violations,
         migration_required: compatibility != SchemaCompatibility::Current,
         issues,
     })
+}
+
+async fn applied_migrations(
+    pool: &SqlitePool,
+) -> Result<BTreeMap<i64, AppliedMigration>, StorageError> {
+    let rows = sqlx::query("SELECT version, success, checksum FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await?;
+    rows.iter()
+        .map(|row| {
+            Ok((
+                row.try_get::<i64, _>("version")?,
+                AppliedMigration {
+                    success: row.try_get("success")?,
+                    checksum: row.try_get("checksum")?,
+                },
+            ))
+        })
+        .collect()
 }
 
 fn empty_report(database_exists: bool) -> SchemaReport {
@@ -616,6 +250,7 @@ fn empty_report(database_exists: bool) -> SchemaReport {
         sqlite_version: None,
         migration_version: None,
         current_schema_version: CURRENT_SCHEMA_VERSION,
+        pending_migrations: MIGRATIONS.iter().map(|(version, _, _)| *version).collect(),
         table_count: 0,
         integrity_ok: true,
         foreign_key_violations: 0,
@@ -624,363 +259,9 @@ fn empty_report(database_exists: bool) -> SchemaReport {
     }
 }
 
-async fn expected_shape()
--> Result<(DatabaseShape, TableShape, TableShape, TableShape), StorageError> {
-    let options = SqliteConnectOptions::new()
-        .in_memory(true)
-        .foreign_keys(true);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(options)
-        .await?;
-    sqlx::raw_sql(BASELINE_SCHEMA_SQL).execute(&pool).await?;
-    sqlx::raw_sql(LIBRARY_STATE_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(DURABLE_JOBS_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(LEGACY_ALEMBIC_CLEANUP_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(LEGACY_KNOWN_DEVICES_CLEANUP_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(CLEANUP_SOURCE_POLICIES_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(CLEANUP_ENRICHMENTS_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(CLEANUP_SOURCE_CREDENTIALS_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(CATALOG_EVIDENCE_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    let legacy = read_shape(&pool).await?;
-    let legacy_sessions =
-        legacy
-            .tables
-            .get("auth_sessions")
-            .cloned()
-            .ok_or(StorageError::InvalidOption(
-                "baseline auth table is missing",
-            ))?;
-    sqlx::raw_sql(HASHED_SESSIONS_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(MODEL_BATCH_SCHEMA_SQL).execute(&pool).await?;
-    sqlx::raw_sql(CLEANUP_REJECTIONS_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    sqlx::raw_sql(RICH_TRACK_METADATA_SCHEMA_SQL)
-        .execute(&pool)
-        .await?;
-    let superseded_contexts = read_shape(&pool)
-        .await?
-        .tables
-        .remove("track_contexts")
-        .ok_or(StorageError::InvalidOption(
-            "baseline context table is missing",
-        ))?;
-    sqlx::raw_sql(SONG_EVIDENCE_REBUILD_SQL)
-        .execute(&pool)
-        .await?;
-    let superseded_analyses = read_shape(&pool)
-        .await?
-        .tables
-        .remove("track_analyses")
-        .ok_or(StorageError::InvalidOption(
-            "baseline analysis table is missing",
-        ))?;
-    sqlx::raw_sql(TAG_DECISIONS_SQL).execute(&pool).await?;
-    let shape = read_shape(&pool).await;
-    pool.close().await;
-    shape.map(|shape| {
-        (
-            shape,
-            legacy_sessions,
-            superseded_contexts,
-            superseded_analyses,
-        )
-    })
-}
-
-async fn read_shape(pool: &SqlitePool) -> Result<DatabaseShape, StorageError> {
-    let table_rows = sqlx::query(
-        "SELECT name, sql FROM sqlite_schema \
-         WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-    )
-    .fetch_all(pool)
-    .await?;
-    let mut tables = BTreeMap::new();
-    let mut indexes = BTreeMap::new();
-
-    for table_row in table_rows {
-        let table_name: String = table_row.try_get("name")?;
-        let create_sql = table_row
-            .try_get::<Option<String>, _>("sql")?
-            .unwrap_or_default();
-        let column_rows = sqlx::query(
-            "SELECT name, type, \"notnull\" AS not_null, pk \
-             FROM pragma_table_info(?) ORDER BY cid",
-        )
-        .bind(&table_name)
-        .fetch_all(pool)
-        .await?;
-        let mut columns = BTreeMap::new();
-        for row in column_rows {
-            let column_name: String = row.try_get("name")?;
-            let data_type: String = row.try_get("type")?;
-            columns.insert(
-                column_name,
-                ColumnShape {
-                    data_type: normalize_type(&data_type),
-                    not_null: row.try_get::<i64, _>("not_null")? != 0,
-                    primary_key_position: row.try_get("pk")?,
-                },
-            );
-        }
-
-        let foreign_key_rows = sqlx::query(
-            "SELECT \"from\" AS source_column, \"table\" AS target_table, \
-                    \"to\" AS target_column, on_update, on_delete, \
-                    \"match\" AS match_mode \
-             FROM pragma_foreign_key_list(?)",
-        )
-        .bind(&table_name)
-        .fetch_all(pool)
-        .await?;
-        let mut foreign_keys = BTreeSet::new();
-        for row in foreign_key_rows {
-            foreign_keys.insert(ForeignKeyShape {
-                source_column: row.try_get("source_column")?,
-                target_table: row.try_get("target_table")?,
-                target_column: row.try_get("target_column")?,
-                on_update: row.try_get("on_update")?,
-                on_delete: row.try_get("on_delete")?,
-                match_mode: row.try_get("match_mode")?,
-            });
-        }
-
-        let index_rows = sqlx::query(
-            "SELECT name, \"unique\" AS is_unique, origin \
-             FROM pragma_index_list(?) ORDER BY name",
-        )
-        .bind(&table_name)
-        .fetch_all(pool)
-        .await?;
-        let mut unique_constraints = BTreeSet::new();
-        for row in index_rows {
-            let index_name: String = row.try_get("name")?;
-            let index_columns = sqlx::query_scalar::<_, Option<String>>(
-                "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
-            )
-            .bind(&index_name)
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .map(|column| column.unwrap_or_else(|| "<expression>".to_owned()))
-            .collect::<Vec<_>>();
-            let origin: String = row.try_get("origin")?;
-            if origin == "u" {
-                unique_constraints.insert(index_columns);
-            } else if origin == "c" {
-                indexes.insert(
-                    index_name,
-                    IndexShape {
-                        table: table_name.clone(),
-                        unique: row.try_get::<i64, _>("is_unique")? != 0,
-                        columns: index_columns,
-                    },
-                );
-            }
-        }
-
-        tables.insert(
-            table_name,
-            TableShape {
-                columns,
-                foreign_keys,
-                unique_constraints,
-                normalized_create_sql: normalize_sql(&create_sql),
-            },
-        );
-    }
-    Ok(DatabaseShape { tables, indexes })
-}
-
-async fn migration_version(
-    pool: &SqlitePool,
-    actual: &DatabaseShape,
-    issues: &mut Vec<SchemaIssue>,
-) -> Option<i64> {
-    if !actual.tables.contains_key(SQLX_MIGRATION_TABLE) {
-        return None;
-    }
-    let failed =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 0")
-            .fetch_one(pool)
-            .await;
-    match failed {
-        Ok(0) => {}
-        Ok(count) => issue(
-            issues,
-            SchemaIssueLevel::Error,
-            "failed_migration",
-            format!("migration ledger contains {count} failed migration(s)"),
-        ),
-        Err(_) => {
-            issue(
-                issues,
-                SchemaIssueLevel::Error,
-                "invalid_migration_ledger",
-                "SQLx migration ledger cannot be read",
-            );
-            return None;
-        }
-    }
-    match sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT MAX(version) FROM _sqlx_migrations WHERE success = 1",
-    )
-    .fetch_one(pool)
-    .await
-    {
-        Ok(version) => version,
-        Err(_) => {
-            issue(
-                issues,
-                SchemaIssueLevel::Error,
-                "invalid_migration_ledger",
-                "SQLx migration version cannot be read",
-            );
-            None
-        }
-    }
-}
-
-fn normalize_type(data_type: &str) -> String {
-    data_type
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_ascii_uppercase()
-}
-
-fn normalize_sql(sql: &str) -> String {
-    sql.chars()
-        .filter(|character| !character.is_ascii_whitespace() && *character != '"')
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-fn required_check_fragments(table: &str) -> &'static [&'static str] {
-    match table {
-        "track_analysis_tag_reviews" => &["check(decisionin('accepted','rejected'))"],
-        "remembered_devices" => &["check(is_outputin(0,1))"],
-        "legacy_device_imports" => {
-            &["check(source_statusin('imported','missing','corrupt','unsupported'))"]
-        }
-        "recovery_journal" => &[concat!(
-            "check(statein('planned','applying','committed','rolling_back',",
-            "'rolled_back','failed'))"
-        )],
-        "library_state" => &[
-            "check(id=1)",
-            "check(generation>=0)",
-            "check(statusin('pending','reconciling','current','failed'))",
-            "check(discovered_tracks>=0)",
-        ],
-        _ => &[],
-    }
-}
-
-fn is_additive_column(table: &str, column: &str) -> bool {
-    ADDITIVE_COLUMNS.contains(&(table, column))
-}
-
-fn is_redundant_unique_constraint(
-    expected: &DatabaseShape,
-    table: &str,
-    columns: &[String],
-) -> bool {
-    expected
-        .indexes
-        .values()
-        .any(|index| index.table == table && index.unique && index.columns.as_slice() == columns)
-}
-
-fn is_index_uniqueness_backed_by_constraint(
-    actual: &DatabaseShape,
-    expected_index: &IndexShape,
-    actual_index: &IndexShape,
-) -> bool {
-    expected_index.unique
-        && !actual_index.unique
-        && actual_index.table == expected_index.table
-        && actual_index.columns == expected_index.columns
-        && actual
-            .tables
-            .get(&actual_index.table)
-            .is_some_and(|table| table.unique_constraints.contains(&actual_index.columns))
-}
-
-fn is_legacy_alembic_ledger(table: &TableShape) -> bool {
-    let Some(version_column) = table.columns.get("version_num") else {
-        return false;
-    };
-    table.columns.len() == 1
-        && version_column.data_type == "VARCHAR(32)"
-        && version_column.not_null
-        && version_column.primary_key_position == 1
-        && table.foreign_keys.is_empty()
-        && table.unique_constraints.is_empty()
-}
-
-fn is_legacy_known_devices_table(table: &TableShape) -> bool {
-    const CREATE_SQL: &str = "\
-        CREATE TABLE known_devices (\
-            client_id VARCHAR(64) NOT NULL,\
-            name VARCHAR(128) NOT NULL,\
-            is_output BOOLEAN NOT NULL,\
-            created_at DATETIME NOT NULL,\
-            last_seen DATETIME NOT NULL,\
-            PRIMARY KEY (client_id)\
-        )";
-    table.columns.len() == 5
-        && table.columns.get("client_id").is_some_and(|column| {
-            column.data_type == "VARCHAR(64)" && column.not_null && column.primary_key_position == 1
-        })
-        && table.columns.get("name").is_some_and(|column| {
-            column.data_type == "VARCHAR(128)"
-                && column.not_null
-                && column.primary_key_position == 0
-        })
-        && table.columns.get("is_output").is_some_and(|column| {
-            column.data_type == "BOOLEAN" && column.not_null && column.primary_key_position == 0
-        })
-        && ["created_at", "last_seen"].iter().all(|name| {
-            table.columns.get(*name).is_some_and(|column| {
-                column.data_type == "DATETIME"
-                    && column.not_null
-                    && column.primary_key_position == 0
-            })
-        })
-        && table.foreign_keys.is_empty()
-        && table.unique_constraints.is_empty()
-        && table.normalized_create_sql == normalize_sql(CREATE_SQL)
-}
-
-fn issue(
-    issues: &mut Vec<SchemaIssue>,
-    level: SchemaIssueLevel,
-    code: impl Into<String>,
-    detail: impl Into<String>,
-) {
+fn issue(issues: &mut Vec<SchemaIssue>, code: &'static str, detail: impl Into<String>) {
     issues.push(SchemaIssue {
-        level,
-        code: code.into(),
+        code,
         detail: detail.into(),
     });
 }
@@ -988,194 +269,103 @@ fn issue(
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::path::Path;
 
+    use sqlx::SqlitePool;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
     use tempfile::tempdir;
 
-    use super::{
-        LEGACY_ALEMBIC_FIXTURE_SQL, LEGACY_KNOWN_DEVICES_FIXTURE_SQL, SchemaCompatibility,
-        inspect_database, inspect_pool, python_fixture_with_legacy_track_uniqueness,
-        python_fixture_with_non_unique_track_index, python_fixture_with_track_unique_constraint,
-    };
+    use super::{CURRENT_SCHEMA_VERSION, SchemaCompatibility, inspect_database};
+    use crate::migration::migrator;
 
-    const PYTHON_SQLITE_FIXTURE: &str =
-        include_str!("../../../contracts/reference/v1/sqlite-fixture.sql");
+    async fn writable_pool(path: &Path) -> Result<SqlitePool, sqlx::Error> {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(true),
+            )
+            .await
+    }
 
     #[tokio::test]
     async fn missing_database_is_empty_without_creating_it() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
-        let path = directory.path().join("missing.db");
-
+        let path = directory.path().join("app.db");
         let report = inspect_database(&path).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::Empty);
-        assert!(report.migration_required);
         assert!(!report.database_exists);
+        assert_eq!(report.compatibility, SchemaCompatibility::Empty);
         assert!(!path.exists());
         Ok(())
     }
 
     #[tokio::test]
-    async fn frozen_python_schema_is_a_compatible_legacy_shape() -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new()
-            .in_memory(true)
-            .foreign_keys(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        let production_fixture = python_fixture_with_legacy_track_uniqueness(PYTHON_SQLITE_FIXTURE);
-        sqlx::raw_sql(sqlx::AssertSqlSafe(production_fixture.as_str()))
-            .execute(&pool)
-            .await?;
-        sqlx::raw_sql(LEGACY_ALEMBIC_FIXTURE_SQL)
-            .execute(&pool)
-            .await?;
-        sqlx::raw_sql(LEGACY_KNOWN_DEVICES_FIXTURE_SQL)
-            .execute(&pool)
-            .await?;
-
-        let report = inspect_pool(&pool, true).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::CompatibleLegacy);
-        assert!(report.migration_required);
-        assert!(report.errors().next().is_none());
-        assert!(report.issues.iter().any(|issue| {
-            issue.code == "legacy_migration_ledger"
-                && issue.detail.contains("remove the legacy Python Alembic")
-        }));
-        assert!(report.issues.iter().any(|issue| {
-            issue.code == "legacy_known_devices_table"
-                && issue.detail.contains("obsolete Python known-devices")
-        }));
-        assert!(report.issues.iter().any(|issue| {
-            issue.code == "redundant_unique_constraint"
-                && issue.detail.contains("tracks")
-                && issue.detail.contains("path")
-        }));
-        assert!(report.issues.iter().any(|issue| {
-            issue.code == "index_uniqueness_backed_by_constraint"
-                && issue.detail.contains("ix_tracks_path")
-        }));
-        assert!(report.issues.iter().any(|issue| {
-            issue.code == "missing_additive_column"
-                && issue.detail.contains("playback_state.storage_revision")
-        }));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rejects_malformed_legacy_alembic_ledger() -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new().in_memory(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        sqlx::query("CREATE TABLE alembic_version (version_num TEXT)")
-            .execute(&pool)
-            .await?;
-
-        let report = inspect_pool(&pool, true).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
-        assert!(
-            report
-                .errors()
-                .any(|issue| issue.code == "invalid_legacy_migration_ledger")
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rejects_malformed_legacy_known_devices_table() -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new().in_memory(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        sqlx::query("CREATE TABLE known_devices (client_id TEXT PRIMARY KEY)")
-            .execute(&pool)
-            .await?;
-
-        let report = inspect_pool(&pool, true).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
-        assert!(
-            report
-                .errors()
-                .any(|issue| issue.code == "invalid_legacy_known_devices_table")
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rejects_nonredundant_additional_unique_constraint() -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new().in_memory(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        let incompatible_fixture =
-            python_fixture_with_track_unique_constraint(PYTHON_SQLITE_FIXTURE, "title");
-        sqlx::raw_sql(sqlx::AssertSqlSafe(incompatible_fixture.as_str()))
-            .execute(&pool)
-            .await?;
-
-        let report = inspect_pool(&pool, true).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
-        assert!(report.errors().any(|issue| {
-            issue.code == "unique_constraint_mismatch" && issue.detail.contains("tracks")
-        }));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rejects_non_unique_required_index_without_matching_constraint()
-    -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new().in_memory(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        let incompatible_fixture =
-            python_fixture_with_non_unique_track_index(PYTHON_SQLITE_FIXTURE);
-        sqlx::raw_sql(sqlx::AssertSqlSafe(incompatible_fixture.as_str()))
-            .execute(&pool)
-            .await?;
-
-        let report = inspect_pool(&pool, true).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
-        assert!(report.errors().any(|issue| {
-            issue.code == "index_shape_mismatch" && issue.detail.contains("ix_tracks_path")
-        }));
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn rejects_unknown_tables_and_damaged_known_tables() -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new().in_memory(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        sqlx::raw_sql(
-            "CREATE TABLE users (id INTEGER PRIMARY KEY); \
-             CREATE TABLE surprise (secret TEXT);",
+    async fn ledger_decides_current_and_outdated() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let path = directory.path().join("app.db");
+        let pool = writable_pool(&path).await?;
+        sqlx::migrate::Migrator::with_migrations(
+            migrator()
+                .iter()
+                .filter(|migration| migration.version < CURRENT_SCHEMA_VERSION)
+                .cloned()
+                .collect(),
         )
-        .execute(&pool)
+        .run(&pool)
         .await?;
+        let outdated = inspect_database(&path).await?;
+        assert_eq!(outdated.compatibility, SchemaCompatibility::Outdated);
+        assert_eq!(outdated.pending_migrations, vec![CURRENT_SCHEMA_VERSION]);
 
-        let report = inspect_pool(&pool, true).await?;
-
-        assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
-        assert!(report.errors().any(|issue| issue.code == "unknown_table"));
-        assert!(
-            report
-                .errors()
-                .any(|issue| issue.code == "missing_required_column")
+        migrator().run(&pool).await?;
+        pool.close().await;
+        let current = inspect_database(&path).await?;
+        assert_eq!(
+            current.compatibility,
+            SchemaCompatibility::Current,
+            "{current:?}"
         );
+        assert_eq!(current.migration_version, Some(CURRENT_SCHEMA_VERSION));
+        assert!(current.issues.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn rejects_unversioned_edited_and_future_databases() -> Result<(), Box<dyn Error>> {
+        let cases: [(&str, &str); 3] = [
+            (
+                "CREATE TABLE tracks (id INTEGER PRIMARY KEY)",
+                "unversioned_database",
+            ),
+            (
+                "UPDATE _sqlx_migrations SET checksum = X'00' WHERE version = 1",
+                "migration_checksum_mismatch",
+            ),
+            (
+                "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+                 VALUES (9999, 'newer server', 1, X'00', 0)",
+                "future_migration_version",
+            ),
+        ];
+        for (index, (statement, code)) in cases.into_iter().enumerate() {
+            let directory = tempdir()?;
+            let path = directory.path().join("app.db");
+            let pool = writable_pool(&path).await?;
+            if index != 0 {
+                migrator().run(&pool).await?;
+            }
+            sqlx::raw_sql(sqlx::AssertSqlSafe(statement))
+                .execute(&pool)
+                .await?;
+            pool.close().await;
+            let report = inspect_database(&path).await?;
+            assert_eq!(report.compatibility, SchemaCompatibility::Incompatible);
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "{report:?}"
+            );
+        }
         Ok(())
     }
 }

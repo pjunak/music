@@ -1036,10 +1036,6 @@ mod tests {
                 "STATIC_DIR".to_owned(),
                 root.join("missing-static").display().to_string(),
             ),
-            (
-                "DEVICES_FILE".to_owned(),
-                root.join("devices.json").display().to_string(),
-            ),
             ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
             ("MAX_UPLOAD_FILES".to_owned(), "3".to_owned()),
             ("MAX_UPLOAD_FILE_BYTES".to_owned(), "1024".to_owned()),

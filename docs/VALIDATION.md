@@ -72,8 +72,8 @@ cargo deny --manifest-path fuzz/Cargo.toml --locked check
 cargo audit --file fuzz/Cargo.lock --deny warnings
 cargo machete .
 cargo machete fuzz
-node --test .github/scripts/rewrite-tree.test.mts
-node .github/scripts/rewrite-tree.mts final
+node --test .github/scripts/tracked-files.test.mts
+node .github/scripts/tracked-files.mts
 # After building the release image on a Docker host:
 bash .github/scripts/verify-rust-image.sh music:test
 ```

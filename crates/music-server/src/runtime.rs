@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,10 +45,7 @@ use music_media::{
     FilesystemModeCatalogSource, FilesystemModeMutations, FilesystemSfxEffects, LibraryRoot,
     MetadataAdapter, SfxRoot,
 };
-use music_storage::{
-    LegacyDeviceImportOutcome, LegacyDeviceImportStatus, SqliteStorage, SqliteStorageOptions,
-    StorageError,
-};
+use music_storage::{SqliteStorage, SqliteStorageOptions};
 use tokio::net::TcpListener;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing_subscriber::EnvFilter;
@@ -120,7 +116,6 @@ impl AppRuntime {
         health.set_component("database_schema", true, ComponentStatus::Starting);
         health.set_component("playback", true, ComponentStatus::Starting);
         health.set_component("authentication", true, ComponentStatus::Starting);
-        health.set_component("remembered_devices", false, ComponentStatus::Starting);
         health.set_component("library_coordinator", true, ComponentStatus::Starting);
         health.set_component("library", false, ComponentStatus::Starting);
         health.set_component("background_jobs", true, ComponentStatus::Starting);
@@ -163,11 +158,10 @@ impl AppRuntime {
             tracing::info!(
                 schema_before = %migration.schema_before.compatibility,
                 schema_version = migration.schema_after.current_schema_version,
-                "applied the Rust database baseline"
+                "applied pending database migrations"
             );
         }
 
-        initialize_legacy_devices(&storage, &config.devices_file, &health).await?;
         let auth = Arc::new(RuntimeAuth::new(Arc::clone(&storage), &config)?);
         let assistant_repository: Arc<dyn AssistantRepository> = storage.clone();
         let provider_repository: Arc<dyn ProviderRepository> = storage.clone();
@@ -540,38 +534,6 @@ impl AppRuntime {
         self.storage.close().await;
         supervisor_result
     }
-}
-
-async fn initialize_legacy_devices(
-    storage: &SqliteStorage,
-    path: &Path,
-    health: &HealthRegistry,
-) -> Result<(), RuntimeError> {
-    let outcome = match storage.import_legacy_devices_once(path).await {
-        Ok(outcome) => outcome,
-        Err(error @ StorageError::Io { .. }) => {
-            health.set_component("remembered_devices", false, ComponentStatus::Degraded);
-            tracing::warn!(error = %error, "legacy device registry could not be inspected");
-            return Ok(());
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let status = match &outcome {
-        LegacyDeviceImportOutcome::Applied(record)
-        | LegacyDeviceImportOutcome::AlreadyRecorded(record) => Some(record.status),
-        LegacyDeviceImportOutcome::TargetNotEmpty => None,
-    };
-    if matches!(
-        status,
-        Some(LegacyDeviceImportStatus::Corrupt | LegacyDeviceImportStatus::Unsupported)
-    ) {
-        health.set_component("remembered_devices", false, ComponentStatus::Degraded);
-        tracing::warn!(?outcome, "legacy device registry was not importable");
-    } else {
-        health.set_component("remembered_devices", false, ComponentStatus::Ready);
-        tracing::info!(?outcome, "remembered-device storage initialized");
-    }
-    Ok(())
 }
 
 fn supervise_playback(
@@ -1088,7 +1050,7 @@ mod tests {
 
     fn reference_wav() -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
         let fixture: Value = serde_json::from_str(include_str!(
-            "../../../contracts/reference/v1/metadata.examples.json"
+            "../../../contracts/fixtures/metadata.examples.json"
         ))?;
         let encoded = fixture["cases"]
             .as_array()

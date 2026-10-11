@@ -209,7 +209,6 @@ fn ensure_parent_exists(database_path: &Path) -> Result<(), StorageError> {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::path::Path;
 
     use sqlx::Row;
     use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -217,13 +216,6 @@ mod tests {
 
     use super::{CompareAndSwap, SqliteStorage, SqliteStorageOptions};
     use crate::StorageError;
-    use crate::schema::{
-        LEGACY_ALEMBIC_FIXTURE_SQL, LEGACY_KNOWN_DEVICES_FIXTURE_SQL,
-        python_fixture_with_legacy_track_uniqueness,
-    };
-
-    const PYTHON_SQLITE_FIXTURE: &str =
-        include_str!("../../../contracts/reference/v1/sqlite-fixture.sql");
 
     async fn open_test_storage() -> Result<(tempfile::TempDir, SqliteStorage), StorageError> {
         let directory = tempdir().map_err(|source| StorageError::Io {
@@ -234,29 +226,6 @@ mod tests {
         let storage =
             SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?;
         Ok((directory, storage))
-    }
-
-    async fn create_python_fixture(path: &Path) -> Result<(), Box<dyn Error>> {
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .foreign_keys(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await?;
-        let production_fixture = python_fixture_with_legacy_track_uniqueness(PYTHON_SQLITE_FIXTURE);
-        sqlx::raw_sql(sqlx::AssertSqlSafe(production_fixture.as_str()))
-            .execute(&pool)
-            .await?;
-        sqlx::raw_sql(LEGACY_ALEMBIC_FIXTURE_SQL)
-            .execute(&pool)
-            .await?;
-        sqlx::raw_sql(LEGACY_KNOWN_DEVICES_FIXTURE_SQL)
-            .execute(&pool)
-            .await?;
-        pool.close().await;
-        Ok(())
     }
 
     #[tokio::test]
@@ -354,118 +323,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migrates_python_schema_after_verified_backup() -> Result<(), Box<dyn Error>> {
-        let directory = tempdir()?;
-        let database_path = directory.path().join("app.db");
-        create_python_fixture(&database_path).await?;
-        let storage = SqliteStorage::open(SqliteStorageOptions::new(&database_path)).await?;
-
-        let table_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master \
-             WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
-               AND name NOT IN ('_sqlx_migrations', 'alembic_version', 'known_devices')",
-        )
-        .fetch_one(&storage.pool)
-        .await?;
-        assert_eq!(table_count, 28);
-        let legacy_ledger_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master \
-             WHERE type = 'table' AND name = 'alembic_version'",
-        )
-        .fetch_one(&storage.pool)
-        .await?;
-        assert_eq!(legacy_ledger_count, 0);
-        let legacy_known_devices_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master \
-             WHERE type = 'table' AND name = 'known_devices'",
-        )
-        .fetch_one(&storage.pool)
-        .await?;
-        assert_eq!(legacy_known_devices_count, 0);
-
-        let foreign_key_failures = sqlx::query("PRAGMA foreign_key_check")
-            .fetch_all(&storage.pool)
-            .await?;
-        assert!(foreign_key_failures.is_empty());
-
-        let row = sqlx::query("SELECT username, created_at FROM users WHERE id = 1")
-            .fetch_one(&storage.pool)
-            .await?;
-        assert_eq!(row.try_get::<String, _>("username")?, "fixture-user");
-        assert_eq!(
-            row.try_get::<String, _>("created_at")?,
-            "2026-08-27 12:34:56.000000"
-        );
-        let storage_revision: i64 =
-            sqlx::query_scalar("SELECT storage_revision FROM playback_state WHERE id = 1")
-                .fetch_one(&storage.pool)
-                .await?;
-        assert_eq!(storage_revision, 0);
-        let discovered_tracks: i64 =
-            sqlx::query_scalar("SELECT discovered_tracks FROM library_state WHERE id = 1")
-                .fetch_one(&storage.pool)
-                .await?;
-        assert_eq!(discovered_tracks, 1);
-
-        let outcome = storage.migration_outcome();
-        assert!(outcome.migration_applied);
-        assert_eq!(
-            outcome.schema_before.compatibility,
-            crate::SchemaCompatibility::CompatibleLegacy
-        );
-        assert_eq!(
-            outcome.schema_after.compatibility,
-            crate::SchemaCompatibility::Current
-        );
-        let backup = outcome.backup.as_ref().ok_or("expected migration backup")?;
-        assert!(backup.database_path.is_file());
-        assert!(backup.manifest_path.is_file());
-        assert_eq!(backup.sha256.len(), 64);
-        assert!(backup.bytes > 0);
-
-        let backup_report = SqliteStorage::doctor(&backup.database_path).await?;
-        assert_eq!(backup_report.table_count, 18);
-        assert_eq!(
-            backup_report.compatibility,
-            crate::SchemaCompatibility::CompatibleLegacy
-        );
-        let backup_options = SqliteConnectOptions::new()
-            .filename(&backup.database_path)
-            .read_only(true);
-        let backup_pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(backup_options)
-            .await?;
-        let migrated_column_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM pragma_table_info('playback_state') \
-             WHERE name = 'storage_revision'",
-        )
-        .fetch_one(&backup_pool)
-        .await?;
-        assert_eq!(migrated_column_count, 0);
-        let backup_legacy_ledger_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM sqlite_master \
-             WHERE type = 'table' AND name = 'alembic_version'",
-        )
-        .fetch_one(&backup_pool)
-        .await?;
-        assert_eq!(backup_legacy_ledger_count, 1);
-        let backup_legacy_device_name: String =
-            sqlx::query_scalar("SELECT name FROM known_devices WHERE client_id = 'legacy-tv'")
-                .fetch_one(&backup_pool)
-                .await?;
-        assert_eq!(backup_legacy_device_name, "Legacy TV");
-        backup_pool.close().await;
-
-        storage.close().await;
-        drop(storage);
-        let reopened = SqliteStorage::open(SqliteStorageOptions::new(&database_path)).await?;
-        assert!(!reopened.migration_outcome().migration_applied);
-        assert!(reopened.migration_outcome().backup.is_none());
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn refuses_unknown_schema_without_creating_a_backup() -> Result<(), Box<dyn Error>> {
         let directory = tempdir()?;
         let database_path = directory.path().join("app.db");
@@ -490,7 +347,7 @@ mod tests {
         assert!(
             !sibling_names
                 .iter()
-                .any(|name| { name.to_string_lossy().contains(".pre-rust-v") })
+                .any(|name| { name.to_string_lossy().contains(".pre-v") })
         );
         Ok(())
     }

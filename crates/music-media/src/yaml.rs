@@ -241,7 +241,7 @@ mod tests {
     };
 
     const AUTHORED_EXAMPLES: &str =
-        include_str!("../../../contracts/reference/v1/authored-files.examples.json");
+        include_str!("../../../contracts/fixtures/authored-files.examples.json");
 
     #[derive(Deserialize)]
     struct AuthoredFixture {

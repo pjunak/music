@@ -243,13 +243,13 @@ enum CredentialCommand {
 enum ContractCommand {
     /// Regenerate checked-in TypeScript, OpenAPI, and compatibility reports.
     Export {
-        /// Repository root containing contracts/reference and frontend.
+        /// Repository root containing contracts/generated and frontend.
         #[arg(long, default_value = ".", value_name = "PATH")]
         root: PathBuf,
     },
     /// Fail with exit code 2 when checked-in generated contracts have drifted.
     Check {
-        /// Repository root containing contracts/reference and frontend.
+        /// Repository root containing contracts/generated and frontend.
         #[arg(long, default_value = ".", value_name = "PATH")]
         root: PathBuf,
     },
@@ -1258,8 +1258,11 @@ fn print_schema_report(
     );
     println!("foreign-key violations: {}", report.foreign_key_violations);
     println!("migration required: {}", report.migration_required);
+    if !report.pending_migrations.is_empty() {
+        println!("pending migrations: {:?}", report.pending_migrations);
+    }
     for issue in &report.issues {
-        println!("[{}] {}: {}", issue.level, issue.code, issue.detail);
+        println!("[error] {}: {}", issue.code, issue.detail);
     }
     Ok(())
 }

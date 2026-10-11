@@ -302,10 +302,9 @@ expiry or revocation.
 - Rust types derive Serde and TypeScript bindings. Generated TypeScript is committed; CI regenerates
   it and fails on drift. Warnings for unsupported Serde attributes fail the export gate rather than
   being hidden.
-- Axum routes are registered with their OpenAPI definitions. A checked-in semantic OpenAPI baseline
-  detects missing operations, parameters, response statuses, and incompatible schema changes.
-  Intentional endpoint retirements require a `#retired` review entry bound to the exact removed
-  operation, with a reason. Unreviewed removals and security changes continue to fail the gate.
+- Axum routes are registered with their OpenAPI definitions. The generated
+  `contracts/generated/rust/openapi.json` is committed and CI fails on drift, so every HTTP contract
+  change is visible in review.
 - Request rejection uses a single `ApiError` envelope compatible with the frontend's `detail`
   handling. Validation errors remain 422; auth remains 401/403 as currently contracted.
 - Unexpected failures retain a safe `detail`, stable code, and correlation ID. Internal exception
@@ -344,71 +343,36 @@ the manifest records only its one-way fingerprint for pairing checks.
 
 ### Migration bootstrap
 
-The existing database may contain Alembic's standard bookkeeping table and the obsolete SQL-backed
-`known_devices` table that Python later replaced with `devices.json`. The Python runtime did not
-provide the general application migration path required for this cutover. Rust bootstrap therefore:
+The SQLx migration ledger is the schema authority. On every open, the read-only doctor runs
+SQLite quick/foreign-key checks and compares the ledger with the embedded migrations: a failed,
+unknown, future or edited (checksum-mismatched) migration fails closed, and a database with tables
+but no ledger is refused because databases from before the Rust server are not supported. When
+migrations are pending, `VACUUM INTO` first creates a consistent sibling snapshot that is reopened,
+verified, fsynced, SHA-256 hashed and paired with a non-secret JSON manifest; only then does the
+read-write pool open and apply the pending migrations. Missing databases are created directly
+because there is no prior state to back up. `music-cli db doctor` is read-only; `music-cli db
+migrate` takes the same lifetime lock as the server and follows this identical path.
 
-1. opens the database read-write only after an automatic backup succeeds;
-2. inspects tables, columns, indexes, foreign keys, and SQLite version;
-3. accepts both legacy tables only in their exact historical shapes and refuses every other unknown
-   or incompatible shape with a precise `music-cli db doctor` report; the older table-level unique
-   constraint plus non-unique named index is accepted only when their table and columns exactly
-   reproduce a canonical Rust unique index;
-4. creates the SQLx migration ledger and any missing structures, including remembered-device and
-   recovery-journal tables, with idempotent statements;
-5. imports legacy `devices.json` only when the target table is empty and records its fingerprint;
-   and
-6. records the compatibility baseline only after validation succeeds.
+Applied migrations are never edited. Every schema change is a new numbered migration.
 
-Application tables and columns used by the final Python runtime are not dropped or renamed. The
-final-cutover cleanup removes only the validated Alembic bookkeeping table and the obsolete
-`known_devices` table after a verified backup; rollback restores the complete pre-cutover database.
-The current `devices.json` stays untouched for Rust's one-time import. A pre-cutover database copy
-remains mandatory. Redundant historical uniqueness constraints stay in place because they enforce
-the same or stronger invariant and do not require a risky SQLite table rebuild.
+### Tracked files
 
-Baseline v1 implements that bootstrap without first touching the source database: the doctor opens
-the existing file read-only, runs SQLite quick/foreign-key checks, and compares tables, columns,
-unique/check constraints, indexes, and foreign keys against the frozen Python schema plus explicit
-Rust additions. Only the documented Python additive columns and Rust v1 objects may be absent;
-unknown tables/columns or damaged constraints fail closed. For a compatible existing file,
-`VACUUM INTO` creates a consistent sibling snapshot that is reopened read-only, verified, fsynced,
-SHA-256 hashed, and paired with a non-secret JSON manifest before the first read-write pool opens.
-The ordered migrations add the internal playback storage revision, create `remembered_devices`,
-`legacy_device_imports`, and `recovery_journal`, remove the validated Alembic ledger at schema
-version 5, remove the validated obsolete known-device table at version 6, and add the cleanup
-source-policy table at version 7. Missing databases are created directly because there is no prior
-state to back up.
-`music-cli db doctor` is read-only; `music-cli db migrate` takes the same lifetime lock as the
-server and follows this identical path.
-
-### Final-tree boundary
-
-During rewrite acceptance, the Python implementation was frozen and content-fingerprinted as an
-immutable compatibility oracle. After the accepted Linux semantic, performance, fuzz, Unix-process,
-and container run—and the owner's decision to move private-library and physical-device checks after
-cutover—the oracle and transition harness were removed from the production branch.
-
-`.github/scripts/rewrite-tree.mts final` is now a permanent clean-checkout gate. It requires the
-canonical `Dockerfile`, rejects backend and common Python project artifacts, rejects former
-transition-only paths, scans active workflows/operator instructions for stale runtime commands, and
-rejects tracked build output, databases, audio, environments, or key material. Historical ADR prose
-and Rust compatibility fixtures remain valid evidence and are deliberately not mistaken for
-executable Python. Image inspection, gitleaks, and pinned `cargo-machete` checks remain separate
-gates because a source-tree allowlist cannot prove those properties.
+`.github/scripts/tracked-files.mts` rejects tracked build output, databases, audio, environment
+files and key material. Image inspection, gitleaks, and pinned `cargo-machete` checks remain
+separate gates.
 
 ### Compatibility-sensitive data
 
 - Existing Argon2 password hashes are verified directly by the Rust Argon2 implementation.
 - Provider credentials retain AES-256-GCM, 12-byte nonces, URL-safe base64, and the exact
   `assistant-provider-credential/v1:<connection_id>` associated data. Golden cross-language tests
-  prove decrypt/encrypt compatibility before cutover.
+  ([`crypto-vectors.json`](../contracts/fixtures/crypto-vectors.json)) keep decrypt/encrypt
+  compatibility with credentials stored before the rewrite.
 - Existing JSON state and job documents are read through tolerant persisted DTOs, normalized, and
   written through strict current DTOs.
 - Unknown historical job kinds remain listable rather than making job history unreadable.
-- Remembered devices become SQLite-owned operational records. Legacy `devices.json` is a one-time
-  migration input and rollback artifact; `music-cli devices export/import` provides explicit
-  recovery without retaining a second mutable runtime store.
+- Remembered devices are SQLite-owned operational records; `music-cli devices export/import`
+  provides explicit recovery without a second mutable runtime store.
 - Mode YAML remains operator-authored. Reads are typed and bounded; writes use stage, fsync, atomic
   rename, and a recoverable journal for multi-file authoring commits.
 

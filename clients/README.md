@@ -104,8 +104,8 @@ following state. Reconnect on close and repeat from step 2.
 ## The fields you actually need
 
 `PlayerState` is large; an output only cares about a handful (see
-[`music-protocol`](../crates/music-protocol/src/messages.rs) or the checked-in
-[`WebSocket schema`](../contracts/reference/v1/websocket-messages.schema.json) for the full shape):
+[`music-protocol`](../crates/music-protocol/src/messages.rs) or the generated
+[TypeScript bindings](../frontend/src/generated/protocol.ts) for the full shape):
 
 | Field | Meaning |
 |---|---|

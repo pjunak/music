@@ -102,7 +102,7 @@ const APPROVED_SPAWN_BLOCKING_COUNTS: ReadonlyMap<string, number> = new Map([
   ["crates/music-server/src/bin/music-cli.rs", 1],
   ["crates/music-server/src/blocking.rs", 1],
   ["crates/music-storage/src/backup.rs", 1],
-  ["crates/music-storage/src/devices.rs", 3],
+  ["crates/music-storage/src/devices.rs", 2],
   ["crates/music-storage/src/migration.rs", 2],
 ]);
 

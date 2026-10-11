@@ -81,15 +81,15 @@ jobs:
           "$MUSIC_TEST_FFMPEG" -version
           "$MUSIC_TEST_FFPROBE" -version
 
-      - name: Check architecture and final repository tree
+      - name: Check architecture and tracked files
         run: |
           node --test tools/*.test.mts
           node --test .github/scripts/workflow-policy.test.mts
           node --test .github/scripts/publish-output.test.mts
           node --test .github/scripts/rust-architecture.test.mts
           node .github/scripts/rust-architecture.mts
-          node --test .github/scripts/rewrite-tree.test.mts
-          node .github/scripts/rewrite-tree.mts final
+          node --test .github/scripts/tracked-files.test.mts
+          node .github/scripts/tracked-files.mts
 
       - name: Check formatting and generated contracts
         run: |

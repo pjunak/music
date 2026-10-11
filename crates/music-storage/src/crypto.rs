@@ -313,7 +313,7 @@ mod tests {
     use super::{CredentialVault, hash_password, verify_password};
 
     const COMPATIBILITY_DATA: &str =
-        include_str!("../../../contracts/reference/v1/compatibility-data.json");
+        include_str!("../../../contracts/fixtures/crypto-vectors.json");
 
     #[derive(Deserialize)]
     struct CompatibilityFixture {

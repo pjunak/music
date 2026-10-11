@@ -393,7 +393,7 @@ mod tests {
 
     const CORPUS: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../contracts/reference/v1/websocket-messages.examples.json"
+        "/../../contracts/fixtures/websocket-messages.examples.json"
     ));
 
     #[derive(Deserialize)]
@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn python_message_corpus_round_trips_canonically() -> Result<(), Box<dyn Error>> {
+    fn message_corpus_round_trips_canonically() -> Result<(), Box<dyn Error>> {
         let corpus: Corpus = serde_json::from_str(CORPUS)?;
         let mut kinds = BTreeSet::new();
 
@@ -442,12 +442,12 @@ mod tests {
     }
 
     #[test]
-    fn python_message_rejection_corpus_is_rejected() -> Result<(), Box<dyn Error>> {
+    fn message_rejection_corpus_is_rejected() -> Result<(), Box<dyn Error>> {
         let corpus: Corpus = serde_json::from_str(CORPUS)?;
         for case in corpus.invalid {
             assert!(
                 serde_json::from_value::<ServerMessage>(case.input).is_err(),
-                "Rust accepted Python-rejected case {}",
+                "accepted rejected case {}",
                 case.id
             );
         }

@@ -450,10 +450,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                 Err(PlaybackActorError::DisconnectedOutput(device_ids)) => {
                     queue_error(
                         writer,
-                        format!(
-                            "device(s) not connected: {}",
-                            python_string_list(&device_ids)
-                        ),
+                        format!("device(s) not connected: {}", device_ids.join(", ")),
                         None,
                         cancellation,
                     )
@@ -705,10 +702,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
                         .cloned()
                         .collect::<Vec<_>>();
                     if !unknown.is_empty() {
-                        return Err(format!(
-                            "unknown preset(s): {}",
-                            python_string_list(&unknown)
-                        ));
+                        return Err(format!("unknown preset(s): {}", unknown.join(", ")));
                     }
                     let crossfade_ms = loaded
                         .and_then(|mode| {
@@ -1107,15 +1101,6 @@ fn domain_track_ids(track_ids: Vec<i64>) -> Result<Vec<music_domain::TrackId>, &
             music_domain::TrackId::new(track_id).map_err(|_| "track ID must be positive")
         })
         .collect()
-}
-
-fn python_string_list(values: &[String]) -> String {
-    let values = values
-        .iter()
-        .map(|value| format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'")))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{values}]")
 }
 
 fn playlist_dependencies<'a>(
@@ -1776,6 +1761,7 @@ mod tests {
     use axum::http::{HeaderValue, Request, StatusCode};
     use futures_util::{SinkExt, StreamExt};
     use music_application::auth::{AuthRepository, UnixSeconds};
+    use music_application::devices::RememberedDeviceRepository;
     use music_application::library::ReconciliationStatus;
     use music_protocol::{ErrorCode, ServerMessage};
     use music_storage::{SqliteStorage, SqliteStorageOptions};
@@ -1811,10 +1797,6 @@ mod tests {
                 "STATIC_DIR".to_owned(),
                 root.join("missing-static").display().to_string(),
             ),
-            (
-                "DEVICES_FILE".to_owned(),
-                root.join("devices.json").display().to_string(),
-            ),
             ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
         ]))
         .map_err(Into::into)
@@ -1838,6 +1820,20 @@ mod tests {
         )
         .await
         .map_err(|error| -> Box<dyn Error> { error })?;
+        storage.close().await;
+        Ok(())
+    }
+
+    async fn seed_remembered_output(
+        root: &Path,
+        client_id: &str,
+        name: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(root.join("app.db"))).await?;
+        storage
+            .upsert_device(client_id, name, true)
+            .await
+            .map_err(|error| -> Box<dyn Error> { error })?;
         storage.close().await;
         Ok(())
     }
@@ -2085,10 +2081,7 @@ mod tests {
         let directory = tempdir()?;
         let token = "authenticated-test-session-token";
         seed_session(directory.path(), token).await?;
-        std::fs::write(
-            directory.path().join("devices.json"),
-            r#"{"living-room":{"name":"Living Room TV","is_output":true}}"#,
-        )?;
+        seed_remembered_output(directory.path(), "living-room", "Living Room TV").await?;
         let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
         let control_router = runtime.router()?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -2312,7 +2305,7 @@ mod tests {
         assert!(matches!(
             wait_for_protocol_message(&mut socket, "the disconnected-output error", |message| {
                 matches!(message, ServerMessage::Error { detail, .. }
-                    if detail == "device(s) not connected: ['ghost']")
+                    if detail == "device(s) not connected: ghost")
             })
             .await?,
             ServerMessage::Error { .. }
@@ -2392,7 +2385,7 @@ mod tests {
             .await?;
         let _ = wait_for_protocol_message(&mut socket, "the unknown-preset error", |message| {
             matches!(message, ServerMessage::Error { detail, .. }
-                if detail == "unknown preset(s): ['missing']")
+                if detail == "unknown preset(s): missing")
         })
         .await?;
 

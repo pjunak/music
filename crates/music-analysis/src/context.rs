@@ -848,15 +848,15 @@ fn onset_strengths(levels: &[f64]) -> Vec<f64> {
 }
 
 fn estimate_tempo(levels: &[f64], windows_per_second: f64) -> (Option<f64>, f64) {
-    if levels.len() < python_round_usize(windows_per_second * 12.0) {
+    if levels.len() < round_half_even_usize(windows_per_second * 12.0) {
         return (None, 0.0);
     }
     let envelope = onset_strengths(levels);
     if envelope.iter().map(|value| value * value).sum::<f64>() <= 1e-10 {
         return (None, 0.0);
     }
-    let min_lag = python_round_usize(windows_per_second * 60.0 / 200.0).max(1);
-    let max_lag = (envelope.len() / 2).min(python_round_usize(windows_per_second * 60.0 / 40.0));
+    let min_lag = round_half_even_usize(windows_per_second * 60.0 / 200.0).max(1);
+    let max_lag = (envelope.len() / 2).min(round_half_even_usize(windows_per_second * 60.0 / 40.0));
     let mut candidates = Vec::new();
     for lag in min_lag..=max_lag {
         let left = &envelope[lag..];
@@ -918,8 +918,8 @@ struct TempoPoint {
 
 fn tempo_curve(short_levels: &[f64], duration_s: f64) -> Vec<TempoPoint> {
     let windows_per_second = 20.0;
-    let window = python_round_usize(windows_per_second * 30.0);
-    let hop = python_round_usize(windows_per_second * 15.0);
+    let window = round_half_even_usize(windows_per_second * 30.0);
+    let hop = round_half_even_usize(windows_per_second * 15.0);
     if short_levels.len() < window {
         let (tempo, confidence) = estimate_tempo(short_levels, windows_per_second);
         return tempo.map_or_else(Vec::new, |bpm| {
@@ -1025,7 +1025,7 @@ fn timeline_frames(frames: &[Frame], short_levels: &[f64]) -> Vec<TimelineRow> {
             .collect::<Vec<_>>(),
     );
     let strengths = onset_strengths(short_levels);
-    let short_per_frame = python_round_usize(CONTEXT_FRAME_SECONDS / 0.05).max(1);
+    let short_per_frame = round_half_even_usize(CONTEXT_FRAME_SECONDS / 0.05).max(1);
     let mut previous_profile = None;
     frames
         .iter()
@@ -1190,8 +1190,8 @@ fn trajectory(values: &[f64]) -> Value {
     );
     let quarters = [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)].map(
         |(start_fraction, end_fraction)| {
-            let start_index = python_round_usize(count as f64 * start_fraction);
-            let end_index = python_round_usize(count as f64 * end_fraction)
+            let start_index = round_half_even_usize(count as f64 * start_fraction);
+            let end_index = round_half_even_usize(count as f64 * end_fraction)
                 .max(start_index.saturating_add(1))
                 .min(count);
             mean(&values[start_index.min(count - 1)..end_index])
@@ -1248,7 +1248,7 @@ fn trajectory(values: &[f64]) -> Value {
 }
 
 fn downsample_timeline(rows: &[TimelineRow]) -> Vec<Map<String, Value>> {
-    let group_size = python_round_usize(CONTEXT_TIMELINE_SECONDS / CONTEXT_FRAME_SECONDS).max(1);
+    let group_size = round_half_even_usize(CONTEXT_TIMELINE_SECONDS / CONTEXT_FRAME_SECONDS).max(1);
     rows.chunks(group_size)
         .map(|group| {
             object(json!({
@@ -1323,7 +1323,7 @@ fn change_boundaries(rows: &[TimelineRow]) -> Vec<usize> {
                     .collect::<Vec<_>>(),
             ),
     );
-    let minimum = python_round_usize(MIN_SECTION_SECONDS / CONTEXT_FRAME_SECONDS).max(2);
+    let minimum = round_half_even_usize(MIN_SECTION_SECONDS / CONTEXT_FRAME_SECONDS).max(2);
     let mut ordered = scores;
     ordered.sort_by(|left, right| {
         right
@@ -1876,7 +1876,7 @@ fn round_to(value: f64, digits: i32) -> f64 {
     (value * factor).round_ties_even() / factor
 }
 
-fn python_round_usize(value: f64) -> usize {
+fn round_half_even_usize(value: f64) -> usize {
     value.round_ties_even().max(0.0) as usize
 }
 
