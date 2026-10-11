@@ -39,27 +39,6 @@ dist-ssr/
 Thumbs.db
 Desktop.ini
 
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.venv/
-venv/
-env/
-ENV/
-env.bak/
-venv.bak/
-.ruff_cache/
-.mypy_cache/
-.pyright/
-.pytype/
-.hypothesis/
-.dmypy.json
-dmypy.json
-.python-version
-.tool-versions
-
 # Rust
 /target/
 **/target/
@@ -95,19 +74,12 @@ devices.json
 .devices.json.tmp
 
 # Media / runtime content (never commit user music or uploaded files).
-# Anchored so we don't shadow code dirs like backend/app/library/. The
-# backend/ pair covers the dev defaults (MUSIC_DIR=./music run from backend/).
+# Anchored so code directories with the same names are not shadowed.
 /music/
 /sfx/
-/backend/music/
-/backend/sfx/
 modes/*/cache/
 
 # Testing & Coverage
-.coverage
-.coverage.*
-htmlcov/
-.pytest_cache/
 coverage/
 
 # Frontend cache
