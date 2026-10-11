@@ -6,7 +6,7 @@ use std::time::Instant;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{ConnectInfo, Extension, Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use music_application::assistant::{
     MODEL_ROLES, ModelConformanceStatus, ModelEvaluationRepository, ModelEvaluationStatus,
@@ -18,7 +18,7 @@ use music_application::assistant::{
     ProviderVerificationView, TAGGING_QUALITY_EVALUATION_ID, ThinkingMode,
     assistant_runtime_contract_digest, tag_quality_suite,
 };
-use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::auth::UnixSeconds;
 use music_application::jobs::JobStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -30,7 +30,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use zeroize::Zeroizing;
 
-use crate::auth::{PasswordConfirmationError, current_session, format_rfc3339};
+use crate::auth::{Operator, PasswordConfirmationError, format_rfc3339};
 use crate::error::{ApiError, HttpValidationErrorBody, openapi_datetime};
 use crate::http::HttpState;
 use crate::jobs::{BackgroundJobResponse, job_response, map_job_error};
@@ -897,9 +897,8 @@ pub(crate) fn provider_router() -> OpenApiRouter<HttpState> {
 )]
 async fn framework_status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ProviderFrameworkStatusResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let status = providers(&state)?.storage_status().await?;
     Ok(Json(status.into()))
 }
@@ -913,9 +912,8 @@ async fn framework_status(
 )]
 async fn initialize_credential_storage(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<(StatusCode, Json<ProviderFrameworkStatusResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let status = providers(&state)?.initialize_storage().await?;
     Ok((StatusCode::CREATED, Json(status.into())))
 }
@@ -933,11 +931,10 @@ async fn initialize_credential_storage(
 )]
 async fn reset_credential_storage(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(current): Operator,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     payload: Result<Json<ProviderCredentialStorageResetRequest>, JsonRejection>,
 ) -> Result<Json<ProviderCredentialStorageResetResponse>, ApiError> {
-    let current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=256).contains(&payload.current_password.chars().count()) {
         return Err(ApiError::validation());
@@ -987,9 +984,8 @@ async fn reset_credential_storage(
 )]
 async fn list_connections(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<Vec<ProviderConnectionResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let values = providers(&state)?
         .service
         .list_connections()
@@ -1016,10 +1012,9 @@ async fn list_connections(
 )]
 async fn create_connection(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ProviderConnectionCreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ProviderConnectionResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let value = providers(&state)?
         .service
@@ -1043,11 +1038,10 @@ async fn create_connection(
 )]
 async fn update_connection(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     connection_id: Result<Path<String>, PathRejection>,
     payload: Result<Json<ProviderConnectionUpdateRequest>, JsonRejection>,
 ) -> Result<Json<ProviderConnectionResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(connection_id) = connection_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let value = providers(&state)?
@@ -1071,10 +1065,9 @@ async fn update_connection(
 )]
 async fn delete_connection(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     connection_id: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(connection_id) = connection_id.map_err(|_| ApiError::validation())?;
     providers(&state)?
         .service
@@ -1097,10 +1090,9 @@ async fn delete_connection(
 )]
 async fn delete_connection_credential(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     connection_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ProviderConnectionResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(connection_id) = connection_id.map_err(|_| ApiError::validation())?;
     let value = providers(&state)?
         .service
@@ -1123,10 +1115,9 @@ async fn delete_connection_credential(
 )]
 async fn verify_connection(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     connection_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ProviderVerificationResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(connection_id) = connection_id.map_err(|_| ApiError::validation())?;
     let providers = providers(&state)?;
     let target = providers
@@ -1152,9 +1143,8 @@ async fn verify_connection(
 )]
 async fn list_roles(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<Vec<ModelRoleResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let values = providers(&state)?
         .service
         .list_model_roles()
@@ -1181,10 +1171,9 @@ async fn list_roles(
 )]
 async fn list_role_evaluations(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     role_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<Vec<ModelQualityEvaluationResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(role_id) = role_id.map_err(|_| ApiError::validation())?;
     let values = providers(&state)?
         .quality
@@ -1215,10 +1204,9 @@ async fn list_role_evaluations(
 )]
 async fn start_role_evaluation(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     identifiers: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Path((role_id, evaluation_id)) = identifiers.map_err(|_| ApiError::validation())?;
     let execution = providers(&state)?
         .quality
@@ -1261,10 +1249,9 @@ async fn start_role_evaluation(
 )]
 async fn start_failed_scenario_evaluation(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     identifiers: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Path((role_id, evaluation_id)) = identifiers.map_err(|_| ApiError::validation())?;
     let (execution, record) = providers(&state)?
         .quality
@@ -1430,10 +1417,9 @@ fn retest_baseline_unavailable() -> ApiError {
 )]
 async fn test_role_model(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     role_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<ModelConformanceResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(role_id) = role_id.map_err(|_| ApiError::validation())?;
     let providers = providers(&state)?;
     let target = providers
@@ -1488,11 +1474,10 @@ async fn test_role_model(
 )]
 async fn update_role(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     role_id: Result<Path<String>, PathRejection>,
     payload: Result<Json<ModelRoleUpdateRequest>, JsonRejection>,
 ) -> Result<Json<ModelRoleResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(role_id) = role_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let value = providers(&state)?
@@ -1526,10 +1511,9 @@ async fn update_role(
 )]
 async fn delete_role(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     role_id: Result<Path<String>, PathRejection>,
 ) -> Result<Response, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(role_id) = role_id.map_err(|_| ApiError::validation())?;
     providers(&state)?
         .service
@@ -1544,12 +1528,6 @@ fn providers(state: &HttpState) -> Result<&RuntimeProviders, ApiError> {
         .providers
         .as_deref()
         .ok_or_else(ApiError::service_unavailable)
-}
-
-async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {
-    current_session(state, headers, SessionTouch::UpdateLastSeen)
-        .await
-        .map(|_| ())
 }
 
 pub(crate) fn map_provider_error(error: ProviderServiceError) -> ApiError {
@@ -1865,7 +1843,6 @@ const fn default_max_output_tokens() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::error::Error;
     use std::path::Path;
 
@@ -1889,34 +1866,14 @@ mod tests {
     use crate::{AppConfig, AppRuntime};
 
     fn runtime_config(root: &Path) -> Result<AppConfig, crate::ConfigError> {
-        AppConfig::from_values(&BTreeMap::from([
-            (
-                "DATABASE_URL".to_owned(),
-                format!("sqlite:///{}", root.join("app.db").display()),
-            ),
-            (
-                "MUSIC_DIR".to_owned(),
-                root.join("music").display().to_string(),
-            ),
-            (
-                "SFX_LIBRARY_DIR".to_owned(),
-                root.join("sfx").display().to_string(),
-            ),
-            (
-                "MODES_DIR".to_owned(),
-                root.join("modes").display().to_string(),
-            ),
-            (
-                "STATIC_DIR".to_owned(),
-                root.join("missing-static").display().to_string(),
-            ),
-            ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
-            ("SESSION_COOKIE_NAME".to_owned(), "test_session".to_owned()),
-            (
-                "ASSISTANT_CREDENTIAL_KEY".to_owned(),
-                URL_SAFE.encode([7_u8; 32]),
-            ),
-        ]))
+        let key = URL_SAFE.encode([7_u8; 32]);
+        crate::test_support::test_config(
+            root,
+            &[
+                ("SESSION_COOKIE_NAME", "test_session"),
+                ("ASSISTANT_CREDENTIAL_KEY", &key),
+            ],
+        )
     }
 
     async fn body_json(

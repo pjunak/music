@@ -37,6 +37,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
+use crate::auth::Operator;
 use crate::blocking::{BlockingMediaError, BlockingMediaExecutor};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_integer,
@@ -699,10 +700,9 @@ fn insert_number_update(
 )]
 async fn search(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<SearchQuery>, QueryRejection>,
 ) -> Result<Json<SearchResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let request = LibrarySearch::new(
         query.q,
@@ -744,10 +744,9 @@ async fn search(
 )]
 async fn tree(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<TreeQuery>, QueryRejection>,
 ) -> Result<Json<TreeResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let path = query.path.unwrap_or_default();
     let directory = if path.is_empty() {
@@ -777,9 +776,8 @@ async fn tree(
 )]
 async fn folders(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<FoldersResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let library = library(&state)?;
     let root = library.root.clone();
     let directories = library
@@ -822,10 +820,9 @@ async fn folders(
 )]
 async fn create_folder(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<FolderCreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<FolderResponse>), ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.path.is_empty() {
         return Err(ApiError::validation());
@@ -852,10 +849,9 @@ async fn create_folder(
 )]
 async fn delete_folder(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<FolderDeleteQuery>, QueryRejection>,
 ) -> Result<Json<FolderDeleteResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let path =
         LibraryPath::parse(query.path).map_err(|_| ApiError::bad_request("invalid folder path"))?;
@@ -881,10 +877,9 @@ async fn delete_folder(
 )]
 async fn rename_folder(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<FolderRenameRequest>, JsonRejection>,
 ) -> Result<Json<FolderResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.src.is_empty() || payload.dst.is_empty() {
         return Err(ApiError::validation());
@@ -961,10 +956,9 @@ async fn tracks_batch(
 )]
 async fn bulk_update_metadata(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<BulkMetadataUpdateRequest>, JsonRejection>,
 ) -> Result<Json<BulkMetadataResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=1000).contains(&payload.track_ids.len()) {
         return Err(ApiError::validation());
@@ -1031,10 +1025,9 @@ async fn bulk_update_metadata(
 )]
 async fn bulk_move_tracks(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<BulkMoveRequest>, JsonRejection>,
 ) -> Result<Json<BulkMoveResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=1000).contains(&payload.track_ids.len()) {
         return Err(ApiError::validation());
@@ -1106,10 +1099,9 @@ async fn bulk_move_tracks(
 )]
 async fn bulk_delete_tracks(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<BulkDeleteRequest>, JsonRejection>,
 ) -> Result<Json<BulkDeleteResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=1000).contains(&payload.track_ids.len()) {
         return Err(ApiError::validation());
@@ -1183,11 +1175,10 @@ async fn track(
 )]
 async fn update_metadata(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     track_id: Result<Path<i64>, PathRejection>,
     payload: Result<Json<TrackMetadataUpdateRequest>, JsonRejection>,
 ) -> Result<Json<TrackResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track_id =
         TrackId::new(raw_track_id).map_err(|_| ApiError::plain_not_found("track not found"))?;
@@ -1213,11 +1204,10 @@ async fn update_metadata(
 )]
 async fn move_track(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     track_id: Result<Path<i64>, PathRejection>,
     payload: Result<Json<TrackMoveRequest>, JsonRejection>,
 ) -> Result<Json<TrackResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let current = indexed_track(&state, raw_track_id).await?;
@@ -1246,10 +1236,9 @@ async fn move_track(
 )]
 async fn delete_track(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     track_id: Result<Path<i64>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track_id =
         TrackId::new(raw_track_id).map_err(|_| ApiError::plain_not_found("track not found"))?;
@@ -1380,11 +1369,10 @@ async fn cover(
 )]
 async fn upload(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<UploadQuery>, QueryRejection>,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let mut multipart = multipart.map_err(|_| ApiError::validation())?;
     let library = library(&state)?;
@@ -1472,10 +1460,9 @@ async fn upload(
 )]
 async fn upload_check(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<UploadCheckRequest>, JsonRejection>,
 ) -> Result<Json<UploadCheckResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let root = library(&state)?.root.clone();
     let collisions = library(&state)?
@@ -1516,9 +1503,8 @@ fn map_media_worker_error(error: BlockingMediaError) -> ApiError {
 )]
 async fn rescan(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<RescanResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let summary = library(&state)?
         .coordinator
         .reconcile()

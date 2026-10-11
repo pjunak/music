@@ -1,3 +1,4 @@
+use crate::auth::Operator;
 use crate::{
     error::{ApiError, HttpValidationErrorBody},
     http::HttpState,
@@ -6,10 +7,9 @@ use crate::{
 use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
 };
 use music_application::assistant::{LIBRARY_CLEANUP_DISCLOSURE, LIBRARY_CLEANUP_QUALITY_ID};
-use music_application::auth::SessionTouch;
 use music_application::cleanup_enrichment::ai::{CLEANUP_AI_JOB_KIND, CleanupAiParameters};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -38,9 +38,8 @@ struct CleanupModelStatus {
     responses((status = 200, body = CleanupModelStatus)), tag = "library")]
 async fn status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<CleanupModelStatus>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let execution = match &state.providers {
         Some(providers) => providers
             .quality_service()
@@ -85,10 +84,9 @@ struct CleanupModelStart {
     responses((status = 202, body = BackgroundJobResponse), (status = 422, body = HttpValidationErrorBody)), tag = "library")]
 async fn start(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<CleanupModelStart>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !payload.consent
         || payload.disclosure_version != LIBRARY_CLEANUP_DISCLOSURE

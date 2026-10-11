@@ -10,15 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::State;
+use axum::http::Response;
 use axum::http::header::{
     CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, HeaderValue,
 };
-use axum::http::{HeaderMap, Response};
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use futures_util::stream;
-use music_application::auth::SessionTouch;
 use music_storage::{
     CredentialVault, CryptoError, InstanceLock, SchemaCompatibility, SecretString, SqliteStorage,
     StorageError, inspect_database,
@@ -36,7 +35,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::auth::current_session;
+use crate::auth::Operator;
 use crate::config::AppConfig;
 use crate::error::ApiError;
 use crate::http::HttpState;
@@ -1749,9 +1748,8 @@ pub(crate) fn admin_router() -> OpenApiRouter<HttpState> {
 )]
 async fn download_backup(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(_current): Operator,
 ) -> Result<Response<Body>, ApiError> {
-    let _current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let service = state
         .backup
         .as_ref()

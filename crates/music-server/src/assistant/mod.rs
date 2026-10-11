@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use music_application::ErrorChain;
 use music_application::assistant::{
     AnalysisReviewDecision, AnalysisReviewTarget, AssistantService, AssistantServiceError,
@@ -17,7 +17,7 @@ use music_application::assistant::{
     TagVocabularySnapshot, TrackContextDetail, VoiceAnalyzerStatus, catalog_signature,
     model_tag_source_signature,
 };
-use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::auth::UnixSeconds;
 use music_application::jobs::JobStatus;
 use music_domain::TrackId;
 use serde::{Deserialize, Serialize};
@@ -31,7 +31,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::analysis::{ContextAnalysisParameters, ContextScopeKind, ContextScopeParameters};
-use crate::auth::{current_session, format_rfc3339};
+use crate::auth::{Operator, format_rfc3339};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_integer, openapi_nullable_datetime, openapi_number,
 };
@@ -1005,10 +1005,9 @@ struct ModelBatchStatusResponse {
 #[utoipa::path(get, path = "/assistant/library-tags/model-batches/{batch_id}", params(("batch_id" = String, Path)), responses((status = 200, body = ModelBatchStatusResponse)), tag = "assistant-tags")]
 async fn model_batch_status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(batch_id): Path<String>,
 ) -> Result<Json<ModelBatchStatusResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let batch = state
         .providers
         .as_ref()
@@ -1030,11 +1029,10 @@ async fn model_batch_status(
 #[utoipa::path(post, path = "/assistant/library-tags/model-batches/{batch_id}/actions", params(("batch_id" = String, Path)), request_body = ModelBatchActionRequest, responses((status = 202, body = BackgroundJobResponse)), tag = "assistant-tags")]
 async fn model_batch_action(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(batch_id): Path<String>,
     payload: Result<Json<ModelBatchActionRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if batch_id.len() != 32
         || !batch_id.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -1323,10 +1321,9 @@ pub(crate) fn assistant_router() -> OpenApiRouter<HttpState> {
 )]
 async fn start_library_context_analysis(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<LibraryContextStartRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let parameters = ContextAnalysisParameters {
         force: payload.force,
@@ -1359,9 +1356,8 @@ async fn start_library_context_analysis(
 )]
 async fn library_context_summary(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<LibraryContextSummaryResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let summary = analysis_service(&state)?
         .context_summary()
         .await
@@ -1382,10 +1378,9 @@ async fn library_context_summary(
 )]
 async fn library_track_context(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     track_id: Result<Path<i128>, PathRejection>,
 ) -> Result<Json<TrackContextDetailResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track_id = i64::try_from(track_id)
         .ok()
@@ -1412,10 +1407,9 @@ async fn library_track_context(
 )]
 async fn suggest_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<PlaylistSuggestionRequestWire>, JsonRejection>,
 ) -> Result<Json<PlaylistSuggestionResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let request = playlist_request(payload)?;
     let suggestion = service(&state)?
@@ -1434,9 +1428,8 @@ async fn suggest_playlist(
 )]
 async fn model_playlist_status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ModelPlaylistAvailabilityResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let role = model_role_availability(&state, "playlist_planner", "playlist-quality-v1").await?;
     Ok(Json(ModelPlaylistAvailabilityResponse {
         available: role.reason_code.is_none(),
@@ -1463,10 +1456,9 @@ async fn model_playlist_status(
 )]
 async fn start_model_playlist_suggestion(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelPlaylistSuggestionStartRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.disclosure_version != "assistant-playlist-model-disclosure/v4" || !payload.consent {
         return Err(ApiError::validation());
@@ -1511,9 +1503,8 @@ async fn start_model_playlist_suggestion(
 )]
 async fn model_eq_status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ModelEqAvailabilityResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let role = model_role_availability(&state, "eq_assistant", "eq-quality-v1").await?;
     Ok(Json(ModelEqAvailabilityResponse {
         available: role.reason_code.is_none(),
@@ -1540,10 +1531,9 @@ async fn model_eq_status(
 )]
 async fn start_model_eq_draft(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelEqDraftStartRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(mut payload) = payload.map_err(|_| ApiError::validation())?;
     payload.request.name = payload.request.name.trim().to_owned();
     payload.request.goal = payload.request.goal.trim().to_owned();
@@ -1718,9 +1708,8 @@ fn eq_disclosure() -> ModelEqDisclosureResponse {
 )]
 async fn model_tagging_status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ModelTaggingAvailabilityResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     Ok(Json(
         model_tagging_availability(
             &state,
@@ -1747,10 +1736,9 @@ async fn model_tagging_status(
 )]
 async fn plan_model_tagging(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelTaggingPlanRequest>, JsonRejection>,
 ) -> Result<Json<ModelTaggingAvailabilityResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let scope = payload.scope.into_parameters()?;
     Ok(Json(
@@ -1779,10 +1767,9 @@ async fn plan_model_tagging(
 )]
 async fn start_model_tagging(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelTaggingStartRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.disclosure_version != "assistant-model-music-tagging-disclosure/v16"
         || !payload.consent
@@ -2128,9 +2115,8 @@ fn model_tagging_disclosure(
 )]
 async fn tag_catalog(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ManualTagCatalogResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let service = service(&state)?;
     let usage = service.tag_usage().await.map_err(map_assistant_error)?;
     let vocabulary = service.vocabulary().await.map_err(map_assistant_error)?;
@@ -2165,9 +2151,8 @@ async fn tag_catalog(
 )]
 async fn get_tag_vocabulary(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<TagVocabularyResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let snapshot = service(&state)?
         .vocabulary()
         .await
@@ -2188,10 +2173,9 @@ async fn get_tag_vocabulary(
 )]
 async fn update_tag_vocabulary(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<TagVocabularyUpdateRequest>, JsonRejection>,
 ) -> Result<Json<TagVocabularyResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let document = TagVocabularyDocument {
         schema_version: payload.schema_version,
@@ -2213,9 +2197,8 @@ async fn update_tag_vocabulary(
 )]
 async fn model_tag_cleanup_status(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ModelTagCleanupAvailabilityResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let role = model_role_availability(&state, "tag_cleanup", "tag-cleanup-quality-v1").await?;
     let assistant = service(&state)?;
     let usage = assistant.tag_usage().await.map_err(map_assistant_error)?;
@@ -2267,10 +2250,9 @@ async fn model_tag_cleanup_status(
 )]
 async fn start_model_tag_cleanup(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelTagCleanupStartRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.disclosure_version != "assistant-model-tag-cleanup-disclosure/v3" || !payload.consent
     {
@@ -2332,10 +2314,9 @@ async fn start_model_tag_cleanup(
 )]
 async fn apply_model_tag_cleanup(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelTagCleanupApplyRequest>, JsonRejection>,
 ) -> Result<Json<TagCleanupApplyResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !valid_sha256(&payload.catalog_signature)
         || !valid_sha256(&payload.vocabulary_fingerprint)
@@ -2518,9 +2499,8 @@ fn map_model_cleanup_apply_error(error: AssistantServiceError) -> ApiError {
 )]
 async fn preview_tag_cleanup(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<TagCleanupPreviewResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let preview = service(&state)?
         .cleanup_preview()
         .await
@@ -2559,10 +2539,9 @@ async fn preview_tag_cleanup(
 )]
 async fn apply_tag_cleanup(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<TagCleanupApplyRequest>, JsonRejection>,
 ) -> Result<Json<TagCleanupApplyResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let requested_items = payload.items.len();
     let outcome = service(&state)?
@@ -2598,10 +2577,9 @@ async fn apply_tag_cleanup(
 )]
 async fn rename_tag(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ManualTagRenameRequest>, JsonRejection>,
 ) -> Result<Json<ManualTagRenameResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let outcome = service(&state)?
         .rename_tag(&payload.source, &payload.target)
@@ -2623,10 +2601,9 @@ async fn rename_tag(
 )]
 async fn patch_tags_bulk(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<BulkManualTagPatchRequest>, JsonRejection>,
 ) -> Result<Json<BulkManualTagResultResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let track_ids = track_ids(&payload.track_ids)?;
     let outcome = service(&state)?
@@ -2670,10 +2647,9 @@ async fn patch_tags_bulk(
 )]
 async fn review_analysis_tags_bulk(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<BulkAnalysisTagReviewRequest>, JsonRejection>,
 ) -> Result<Json<BulkAnalysisTagReviewResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let decision: AnalysisReviewDecision = payload.decision.into();
     let targets = payload
@@ -2731,10 +2707,9 @@ async fn review_analysis_tags_bulk(
 )]
 async fn list_library_tags(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<LibraryTagListQuery>, QueryRejection>,
 ) -> Result<Json<LibraryTagPageResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let scope = query
         .folder
@@ -2796,10 +2771,9 @@ async fn list_library_tags(
 )]
 async fn query_model_library_tags(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<ModelTaggingReviewQueryRequest>, JsonRejection>,
 ) -> Result<Json<LibraryTagPageResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=100).contains(&payload.limit) {
         return Err(ApiError::validation());
@@ -2845,11 +2819,10 @@ async fn query_model_library_tags(
 )]
 async fn patch_track_tags(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     track_id: Result<Path<i128>, PathRejection>,
     payload: Result<Json<ManualTagPatchRequest>, JsonRejection>,
 ) -> Result<Json<LibraryTagTrackResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track_id = TrackId::new(i64::try_from(raw_track_id).map_err(|_| ApiError::validation())?)
         .map_err(|_| ApiError::validation())?;
@@ -2875,11 +2848,10 @@ async fn patch_track_tags(
 )]
 async fn review_analysis_tag(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     track_id: Result<Path<i128>, PathRejection>,
     payload: Result<Json<AnalysisTagReviewRequest>, JsonRejection>,
 ) -> Result<Json<AnalysisTagReviewResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
     let track_id = TrackId::new(i64::try_from(raw_track_id).map_err(|_| ApiError::validation())?)
         .map_err(|_| ApiError::validation())?;
@@ -3191,12 +3163,6 @@ fn track_context_detail_response(
 fn map_local_analysis_error(error: LocalAnalysisError) -> ApiError {
     tracing::error!(error = %ErrorChain(&error), "Local analysis request failed");
     ApiError::internal()
-}
-
-async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {
-    current_session(state, headers, SessionTouch::UpdateLastSeen)
-        .await
-        .map(|_| ())
 }
 
 fn map_assistant_error(error: AssistantServiceError) -> ApiError {

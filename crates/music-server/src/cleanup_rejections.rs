@@ -1,3 +1,4 @@
+use crate::auth::Operator;
 use crate::{
     error::{ApiError, HttpValidationErrorBody},
     http::HttpState,
@@ -5,9 +6,7 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::HeaderMap,
 };
-use music_application::auth::SessionTouch;
 use music_application::cleanup::rejections::{
     CleanupReviewProposal, REJECTION_PAGE_SIZE, RejectionError,
 };
@@ -116,10 +115,9 @@ fn error(error: RejectionError) -> ApiError {
 #[utoipa::path(get, path = "/library/cleanup/rejections", params(PageQuery), responses((status = 200, body = Page)), tag = "library-cleanup")]
 async fn list(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<Page>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let rows = crate::library::library(&state)?
         .cleanup
         .rejected_page(query.before, &query.search)
@@ -143,10 +141,9 @@ async fn list(
 #[utoipa::path(post, path = "/library/cleanup/rejections", request_body = Proposal, responses((status = 200, body = Item), (status = 422, body = HttpValidationErrorBody)), tag = "library-cleanup")]
 async fn reject(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Json(proposal): Json<Proposal>,
 ) -> Result<Json<Item>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let record = crate::library::library(&state)?
         .cleanup
         .reject_proposal(proposal.into())
@@ -163,10 +160,9 @@ async fn reject(
 #[utoipa::path(post, path = "/library/cleanup/rejections/match", request_body = Vec<Proposal>, responses((status = 200, body = Vec<Option<i64>>)), tag = "library-cleanup")]
 async fn matching(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Json(proposals): Json<Vec<Proposal>>,
 ) -> Result<Json<Vec<Option<i64>>>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let proposals = proposals.into_iter().map(Into::into).collect::<Vec<_>>();
     Ok(Json(
         crate::library::library(&state)?
@@ -180,10 +176,9 @@ async fn matching(
 #[utoipa::path(post, path = "/library/cleanup/rejections/{id}/restore", params(("id" = i64, Path)), responses((status = 200, body = Proposal)), tag = "library-cleanup")]
 async fn restore(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(id): Path<i64>,
 ) -> Result<Json<Proposal>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     Ok(Json(
         crate::library::library(&state)?
             .cleanup
@@ -197,10 +192,9 @@ async fn restore(
 #[utoipa::path(delete, path = "/library/cleanup/rejections/{id}", params(("id" = i64, Path)), responses((status = 204)), tag = "library-cleanup")]
 async fn forget(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(id): Path<i64>,
 ) -> Result<axum::http::StatusCode, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     crate::library::library(&state)?
         .cleanup
         .forget_rejected(id)

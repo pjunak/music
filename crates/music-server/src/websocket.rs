@@ -1750,7 +1750,6 @@ async fn finish_writer(writer: &mut JoinHandle<Result<(), ()>>) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::error::Error;
     use std::fs;
     use std::io;
@@ -1777,30 +1776,7 @@ mod tests {
     use crate::{AppConfig, AppRuntime, RuntimeError, TEST_PASSWORD_HASH};
 
     fn runtime_config(root: &Path) -> Result<AppConfig, RuntimeError> {
-        AppConfig::from_values(&BTreeMap::from([
-            (
-                "DATABASE_URL".to_owned(),
-                format!("sqlite:///{}", root.join("app.db").display()),
-            ),
-            (
-                "MUSIC_DIR".to_owned(),
-                root.join("music").display().to_string(),
-            ),
-            (
-                "SFX_LIBRARY_DIR".to_owned(),
-                root.join("sfx").display().to_string(),
-            ),
-            (
-                "MODES_DIR".to_owned(),
-                root.join("modes").display().to_string(),
-            ),
-            (
-                "STATIC_DIR".to_owned(),
-                root.join("missing-static").display().to_string(),
-            ),
-            ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
-        ]))
-        .map_err(Into::into)
+        crate::test_support::test_config(root, &[]).map_err(Into::into)
     }
 
     async fn seed_session(root: &Path, token: &str) -> Result<(), Box<dyn Error>> {

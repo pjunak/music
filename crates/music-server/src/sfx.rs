@@ -7,8 +7,8 @@ use axum::body::Body;
 use axum::extract::multipart::{Field, MultipartError, MultipartRejection};
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{DefaultBodyLimit, Multipart, Query, Request, State};
+use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, HeaderValue};
-use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use music_application::auth::{SessionTouch, UnixSeconds};
 use music_application::modes::ModeCatalog;
@@ -29,7 +29,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 use uuid::Uuid;
 
-use crate::auth::format_rfc3339;
+use crate::auth::{Operator, format_rfc3339};
 use crate::blocking::{BlockingMediaError, BlockingMediaExecutor};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_string,
@@ -323,9 +323,8 @@ async fn get_sfx_file(
 /// to populate the file picker without round-tripping per folder.
 async fn list_all_files(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<Vec<SfxFileResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let catalog = mode_catalog(&state);
     let files = sfx(&state)?
         .coordinator
@@ -348,10 +347,9 @@ async fn list_all_files(
 )]
 async fn delete_file(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let path = parse_required_path(&query.path, "invalid path")?;
     sfx(&state)?
@@ -381,9 +379,8 @@ async fn delete_file(
 /// library's GET /api/library/folders, for the client-side tree.
 async fn list_all_folders(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<SfxFoldersResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let folders = sfx(&state)?
         .coordinator
         .list_folders()
@@ -407,10 +404,9 @@ async fn list_all_folders(
 )]
 async fn create_folder(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<FolderCreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SfxFolderResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.path.is_empty() {
         return Err(ApiError::validation());
@@ -453,10 +449,9 @@ async fn create_folder(
 )]
 async fn delete_folder(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<DeleteFolderQuery>, QueryRejection>,
 ) -> Result<Json<FolderDeleteResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let path = parse_required_folder(&query.path)?;
     sfx(&state)?
@@ -488,10 +483,9 @@ async fn delete_folder(
 )]
 async fn rename_folder(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<FolderRenameRequest>, JsonRejection>,
 ) -> Result<Json<SfxFolderResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.src.is_empty() || payload.dst.is_empty() {
         return Err(ApiError::validation());
@@ -527,10 +521,9 @@ async fn rename_folder(
 )]
 async fn move_file(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<SfxMoveRequest>, JsonRejection>,
 ) -> Result<Json<SfxFileResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.src.is_empty() {
         return Err(ApiError::validation());
@@ -575,10 +568,9 @@ async fn move_file(
 /// from that, so this endpoint returns only the file list.
 async fn list_tree(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<TreeQuery>, QueryRejection>,
 ) -> Result<Json<SfxTreeResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let directory = parse_optional_folder(&query.path)?;
     let catalog = mode_catalog(&state);
@@ -607,11 +599,10 @@ async fn list_tree(
 )]
 async fn upload(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<UploadQuery>, QueryRejection>,
     multipart: Result<Multipart, MultipartRejection>,
 ) -> Result<(StatusCode, Json<SfxUploadResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let mut multipart = multipart.map_err(|_| ApiError::validation())?;
     let runtime = sfx(&state)?;
@@ -712,10 +703,9 @@ async fn upload(
 /// root, so the client can ask about duplicates before sending bytes.
 async fn upload_check(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<UploadCheckRequest>, JsonRejection>,
 ) -> Result<Json<UploadCheckResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let root = sfx(&state)?.root.clone();
     let collisions = sfx(&state)?
@@ -746,12 +736,6 @@ fn map_media_worker_error(error: BlockingMediaError) -> ApiError {
     }
     tracing::error!(error = %ErrorChain(&error), "SFX media worker failed");
     ApiError::internal()
-}
-
-async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {
-    crate::auth::current_session(state, headers, SessionTouch::UpdateLastSeen)
-        .await
-        .map(|_| ())
 }
 
 fn sfx(state: &HttpState) -> Result<&RuntimeSfx, ApiError> {
@@ -995,7 +979,6 @@ fn map_sfx_delivery_error(error: RootedPathError) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::error::Error;
     use std::fs;
     use std::path::Path;
@@ -1016,31 +999,10 @@ mod tests {
     use crate::{AppConfig, AppRuntime, RuntimeError, TEST_PASSWORD_HASH};
 
     fn runtime_config(root: &Path) -> Result<AppConfig, RuntimeError> {
-        AppConfig::from_values(&BTreeMap::from([
-            (
-                "DATABASE_URL".to_owned(),
-                format!("sqlite:///{}", root.join("app.db").display()),
-            ),
-            (
-                "MUSIC_DIR".to_owned(),
-                root.join("music").display().to_string(),
-            ),
-            (
-                "SFX_LIBRARY_DIR".to_owned(),
-                root.join("sfx").display().to_string(),
-            ),
-            (
-                "MODES_DIR".to_owned(),
-                root.join("modes").display().to_string(),
-            ),
-            (
-                "STATIC_DIR".to_owned(),
-                root.join("missing-static").display().to_string(),
-            ),
-            ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
-            ("MAX_UPLOAD_FILES".to_owned(), "3".to_owned()),
-            ("MAX_UPLOAD_FILE_BYTES".to_owned(), "1024".to_owned()),
-        ]))
+        crate::test_support::test_config(
+            root,
+            &[("MAX_UPLOAD_FILES", "3"), ("MAX_UPLOAD_FILE_BYTES", "1024")],
+        )
         .map_err(Into::into)
     }
 

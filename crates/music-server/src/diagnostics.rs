@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 
 use axum::Json;
 use axum::extract::State;
-use axum::http::HeaderMap;
 use music_application::ErrorChain;
-use music_application::auth::SessionTouch;
 use serde::Serialize;
 use utoipa::ToSchema;
 use utoipa::openapi::RefOr;
@@ -12,7 +10,7 @@ use utoipa::openapi::schema::{AnyOfBuilder, ObjectBuilder, Schema, Type};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::current_session;
+use crate::auth::Operator;
 use crate::error::{ApiError, openapi_integer, openapi_number};
 use crate::http::HttpState;
 
@@ -50,9 +48,8 @@ pub(crate) fn diagnostics_router() -> OpenApiRouter<HttpState> {
 )]
 async fn get_diagnostics(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(_current): Operator,
 ) -> Result<Json<DiagnosticsResponse>, ApiError> {
-    let _current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let library = state
         .library
         .as_ref()

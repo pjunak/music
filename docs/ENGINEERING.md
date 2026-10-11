@@ -23,8 +23,10 @@ is selected using [the validation matrix](VALIDATION.md).
 
 ## Authentication
 
-- Authoring APIs resolve a `CurrentSession`; player/output read surfaces use the optional-session
-  lookup where documented.
+- HTTP handlers require a session by taking the `Operator` extractor, which runs before the body
+  is read; player/output read surfaces use the optional-session lookup where documented.
+  `auth_surface_tests.rs` lists the only routes reachable without a session; adding a guest
+  route means updating that list deliberately.
 - Guest sockets may register and act as read-only outputs. Mutating actions
   require a valid session; active-output position reports follow the documented
   exception.

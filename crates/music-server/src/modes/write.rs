@@ -5,8 +5,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
-use music_application::auth::SessionTouch;
+use axum::http::StatusCode;
 use music_application::modes::{
     CueDocument, CueLoopDocument, CueSfxDocument, EffectDocument, IntegrationsDocument,
     InterruptDocument, ModeCatalog, ModeDocument, ModeMutation, ModeMutationError,
@@ -25,7 +24,7 @@ use super::{
     CueSpec, InterruptSpec, ModeSummary, PresetManifest, SoundboardManifest, cue_spec,
     interrupt_spec, mode_catalog, preset_manifest, soundboard_manifest, summary,
 };
-use crate::auth::current_session;
+use crate::auth::Operator;
 use crate::error::{ApiError, HttpValidationErrorBody};
 use crate::http::HttpState;
 
@@ -320,10 +319,9 @@ pub(super) fn mode_write_router() -> OpenApiRouter<HttpState> {
 )]
 async fn create_mode(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<CreateModeRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ModeSummary>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&payload.id, "mode")?;
     validate_text(&payload.name, 1, Some(128))?;
@@ -368,11 +366,10 @@ async fn create_mode(
 )]
 async fn rename_mode(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
     payload: Result<Json<RenameModeRequest>, JsonRejection>,
 ) -> Result<Json<ModeSummary>, ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_text(&payload.name, 1, Some(128))?;
     let catalog = mode_catalog(&state)?;
@@ -402,10 +399,9 @@ async fn rename_mode(
 )]
 async fn delete_mode(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     commit(
         &state,
@@ -431,11 +427,10 @@ async fn delete_mode(
 )]
 async fn create_soundboard(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
     payload: Result<Json<CreateSoundboardRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SoundboardManifest>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&payload.id, "soundboard")?;
     validate_optional_text(payload.name.as_deref(), 0, Some(128))?;
@@ -476,10 +471,9 @@ async fn create_soundboard(
 )]
 async fn delete_soundboard(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, soundboard_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     commit(
         &state,
@@ -506,11 +500,10 @@ async fn delete_soundboard(
 )]
 async fn add_soundboard_category(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, soundboard_id)): Path<(String, String)>,
     payload: Result<Json<AddCategoryRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SoundboardManifest>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&payload.id, "category")?;
     validate_text(&payload.name, 1, Some(128))?;
@@ -552,10 +545,9 @@ async fn add_soundboard_category(
 )]
 async fn delete_soundboard_category(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, soundboard_id, category_id)): Path<(String, String, String)>,
 ) -> Result<Json<SoundboardManifest>, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     let mut soundboard = soundboard(&catalog, &mode_id, &soundboard_id)?.clone();
     let index = category_index(&soundboard, &category_id)?;
@@ -585,11 +577,10 @@ async fn delete_soundboard_category(
 )]
 async fn add_soundboard_item(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, soundboard_id, category_id)): Path<(String, String, String)>,
     payload: Result<Json<AddItemRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<SoundboardManifest>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_item(
         &payload.file,
@@ -634,11 +625,10 @@ async fn add_soundboard_item(
 )]
 async fn update_soundboard_item(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, soundboard_id, category_id, index)): Path<(String, String, String, i64)>,
     payload: Result<Json<UpdateItemRequest>, JsonRejection>,
 ) -> Result<Json<SoundboardManifest>, ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_item_patch(&payload)?;
     let catalog = mode_catalog(&state)?;
@@ -674,10 +664,9 @@ async fn update_soundboard_item(
 )]
 async fn delete_soundboard_item(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, soundboard_id, category_id, index)): Path<(String, String, String, i64)>,
 ) -> Result<Json<SoundboardManifest>, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     let mut soundboard = soundboard(&catalog, &mode_id, &soundboard_id)?.clone();
     let category = category_index(&soundboard, &category_id)?;
@@ -704,11 +693,10 @@ async fn delete_soundboard_item(
 )]
 async fn add_interrupt_template(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
     payload: Result<Json<InterruptTemplateCreate>, JsonRejection>,
 ) -> Result<(StatusCode, Json<Vec<InterruptSpec>>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_interrupt_create(&payload)?;
     let catalog = mode_catalog(&state)?;
@@ -743,11 +731,10 @@ async fn add_interrupt_template(
 )]
 async fn update_interrupt_template(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, index)): Path<(String, i64)>,
     payload: Result<Json<InterruptTemplateUpdate>, JsonRejection>,
 ) -> Result<Json<Vec<InterruptSpec>>, ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_interrupt_patch(&payload)?;
     let catalog = mode_catalog(&state)?;
@@ -774,10 +761,9 @@ async fn update_interrupt_template(
 )]
 async fn delete_interrupt_template(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, index)): Path<(String, i64)>,
 ) -> Result<Json<Vec<InterruptSpec>>, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     let mut manifest = mode(&catalog, &mode_id)?.manifest.clone();
     let index = bounded_index(index, manifest.interrupts.len(), "interrupt")?;
@@ -799,11 +785,10 @@ async fn delete_interrupt_template(
 )]
 async fn create_cue(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
     payload: Result<Json<CreateCueRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<CueSpec>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&payload.id, "cue")?;
     validate_cue_fields(
@@ -857,11 +842,10 @@ async fn create_cue(
 )]
 async fn update_cue(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, cue_id)): Path<(String, String)>,
     payload: Result<Json<CueBodyRequest>, JsonRejection>,
 ) -> Result<Json<CueSpec>, ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&cue_id, "cue")?;
     validate_cue_fields(
@@ -909,10 +893,9 @@ async fn update_cue(
 )]
 async fn delete_cue(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, cue_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     commit(
         &state,
@@ -939,11 +922,10 @@ async fn delete_cue(
 )]
 async fn create_preset(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
     payload: Result<Json<CreatePresetRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<PresetManifest>), ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&payload.id, "preset")?;
     validate_preset_fields(&payload.name, payload.crossfade_ms, &payload.effects)?;
@@ -986,11 +968,10 @@ async fn create_preset(
 )]
 async fn update_preset(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, preset_id)): Path<(String, String)>,
     payload: Result<Json<PresetBodyRequest>, JsonRejection>,
 ) -> Result<Json<PresetManifest>, ApiError> {
-    authenticate(&state, &headers).await?;
     let Json(payload) = json_payload(payload)?;
     validate_slug(&preset_id, "preset")?;
     validate_preset_fields(&payload.name, payload.crossfade_ms, &payload.effects)?;
@@ -1027,10 +1008,9 @@ async fn update_preset(
 )]
 async fn delete_preset(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path((mode_id, preset_id)): Path<(String, String)>,
 ) -> Result<StatusCode, ApiError> {
-    authenticate(&state, &headers).await?;
     let catalog = mode_catalog(&state)?;
     commit(
         &state,
@@ -1042,12 +1022,6 @@ async fn delete_preset(
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-async fn authenticate(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {
-    current_session(state, headers, SessionTouch::UpdateLastSeen)
-        .await
-        .map(|_| ())
 }
 
 fn json_payload<T>(payload: Result<Json<T>, JsonRejection>) -> Result<Json<T>, ApiError> {

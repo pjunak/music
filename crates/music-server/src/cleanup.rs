@@ -8,9 +8,8 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use futures_util::TryStreamExt;
-use music_application::auth::SessionTouch;
 use music_application::cleanup::{
     CleanupAnalysis, CleanupApplyOperation, CleanupApplyResult, CleanupBatchDetail,
     CleanupBatchSummary, CleanupError, CleanupFuture, CleanupInputValue, CleanupNameLookup,
@@ -39,6 +38,7 @@ use utoipa::openapi::schema::{
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::auth::Operator;
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer,
     openapi_nullable_datetime, openapi_nullable_integer, openapi_nullable_string,
@@ -596,10 +596,9 @@ impl From<CleanupAnalysis> for AnalyzeResponse {
 )]
 async fn analyze(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<AnalyzeRequest>, JsonRejection>,
 ) -> Result<Json<AnalyzeResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if payload.scope.track_ids.len() > MAX_CLEANUP_ENRICHMENT_TRACKS {
         return Err(ApiError::validation());
@@ -638,10 +637,9 @@ async fn analyze(
 )]
 async fn start_enrichment(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<CleanupEnrichmentRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let imports: Vec<music_application::cleanup_enrichment::evidence::ImportedTrackEvidence> =
         serde_json::from_value(json!(payload.imports)).map_err(|_| ApiError::validation())?;
@@ -698,9 +696,8 @@ fn enrichment_scope_payload(scope: &CleanupScopeRequest) -> Value {
 )]
 async fn list_sources(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<Vec<CleanupSourceResponse>>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let sources = crate::library::library(&state)?
         .cleanup_sources
         .sources()
@@ -725,11 +722,10 @@ async fn list_sources(
 )]
 async fn update_source(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     source_id: Result<Path<String>, PathRejection>,
     payload: Result<Json<CleanupSourceUpdateRequest>, JsonRejection>,
 ) -> Result<Json<CleanupSourceResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(source_id) = source_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let source = crate::library::library(&state)?
@@ -756,11 +752,10 @@ async fn update_source(
 )]
 async fn save_source_credential(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     source_id: Result<Path<String>, PathRejection>,
     payload: Result<Json<CleanupSourceCredentialUpdateRequest>, JsonRejection>,
 ) -> Result<Json<CleanupSourceResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(source_id) = source_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let source = crate::library::library(&state)?
@@ -784,10 +779,9 @@ async fn save_source_credential(
 )]
 async fn delete_source_credential(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     source_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<CleanupSourceResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(source_id) = source_id.map_err(|_| ApiError::validation())?;
     let source = crate::library::library(&state)?
         .cleanup_sources
@@ -811,10 +805,9 @@ async fn delete_source_credential(
 )]
 async fn verify_names(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<VerifyRequest>, JsonRejection>,
 ) -> Result<Json<VerifyResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=MAX_CLEANUP_VERIFY_NAMES).contains(&payload.names.len()) {
         return Err(ApiError::validation());
@@ -854,10 +847,9 @@ async fn verify_names(
 )]
 async fn apply_cleanup(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<CleanupApplyRequest>, JsonRejection>,
 ) -> Result<Json<CleanupApplyResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=MAX_CLEANUP_APPLY_OPERATIONS).contains(&payload.ops.len())
         || payload.scope_label.chars().count() > MAX_CLEANUP_SCOPE_LABEL_CHARS
@@ -888,9 +880,8 @@ async fn apply_cleanup(
 )]
 async fn list_batches(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<Vec<CleanupBatchSummaryResponse>>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let batches = crate::library::library(&state)?
         .cleanup
         .batches()
@@ -918,10 +909,9 @@ async fn list_batches(
 )]
 async fn get_batch(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     batch_id: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<CleanupBatchDetailResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(batch_id) = batch_id.map_err(|_| ApiError::validation())?;
     let batch = crate::library::library(&state)?
         .cleanup
@@ -946,10 +936,9 @@ async fn get_batch(
 )]
 async fn revert_batch(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     batch_id: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<CleanupRevertResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Path(batch_id) = batch_id.map_err(|_| ApiError::validation())?;
     let result = crate::library::library(&state)?
         .coordinator
@@ -974,10 +963,9 @@ async fn revert_batch(
 )]
 async fn revert_from_journal(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<CleanupRevertJournalRequest>, JsonRejection>,
 ) -> Result<Json<CleanupRevertResponse>, ApiError> {
-    crate::auth::current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=MAX_CLEANUP_REVERT_ITEMS).contains(&payload.items.len()) {
         return Err(ApiError::validation());

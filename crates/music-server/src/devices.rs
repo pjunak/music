@@ -5,9 +5,8 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use music_application::auth::SessionTouch;
 use music_application::devices::{DeviceServiceError, RememberedDevice, RememberedDeviceService};
 use music_storage::SqliteStorage;
 use serde::{Deserialize, Serialize};
@@ -15,7 +14,7 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::current_session;
+use crate::auth::Operator;
 use crate::error::{ApiError, HttpValidationErrorBody, openapi_nullable_string};
 use crate::http::HttpState;
 
@@ -88,9 +87,8 @@ pub(crate) fn device_router() -> OpenApiRouter<HttpState> {
 )]
 async fn list_devices(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(_current): Operator,
 ) -> Result<Json<Vec<DeviceOut>>, ApiError> {
-    let _current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let devices = state
         .devices
         .as_ref()
@@ -120,11 +118,10 @@ async fn list_devices(
 )]
 async fn save_device(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(_current): Operator,
     Path(client_id): Path<String>,
     payload: Result<Json<DevicePut>, JsonRejection>,
 ) -> Result<Json<DeviceOut>, ApiError> {
-    let _current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !(1..=128).contains(&payload.name.chars().count()) {
         return Err(ApiError::validation());
@@ -167,10 +164,9 @@ async fn save_device(
 )]
 async fn forget_device(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(_current): Operator,
     Path(client_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let _current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let devices = state
         .devices
         .as_ref()

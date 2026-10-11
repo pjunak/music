@@ -14,6 +14,8 @@ mod admin;
 mod analysis;
 mod assistant;
 mod auth;
+#[cfg(test)]
+mod auth_surface_tests;
 mod authoring;
 mod blocking;
 mod cleanup;
@@ -43,6 +45,8 @@ mod runtime;
 mod sfx;
 mod storage_admin;
 mod supervisor;
+#[cfg(test)]
+mod test_support;
 mod websocket;
 mod websocket_origin;
 

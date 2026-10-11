@@ -909,29 +909,7 @@ mod tests {
     }
 
     fn runtime_config(root: &Path) -> Result<AppConfig, RuntimeError> {
-        AppConfig::from_values(&BTreeMap::from([
-            (
-                "DATABASE_URL".to_owned(),
-                format!("sqlite:///{}", root.join("app.db").display()),
-            ),
-            (
-                "MUSIC_DIR".to_owned(),
-                root.join("music").display().to_string(),
-            ),
-            (
-                "SFX_LIBRARY_DIR".to_owned(),
-                root.join("sfx").display().to_string(),
-            ),
-            (
-                "MODES_DIR".to_owned(),
-                root.join("modes").display().to_string(),
-            ),
-            (
-                "STATIC_DIR".to_owned(),
-                root.join("missing-static").display().to_string(),
-            ),
-        ]))
-        .map_err(Into::into)
+        crate::test_support::test_config(root, &[]).map_err(Into::into)
     }
 
     async fn operator_router(runtime: &AppRuntime) -> Result<(Router, String), Box<dyn Error>> {

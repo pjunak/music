@@ -3,10 +3,10 @@ use axum::body::Body;
 use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use music_application::ErrorChain;
-use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::auth::UnixSeconds;
 use music_application::playlists::{
     AUTOMATIC_APPLY_SCHEMA, AUTOMATIC_PREVIEW_SCHEMA, AUTOMATIC_RULE_SCHEMA, AutomaticMatch,
     AutomaticOrder, AutomaticPlaylistResolution, AutomaticPlaylistRule, AutomaticTagSources,
@@ -25,7 +25,7 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::{current_session, format_rfc3339};
+use crate::auth::{Operator, format_rfc3339};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer,
     openapi_nullable_datetime, openapi_nullable_integer, openapi_nullable_string, openapi_number,
@@ -319,10 +319,9 @@ pub(crate) fn playlist_router() -> OpenApiRouter<HttpState> {
 )]
 async fn create_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<PlaylistCreateRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<PlaylistMetaResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     validate_name(&payload.name)?;
     validate_optional_short(&payload.mode_id)?;
@@ -352,10 +351,9 @@ async fn create_playlist(
 )]
 async fn list_playlists(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<PlaylistListQuery>, QueryRejection>,
 ) -> Result<Json<Vec<PlaylistMetaResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let rows = service(&state)?
         .list(&PlaylistFilter {
@@ -384,10 +382,9 @@ async fn list_playlists(
 )]
 async fn get_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<PlaylistMetaResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let playlist = service(&state)?
         .get(playlist_id)
@@ -410,11 +407,10 @@ async fn get_playlist(
 )]
 async fn update_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
     payload: Result<Json<PlaylistUpdateRequest>, JsonRejection>,
 ) -> Result<Json<PlaylistMetaResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if let Some(name) = &payload.name {
@@ -458,10 +454,9 @@ async fn update_playlist(
 )]
 async fn delete_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     service(&state)?
         .delete(playlist_id)
@@ -483,10 +478,9 @@ async fn delete_playlist(
 )]
 async fn get_tracks(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<Vec<TrackInPlaylistResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let items = service(&state)?
         .items(playlist_id)
@@ -511,11 +505,10 @@ async fn get_tracks(
 )]
 async fn add_track(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
     payload: Result<Json<TrackAddRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<TrackInPlaylistResponse>), ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let track_id = TrackId::new(payload.track_id)
@@ -546,10 +539,9 @@ async fn add_track(
 )]
 async fn remove_track(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     path: Result<Path<(i64, i64)>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&state, &headers).await?;
     let Path((playlist_id, position)) = path.map_err(|_| ApiError::validation())?;
     let position = usize::try_from(position)
         .map_err(|_| ApiError::plain_not_found("position out of range"))?;
@@ -574,11 +566,10 @@ async fn remove_track(
 )]
 async fn move_track(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     path: Result<Path<(i64, i64)>, PathRejection>,
     payload: Result<Json<PlaylistTrackMoveRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&state, &headers).await?;
     let Path((playlist_id, position)) = path.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let from =
@@ -605,11 +596,10 @@ async fn move_track(
 )]
 async fn preview_automatic_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
     payload: Result<Json<AutomaticPlaylistPreviewRequest>, JsonRejection>,
 ) -> Result<Json<AutomaticPlaylistPreviewResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let resolution = service(&state)?
@@ -633,11 +623,10 @@ async fn preview_automatic_playlist(
 )]
 async fn configure_automatic_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
     payload: Result<Json<AutomaticPlaylistConfigureRequest>, JsonRejection>,
 ) -> Result<Json<AutomaticPlaylistApplyResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     if !valid_signature(&payload.source_signature) {
@@ -667,10 +656,9 @@ async fn configure_automatic_playlist(
 )]
 async fn refresh_automatic_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<AutomaticPlaylistApplyResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let (playlist, resolution) = service(&state)?
         .refresh(playlist_id)
@@ -692,10 +680,9 @@ async fn refresh_automatic_playlist(
 )]
 async fn disable_automatic_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
 ) -> Result<Json<PlaylistMetaResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let playlist = service(&state)?
         .disable_automatic(playlist_id)
@@ -718,11 +705,10 @@ async fn disable_automatic_playlist(
 )]
 async fn export_playlist(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     playlist_id: Result<Path<i64>, PathRejection>,
     query: Result<Query<ExportQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(playlist_id) = playlist_id.map_err(|_| ApiError::validation())?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     let items = service(&state)?
@@ -753,12 +739,6 @@ async fn export_playlist(
         })?,
     );
     Ok(response)
-}
-
-async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {
-    current_session(state, headers, SessionTouch::UpdateLastSeen)
-        .await
-        .map(|_| ())
 }
 
 fn service(state: &HttpState) -> Result<&PlaylistService, ApiError> {

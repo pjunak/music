@@ -1,8 +1,7 @@
 use axum::Json;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
-use axum::http::HeaderMap;
-use music_application::auth::{SessionTouch, UnixSeconds};
+use music_application::auth::UnixSeconds;
 use music_application::jobs::{JobListFilter, JobRecord, JobService, JobServiceError, JobStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,7 +11,7 @@ use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::{current_session, format_rfc3339};
+use crate::auth::{Operator, format_rfc3339};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_nullable_datetime,
     openapi_nullable_string,
@@ -124,10 +123,9 @@ pub(crate) fn jobs_router() -> OpenApiRouter<HttpState> {
 )]
 async fn list_jobs(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     query: Result<Query<JobListQuery>, QueryRejection>,
 ) -> Result<Json<Vec<BackgroundJobResponse>>, ApiError> {
-    authorize(&state, &headers).await?;
     let Query(query) = query.map_err(|_| ApiError::validation())?;
     if query.kind.as_ref().is_some_and(|kind| kind.len() > 128) || !(1..=100).contains(&query.limit)
     {
@@ -161,10 +159,9 @@ async fn list_jobs(
 )]
 async fn get_job(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     job_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<BackgroundJobResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(job_id) = job_id.map_err(|_| ApiError::validation())?;
     let job = service(&state)?
         .get(&job_id)
@@ -187,10 +184,9 @@ async fn get_job(
 )]
 async fn cancel_job(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     job_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<BackgroundJobResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(job_id) = job_id.map_err(|_| ApiError::validation())?;
     let job = service(&state)?
         .cancel(&job_id)
@@ -212,22 +208,15 @@ async fn cancel_job(
 )]
 async fn retry_job(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     job_id: Result<Path<String>, PathRejection>,
 ) -> Result<Json<BackgroundJobResponse>, ApiError> {
-    authorize(&state, &headers).await?;
     let Path(job_id) = job_id.map_err(|_| ApiError::validation())?;
     let job = service(&state)?
         .retry(&job_id)
         .await
         .map_err(map_job_error)?;
     Ok(Json(job_response(job)?))
-}
-
-async fn authorize(state: &HttpState, headers: &HeaderMap) -> Result<(), ApiError> {
-    current_session(state, headers, SessionTouch::UpdateLastSeen)
-        .await
-        .map(|_| ())
 }
 
 fn service(state: &HttpState) -> Result<&JobService, ApiError> {

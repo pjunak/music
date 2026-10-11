@@ -1,4 +1,3 @@
-use music_application::ErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -6,10 +5,12 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::ConnectInfo;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::{FromRequestParts, Path, State};
 use axum::http::header::{COOKIE, SET_COOKIE};
+use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{IntoResponse, Response};
+use music_application::ErrorChain;
 use music_application::auth::{
     ActiveSession, AuthService, AuthServiceConfig, AuthServiceError, AuthenticatedSession,
     LoginThrottle, LoginThrottleConfig, RevokeSessionOutcome, SecretSessionToken, SessionLookup,
@@ -195,6 +196,24 @@ pub(crate) struct CurrentSession {
     pub(crate) expires_at: UnixSeconds,
 }
 
+/// An authenticated operator. A handler requires a signed-in session by
+/// taking this extractor; the check runs before the request body is read.
+#[derive(Debug, Clone)]
+pub(crate) struct Operator(pub(crate) CurrentSession);
+
+impl FromRequestParts<HttpState> for Operator {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &HttpState,
+    ) -> Result<Self, Self::Rejection> {
+        current_session(state, &parts.headers, SessionTouch::UpdateLastSeen)
+            .await
+            .map(Self)
+    }
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 struct LoginRequest {
     #[schema(min_length = 1, max_length = 64)]
@@ -313,8 +332,10 @@ async fn login(
     ),
     tag = "auth"
 )]
-async fn logout(State(state): State<HttpState>, headers: HeaderMap) -> Result<Response, ApiError> {
-    let current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+async fn logout(
+    State(state): State<HttpState>,
+    Operator(current): Operator,
+) -> Result<Response, ApiError> {
     let auth = state.auth.ok_or_else(ApiError::service_unavailable)?;
     auth.service
         .logout(current.user.id)
@@ -338,11 +359,7 @@ async fn logout(State(state): State<HttpState>, headers: HeaderMap) -> Result<Re
     ),
     tag = "auth"
 )]
-async fn me(
-    State(state): State<HttpState>,
-    headers: HeaderMap,
-) -> Result<Json<UserInfoResponse>, ApiError> {
-    let current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
+async fn me(Operator(current): Operator) -> Result<Json<UserInfoResponse>, ApiError> {
     Ok(Json(current.user.into()))
 }
 
@@ -356,9 +373,8 @@ async fn me(
 )]
 async fn list_sessions(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(current): Operator,
 ) -> Result<Json<Vec<ActiveSessionResponse>>, ApiError> {
-    let current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let auth = state.auth.ok_or_else(ApiError::service_unavailable)?;
     let sessions = auth
         .service
@@ -387,10 +403,9 @@ async fn list_sessions(
 )]
 async fn revoke_session(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    Operator(current): Operator,
     Path(session_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let current = current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let auth = state.auth.ok_or_else(ApiError::service_unavailable)?;
     match auth
         .service
@@ -506,7 +521,6 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::error::Error;
     use std::path::Path;
 
@@ -552,30 +566,7 @@ mod tests {
     }
 
     fn runtime_config(root: &Path) -> Result<AppConfig, crate::ConfigError> {
-        AppConfig::from_values(&BTreeMap::from([
-            (
-                "DATABASE_URL".to_owned(),
-                format!("sqlite:///{}", root.join("app.db").display()),
-            ),
-            (
-                "MUSIC_DIR".to_owned(),
-                root.join("music").display().to_string(),
-            ),
-            (
-                "SFX_LIBRARY_DIR".to_owned(),
-                root.join("sfx").display().to_string(),
-            ),
-            (
-                "MODES_DIR".to_owned(),
-                root.join("modes").display().to_string(),
-            ),
-            (
-                "STATIC_DIR".to_owned(),
-                root.join("missing-static").display().to_string(),
-            ),
-            ("SESSION_COOKIE_SECURE".to_owned(), "false".to_owned()),
-            ("SESSION_COOKIE_NAME".to_owned(), "test_session".to_owned()),
-        ]))
+        crate::test_support::test_config(root, &[("SESSION_COOKIE_NAME", "test_session")])
     }
 
     async fn body_json(response: Response) -> Result<Value, Box<dyn Error>> {

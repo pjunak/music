@@ -26,7 +26,7 @@ use utoipa::{PartialSchema, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::{current_session, optional_session};
+use crate::auth::{Operator, optional_session};
 use crate::error::{ApiError, HttpValidationErrorBody, openapi_integer, openapi_nullable_string};
 use crate::http::HttpState;
 
@@ -245,9 +245,8 @@ pub(crate) fn mode_router() -> OpenApiRouter<HttpState> {
 )]
 async fn list_modes(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<Vec<ModeSummary>>, ApiError> {
-    current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let catalog = mode_catalog(&state)?;
     Ok(Json(catalog.modes.values().map(summary).collect()))
 }
@@ -260,9 +259,8 @@ async fn list_modes(
 )]
 async fn get_active_mode(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ActiveMode>, ApiError> {
-    current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let playback = playback(&state)?;
     let snapshot = playback.snapshot().await.map_err(playback_unavailable)?;
     Ok(Json(ActiveMode {
@@ -282,10 +280,9 @@ async fn get_active_mode(
 )]
 async fn set_active_mode(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     payload: Result<Json<SetActiveModeRequest>, JsonRejection>,
 ) -> Result<Json<ActiveMode>, ApiError> {
-    current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let Json(payload) = payload.map_err(|_| ApiError::validation())?;
     let mode_id = payload.mode_id.0;
     let playback = playback(&state)?;
@@ -328,9 +325,8 @@ async fn set_active_mode(
 )]
 async fn reload_modes(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
 ) -> Result<Json<ReloadResult>, ApiError> {
-    current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let result = modes(&state)?.reload().await.map_err(|error| {
         tracing::error!(error = %ErrorChain(&error), "mode reload failed");
         ApiError::service_unavailable()
@@ -353,10 +349,9 @@ async fn reload_modes(
 )]
 async fn get_mode(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
 ) -> Result<Json<ModeDetail>, ApiError> {
-    current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let catalog = mode_catalog(&state)?;
     let mode = catalog
         .modes
@@ -406,10 +401,9 @@ async fn list_mode_presets(
 )]
 async fn get_mode_theme(
     State(state): State<HttpState>,
-    headers: HeaderMap,
+    _operator: Operator,
     Path(mode_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    current_session(&state, &headers, SessionTouch::UpdateLastSeen).await?;
     let catalog = mode_catalog(&state)?;
     let theme = catalog
         .modes
