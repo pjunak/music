@@ -217,7 +217,9 @@ new independent confirmation recordings.
 ## Developer Jev input comparison
 
 When the owner explicitly requests suggestions to rate, the developer-only
-`jev-compare` example can run a small, separately authorized private-audio pilot.
+`jev-compare` research harness can run a small, separately authorized private-audio pilot.
+That harness and the `jev-*` scripts live in the owner's local research folder, outside
+this repository; run the commands below from there.
 This is assisted development feedback. Showing predictions before judgments means
 these recordings cannot later be called a blind confirmation cohort. It does not
 certify the model, update app acceptance, or write library tags.
@@ -230,7 +232,7 @@ It does not invent descriptions from filenames or folders. Voice is explicitly
 not configured and catalog evidence is not retrieved. This is an isolated native
 baseline, not an export of the operator's configured production library.
 
-The offline [learned exporter](../tools/jev-audio-evidence.mts) reuses the pinned
+The offline learned exporter (`tools/jev-audio-evidence.mts` in the research folder) reuses the pinned
 EffNet encoder with its mood/theme, instrument and style outputs. Exact graph,
 metadata and ordered-label hashes prevent mixing model families or score indices.
 It keeps all 496 labels and full precision locally; the pilot selects bounded
@@ -242,8 +244,8 @@ Style graph shape and label identity are checked; original-export style numerica
 parity remains a qualification gap. No weights are bundled or installed by the app.
 
 ```powershell
-cargo run --locked -p music-server --example jev-compare -- pilot-analyze private-paths.json private-corpus.json --ffmpeg ffmpeg --ffprobe ffprobe
-cargo run --locked -p music-server --example jev-compare -- pilot-plan private-corpus.json private-plan.json --predictions private-audio-predictions.json --tracks 1,2,3
+cargo run --locked --manifest-path jev-compare/Cargo.toml -- pilot-analyze private-paths.json private-corpus.json --ffmpeg ffmpeg --ffprobe ffprobe
+cargo run --locked --manifest-path jev-compare/Cargo.toml -- pilot-plan private-corpus.json private-plan.json --predictions private-audio-predictions.json --tracks 1,2,3
 ```
 
 Select 1..8 distinct recordings before inspecting predictions. Freeze and record
@@ -265,7 +267,7 @@ worst-case bounds, vocabulary, engine identity and the exact disclosure. Review 
 plan and obtain a separate explicit paid-run budget before using `pilot-run`:
 
 ```powershell
-cargo run --locked -p music-server --example jev-compare -- pilot-run private-plan.json --key-file temporary-key.txt --plan-sha256 REVIEWED_HASH --max-requests REVIEWED_COUNT --max-input-units REVIEWED_UNITS --output-directory NEW_PRIVATE_DIRECTORY
+cargo run --locked --manifest-path jev-compare/Cargo.toml -- pilot-run private-plan.json --key-file temporary-key.txt --plan-sha256 REVIEWED_HASH --max-requests REVIEWED_COUNT --max-input-units REVIEWED_UNITS --output-directory NEW_PRIVATE_DIRECTORY
 ```
 
 The runner rebuilds and verifies the plan, exact caps and selected file hashes before

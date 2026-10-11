@@ -8,14 +8,8 @@ Read the relevant rows before choosing checks.
 | Prose or agent guidance only | Review the diff and local links; verify changed command/contract claims against their owner. Run `music-cli contracts check` when generated contracts change. No runtime rebuild solely for prose. |
 | Rust behavior | Focused regression tests while iterating; formatting, architecture checks, workspace check/Clippy/nextest/doc tests and contracts check below on the final change. |
 | Frontend behavior | Frontend lint, typecheck, tests and build; inspect affected visible flows. Rust gates apply when a server/wire contract also changes. |
-| Development audio references | `node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts tools/jev-audio-evidence.test.mts`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
+| Development audio references | `node --test tools/effnet-reference.test.mts tools/effnet-stream.test.mts`; verify existing pinned fixtures when sharing their loader. Licensed-model/private-audio comparisons remain explicit, separately recorded experiments. |
 | Offline mood pilot | `node --test tools/mood-pilot.test.mts`; affected frontend gates for exported files and controls. Exercise changed CLI operations, including prediction-free readiness and export handling. Private listening judgments remain separate acceptance evidence. |
-| Jev experiment tooling | `cargo test --locked -p music-server --example jev-compare`; `node --test tools/jev-pilot-report.test.mts`; inspect offline plans. Paid runs require an explicit reviewed plan and budget, never an automatic test or retry. |
-| Graded Jev listening experiment | Above Jev checks plus `node --test tools/jev-corpus-prepare.test.mts tools/jev-graded-report.test.mts`, tool typecheck/lint, immutable-plan and explicit source-hash review. Never convert confidence into musical relevance or incomplete results into zero. |
-| Short-question Jev comparison | Native Jev example tests plus `node --test tools/jev-simple-report.test.mts tools/jev-graded-report.test.mts`, tool typecheck/lint, exact baseline pairing and source-hash review. Noul probabilities and ordinal Score positions have different meanings. |
-| Jev evidence ablation | Native Jev example tests and Rust gates; inspect the frozen baseline/auxiliary hashes, exact request and input-unit bounds, factor isolation, source hashes, repeats and missing-evidence controls. Export only a complete journal through `ablation-report`. Raw answers and model costs do not establish listening accuracy. |
-| Jev algorithmic feature experiments | Native Jev example tests and Rust gates; validate controlled signal behavior, extractor/model contracts, exact original hashes and duration, family isolation, interval precision, immutable reservations and repeats. Export only a complete journal through `feature-report`. Affect estimates remain learned clues; additional input or stronger answers do not establish accuracy. |
-| Targeted Jev feature experiments | Native Jev example tests and Rust gates; inspect source/duration binding, controlled pulse/roughness behavior, exact profile labels and temporal coverage, pooled arithmetic, representation isolation, missingness and immutable budgets. Export only a complete journal through `targeted-report`. Beat/mode estimates and classifier responses are fallible evidence, not verified mood tags. |
 | HTTP/WS, schema, persistence, auth or shared playback | Affected Rust/frontend gates plus relevant client serialization, reconnect, failure and compatibility tests; coordinate Baton when its wire behavior changes. |
 | Dependencies, licenses or toolchains | Affected runtime gates plus deny/audit/machete for each changed dependency graph; preserve separate fuzz lockfile coverage. |
 | Fuzz sources/configuration | Fuzz formatting, Clippy and applicable dependency checks below. |
@@ -115,81 +109,11 @@ licensed model in `MUSIC_TEST_VOICE_MODEL` and, for the worker, `MUSIC_TEST_FFMP
 The [dated reference notes](../crates/music-analysis/tests/fixtures/README.md#voice-decoding-and-ending-acceptance-25-september-2026)
 record which tests actually exercised those tools and their remaining acceptance limits.
 
-## Offline Jev investigation plans
+## Local research tooling
 
-The developer-only [example](../crates/music-server/examples/jev-compare.rs) uses
-built-in synthetic cases by default. Its explicit `pilot-*` commands accept a
-private file selection through the [assisted pilot](MOOD_PILOT.md#developer-jev-input-comparison).
-No command loads application configuration or app credentials:
-
-```powershell
-cargo run --locked -p music-server --example jev-compare -- plan target/jev-framing-plan.json
-cargo run --locked -p music-server --example jev-compare -- quality-plan target/jev-quality-plan.json
-cargo run --locked -p music-server --example jev-compare -- evidence-plan target/jev-evidence-plan.json
-# After a separately authorized comparison has produced this journal:
-cargo run --locked -p music-server --example jev-compare -- report target/jev-framing-run.jsonl target/jev-framing-report.json
-# After a separately authorized evidence experiment:
-cargo run --locked -p music-server --example jev-compare -- evidence-report target/jev-evidence-run.jsonl target/jev-evidence-report.json
-```
-
-These commands are offline and refuse to overwrite their output. Comparison plans
-account for every case in the current synthetic suite, including previously passing
-positives, failures, custom definitions and safety controls. The baseline is the
-exact production assessment plan. Its paired candidate removes only optional Noul
-yes/no criteria from initial fit questions; instructions, state, definitions,
-scopes, thresholds, Choice questions and partitioning stay identical. Cases with
-no eligible evidence are recorded without requests. This replaces the rejected
-dimension-specific experiment; old journals remain historical evidence.
-
-The offline report requires a journal matching the current comparison plan. It
-separates required-tag gains/losses, forbidden-tag threshold crossings, and changes
-to tags with no explicit expectation. Missing or unpaired responses stay unknown;
-partial runs cannot look complete. Duplicate, uncheckpointed, malformed or
-wrong-model responses are rejected. Reported token totals include reporting counts
-so absent usage cannot be mistaken for complete accounting. First-pass candidates
-are not final tags: capacity, grounding, period applicability, conformance and
-safety repeats are not evaluated by this experiment. No diagnostic pass rate is
-reported and no production adoption follows automatically. Full plans include conformance,
-the entire current quality suite, safety repeats, inference identity, scoring
-expectations and conservative total request/input bounds.
-
-The evidence plan holds production question bodies, criteria, definitions and
-thresholds fixed while varying supplied data. It includes all existing cases and
-vocabulary entries, previous successes, explicit negatives, custom definitions and
-ending-conflict controls. Partitions are shared across arms and sized for the
-largest state; they may differ from normal production packing. Identical/no-op
-and empty-observation variants make no call and are explicitly reported. Six cases
-have one budgeted identical-input repeat to expose score variation. Arm order
-rotates deterministically; a repeat is not an automatic retry. All other identical
-provider bodies share one physical request across cases/arms. Logical scoring
-contexts retain their own expectations, and shared request IDs expose reuse and
-differing expectation sets. Physical request labels describe only the first use.
-
-Evidence reports compare each variant with its paired baseline within source cohort
-and tag group. They retain raw scores, required-tag retention, forbidden candidates,
-unscored crossings, separate period Choice snapshots, byte sizes, actual usage and
-repeat controls. Period applicability and grounding are not run. Different arm
-denominators cannot be ranked as comparable pass rates. Removing the only supporting
-fact can correctly cause abstention; copied genre text under catalog attribution
-does not establish the value of independently retrieved catalog facts. Empty arms,
-incomplete pairs and absent usage remain distinct. No automatic best variant or
-production adoption follows. The report shares the durable journal validator with
-the question comparison; the larger evidence journal has a 256 MiB read bound.
-Per-arm counts and paired usage describe logical comparisons, with separate distinct
-request sets; shared inputs are not independent samples. Only root usage counts
-each paid response once. Do not sum paired baseline or variant usage as total spend.
-
-After separate paid-run authorization, `run`, `evidence-run` or `quality-run` requires
-`--key-file` (a temporary secret outside source control), `--plan-sha256`,
-`--max-requests` and `--max-input-units`, plus a new `--output` journal or
-`--output-directory`. Use `--help` for the exact arguments. All runners require
-the plan's exact total request/input bounds before reading credentials. The full
-runner uses an isolated SQLite job database and
-the production planner/executor/scorer. A
-successfully completed job can still have `evaluation.passed: false`; neither
-command writes application acceptance. Stop after any uncertain request and
-inspect the saved journal; existing runs are never resumed or retried. See the
-[dated live results](AI_ACCEPTANCE.md#jev-full-v8-validation-and-rollback-2026-09-28).
+Jev mood-tagging experiments (`jev-compare` and the `jev-*` report scripts) live
+outside this repository in the owner's local research folder. They are not part
+of any gate here.
 
 ## Frontend
 

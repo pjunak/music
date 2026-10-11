@@ -129,7 +129,7 @@ case regressed by adding an unsupported second custom tag. The model remains
 uncertified. See the [acceptance record](AI_ACCEPTANCE.md#jev-controlled-comparison-and-full-validation-2026-09-27)
 for complete usage, remaining fixture contradictions and semantic failures.
 
-The developer-only `jev-compare` example creates offline, hash-bound plans and
+The developer-only `jev-compare` research harness (kept outside this repository) creates offline, hash-bound plans and
 uses synthetic fixtures without application configuration or library access.
 Paid runs are explicit, bounded, checkpointed before I/O and never retried.
 Full evaluation reuses the native executor, durable SQLite jobs and shared scorer;
