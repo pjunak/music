@@ -43,7 +43,8 @@ pub use local_analysis::{
     LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LibraryContextPassSummary,
     LibraryContextSummary, LocalAnalysisError, LocalAnalysisRepository, LocalAnalysisService,
     ModelAnalysisWrite, TrackContextDetail, VOICE_ANALYZER_ID, VOICE_MODEL_FILENAME,
-    VOICE_MODEL_SHA256, VoiceAnalyzerStatus, context_source_signature, parse_context_state,
+    VOICE_MODEL_SHA256, VoiceAnalyzerState, VoiceAnalyzerStatus, context_source_signature,
+    parse_context_state,
 };
 pub use model_batch::*;
 pub use model_eq::*;

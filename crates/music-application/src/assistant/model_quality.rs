@@ -71,6 +71,10 @@ pub const MODEL_EVALUATIONS: &[ModelEvaluationDefinition] = &[
     },
 ];
 
+/// Stored outcomes of a completed evaluation run.
+pub const EVALUATION_PASSED: &str = "passed";
+pub const EVALUATION_FAILED: &str = "failed";
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ModelEvaluationRecord {
     pub role_id: String,
@@ -299,7 +303,7 @@ impl ModelQualityService {
             .map_err(ModelQualityError::Dependency)?;
         let passed = records.iter().any(|record| {
             record.evaluation_id == evaluation_id
-                && record.status == "passed"
+                && record.status == EVALUATION_PASSED
                 && record.suite_id == execution.definition.suite_id
                 && record.role_fingerprint == execution.role.fingerprint
         });
@@ -373,9 +377,9 @@ impl ModelQualityService {
                 expected_connection_fingerprint: execution.role.connection_fingerprint.clone(),
                 role_fingerprint: execution.role.fingerprint.clone(),
                 status: if passed {
-                    "passed".to_owned()
+                    EVALUATION_PASSED.to_owned()
                 } else {
-                    "failed".to_owned()
+                    EVALUATION_FAILED.to_owned()
                 },
                 suite_id: execution.definition.suite_id.to_owned(),
                 engine_id: engine_id.to_owned(),
@@ -417,8 +421,8 @@ fn evaluation_view(
         {
             ModelEvaluationStatus::Stale
         }
-        Some(record) if record.status == "passed" => ModelEvaluationStatus::Passed,
-        Some(record) if record.status == "failed" => ModelEvaluationStatus::Failed,
+        Some(record) if record.status == EVALUATION_PASSED => ModelEvaluationStatus::Passed,
+        Some(record) if record.status == EVALUATION_FAILED => ModelEvaluationStatus::Failed,
         Some(_) => ModelEvaluationStatus::Never,
     };
     ModelEvaluationView {

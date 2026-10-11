@@ -146,10 +146,29 @@ impl ContextScope {
     }
 }
 
+/// Whether the optional voice model can run.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum VoiceAnalyzerState {
+    NotConfigured,
+    Unavailable,
+    Ready,
+}
+
+impl VoiceAnalyzerState {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotConfigured => "not_configured",
+            Self::Unavailable => "unavailable",
+            Self::Ready => "ready",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VoiceAnalyzerStatus {
     pub analyzer_id: String,
-    pub status: String,
+    pub status: VoiceAnalyzerState,
     pub reason: Option<String>,
     pub model_filename: String,
     pub model_sha256: String,
@@ -161,7 +180,7 @@ impl VoiceAnalyzerStatus {
     pub fn not_configured() -> Self {
         Self {
             analyzer_id: VOICE_ANALYZER_ID.to_owned(),
-            status: "not_configured".to_owned(),
+            status: VoiceAnalyzerState::NotConfigured,
             reason: None,
             model_filename: VOICE_MODEL_FILENAME.to_owned(),
             model_sha256: VOICE_MODEL_SHA256.to_owned(),
@@ -173,7 +192,7 @@ impl VoiceAnalyzerStatus {
     pub fn unavailable(reason: impl Into<String>) -> Self {
         Self {
             analyzer_id: VOICE_ANALYZER_ID.to_owned(),
-            status: "unavailable".to_owned(),
+            status: VoiceAnalyzerState::Unavailable,
             reason: Some(reason.into()),
             model_filename: VOICE_MODEL_FILENAME.to_owned(),
             model_sha256: VOICE_MODEL_SHA256.to_owned(),
@@ -195,7 +214,7 @@ impl VoiceAnalyzerStatus {
     pub fn ready(source_signature: impl Into<String>) -> Self {
         Self {
             analyzer_id: VOICE_ANALYZER_ID.to_owned(),
-            status: "ready".to_owned(),
+            status: VoiceAnalyzerState::Ready,
             reason: None,
             model_filename: VOICE_MODEL_FILENAME.to_owned(),
             model_sha256: VOICE_MODEL_SHA256.to_owned(),
@@ -205,7 +224,7 @@ impl VoiceAnalyzerStatus {
 
     #[must_use]
     pub fn is_ready(&self) -> bool {
-        self.status == "ready" && self.source_signature.is_some()
+        self.status == VoiceAnalyzerState::Ready && self.source_signature.is_some()
     }
 }
 

@@ -12,7 +12,7 @@ mod cleanup_rejection_tests;
 use music_analysis::{AnalysisExecutor, AudioContextAnalyzer, FfmpegContextAnalyzer, VoiceBackend};
 use music_application::assistant::{
     AssistantRepository, AssistantService, LocalAnalysisRepository, LocalAnalysisService,
-    ModelEvaluationRepository, ProviderCredentialSource, ProviderRepository,
+    ModelEvaluationRepository, ProviderCredentialSource, ProviderRepository, VoiceAnalyzerState,
 };
 use music_application::cleanup::{
     CleanupMutationRepository, CleanupNameLookup, CleanupRepository, CleanupService,
@@ -61,7 +61,7 @@ use crate::cleanup_enrichment::{
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
-use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
+use crate::health::{Component, ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::http::{RuntimeServices, build_router};
 use crate::library::RuntimeLibrary;
 use crate::model_jobs::{model_evaluation_job_handlers, model_feature_job_handlers};
@@ -109,40 +109,40 @@ impl AppRuntime {
         }
         let config = Arc::new(config);
         let health = HealthRegistry::new();
-        health.set_component("configuration", true, ComponentStatus::Ready);
-        health.set_component("filesystem", true, ComponentStatus::Starting);
-        health.set_component("instance_lock", true, ComponentStatus::Starting);
-        health.set_component("database", true, ComponentStatus::Starting);
-        health.set_component("database_schema", true, ComponentStatus::Starting);
-        health.set_component("playback", true, ComponentStatus::Starting);
-        health.set_component("authentication", true, ComponentStatus::Starting);
-        health.set_component("library_coordinator", true, ComponentStatus::Starting);
-        health.set_component("library", false, ComponentStatus::Starting);
-        health.set_component("background_jobs", true, ComponentStatus::Starting);
-        health.set_component("voice_analysis", false, ComponentStatus::Starting);
-        health.set_component("mode_coordinator", true, ComponentStatus::Starting);
-        health.set_component("modes", false, ComponentStatus::Starting);
-        health.set_component("sfx", true, ComponentStatus::Starting);
-        health.set_component("runtime", true, ComponentStatus::Starting);
+        health.set_component(Component::Configuration, ComponentStatus::Ready);
+        health.set_component(Component::Filesystem, ComponentStatus::Starting);
+        health.set_component(Component::InstanceLock, ComponentStatus::Starting);
+        health.set_component(Component::Database, ComponentStatus::Starting);
+        health.set_component(Component::DatabaseSchema, ComponentStatus::Starting);
+        health.set_component(Component::Playback, ComponentStatus::Starting);
+        health.set_component(Component::Authentication, ComponentStatus::Starting);
+        health.set_component(Component::LibraryCoordinator, ComponentStatus::Starting);
+        health.set_component(Component::Library, ComponentStatus::Starting);
+        health.set_component(Component::BackgroundJobs, ComponentStatus::Starting);
+        health.set_component(Component::VoiceAnalysis, ComponentStatus::Starting);
+        health.set_component(Component::ModeCoordinator, ComponentStatus::Starting);
+        health.set_component(Component::Modes, ComponentStatus::Starting);
+        health.set_component(Component::Sfx, ComponentStatus::Starting);
+        health.set_component(Component::Runtime, ComponentStatus::Starting);
 
         initialize_directories(&config, &health)?;
         let storage =
             match SqliteStorage::open(SqliteStorageOptions::new(&config.database_path)).await {
                 Ok(storage) => Arc::new(storage),
                 Err(error) => {
-                    health.set_component("instance_lock", true, ComponentStatus::Failed);
-                    health.set_component("database", true, ComponentStatus::Failed);
-                    health.set_component("database_schema", true, ComponentStatus::Failed);
+                    health.set_component(Component::InstanceLock, ComponentStatus::Failed);
+                    health.set_component(Component::Database, ComponentStatus::Failed);
+                    health.set_component(Component::DatabaseSchema, ComponentStatus::Failed);
                     return Err(error.into());
                 }
             };
         if let Err(error) = storage.healthcheck().await {
-            health.set_component("database", true, ComponentStatus::Failed);
+            health.set_component(Component::Database, ComponentStatus::Failed);
             return Err(error.into());
         }
-        health.set_component("instance_lock", true, ComponentStatus::Ready);
-        health.set_component("database", true, ComponentStatus::Ready);
-        health.set_component("database_schema", true, ComponentStatus::Ready);
+        health.set_component(Component::InstanceLock, ComponentStatus::Ready);
+        health.set_component(Component::Database, ComponentStatus::Ready);
+        health.set_component(Component::DatabaseSchema, ComponentStatus::Ready);
 
         let migration = storage.migration_outcome();
         if let Some(backup) = &migration.backup {
@@ -184,9 +184,8 @@ impl AppRuntime {
         let voice_analyzer = voice_backend.status;
         let voice_worker_factory = voice_backend.worker_factory;
         health.set_component(
-            "voice_analysis",
-            false,
-            if voice_analyzer.status == "unavailable" {
+            Component::VoiceAnalysis,
+            if voice_analyzer.status == VoiceAnalyzerState::Unavailable {
                 ComponentStatus::Degraded
             } else {
                 ComponentStatus::Ready
@@ -206,7 +205,7 @@ impl AppRuntime {
             MaintenanceGate::default(),
         ));
         let devices = Arc::new(RuntimeDevices::new(Arc::clone(&storage)));
-        health.set_component("authentication", true, ComponentStatus::Ready);
+        health.set_component(Component::Authentication, ComponentStatus::Ready);
 
         let supervisor = TaskSupervisor::new(health.clone());
         let playback = match start_playback_actor(
@@ -220,12 +219,12 @@ impl AppRuntime {
         {
             Ok(spawned) => supervise_playback(&supervisor, spawned)?,
             Err(error) => {
-                health.set_component("playback", true, ComponentStatus::Failed);
+                health.set_component(Component::Playback, ComponentStatus::Failed);
                 storage.close().await;
                 return Err(error.into());
             }
         };
-        health.set_component("playback", true, ComponentStatus::Ready);
+        health.set_component(Component::Playback, ComponentStatus::Ready);
         let mode_source = Arc::new(FilesystemModeCatalogSource::open(&config.modes_dir)?);
         let mode_sink: Arc<dyn ModeCatalogSink> = Arc::new(playback.clone());
         let mode_journal: Arc<dyn RecoveryJournalRepository> = storage.clone();
@@ -247,7 +246,7 @@ impl AppRuntime {
         .await?;
         let modes = supervise_modes(&supervisor, spawned_modes, health.clone())?;
         let initial_mode_status = modes.wait_until_initialized().await?;
-        health.set_component("mode_coordinator", true, ComponentStatus::Ready);
+        health.set_component(Component::ModeCoordinator, ComponentStatus::Ready);
         apply_mode_health(&health, initial_mode_status.state);
         let media_executor = BlockingMediaExecutor::default();
         let sfx_root = SfxRoot::open(&config.sfx_library_dir)?;
@@ -261,7 +260,7 @@ impl AppRuntime {
             max_upload_file_bytes: config.max_upload_file_bytes,
             media_executor: media_executor.clone(),
         });
-        health.set_component("sfx", true, ComponentStatus::Ready);
+        health.set_component(Component::Sfx, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
         let library_metadata =
             MetadataAdapter::with_ffmpeg(FfmpegTools::new(ffmpeg.clone(), ffprobe_executable()));
@@ -388,13 +387,13 @@ impl AppRuntime {
             &supervisor,
             start_job_coordinator(job_repository, job_handlers).await?,
         )?;
-        health.set_component("background_jobs", true, ComponentStatus::Ready);
+        health.set_component(Component::BackgroundJobs, ComponentStatus::Ready);
         start_model_batch_monitor(&supervisor, providers.batches.clone(), Arc::clone(&jobs))?;
-        health.set_component("library_coordinator", true, ComponentStatus::Ready);
+        health.set_component(Component::LibraryCoordinator, ComponentStatus::Ready);
         apply_library_health(&health, library.status().status);
         library.request_reconciliation()?;
         start_database_monitor(&supervisor, Arc::clone(&storage))?;
-        health.set_component("runtime", true, ComponentStatus::Ready);
+        health.set_component(Component::Runtime, ComponentStatus::Ready);
 
         tracing::info!(
             music_dir = %config.music_dir.display(),
@@ -485,13 +484,13 @@ impl AppRuntime {
             Ok(router) => router,
             Err(error) => {
                 self.health
-                    .set_component("http", true, ComponentStatus::Failed);
+                    .set_component(Component::Http, ComponentStatus::Failed);
                 let _ = self.shutdown().await;
                 return Err(error);
             }
         };
         self.health
-            .set_component("http", true, ComponentStatus::Ready);
+            .set_component(Component::Http, ComponentStatus::Ready);
         let cancellation = self.supervisor.cancellation_token();
         let graceful_cancellation = cancellation.clone();
         let server = async move {
@@ -528,7 +527,7 @@ impl AppRuntime {
 
     pub async fn shutdown(&self) -> Result<(), RuntimeError> {
         self.health
-            .set_component("http", true, ComponentStatus::Starting);
+            .set_component(Component::Http, ComponentStatus::Starting);
         self.jobs.shutdown();
         let supervisor_result = self.supervisor.shutdown(SHUTDOWN_TIMEOUT).await;
         self.storage.close().await;
@@ -544,7 +543,7 @@ fn supervise_playback(
     let shutdown_handle = handle.clone();
     let cancellation = supervisor.cancellation_token();
     let mut task = spawned.task;
-    supervisor.spawn_critical("playback-owner", "playback", async move {
+    supervisor.spawn_critical("playback-owner", Component::Playback, async move {
         tokio::select! {
             result = &mut task => map_playback_exit(result),
             () = cancellation.cancelled() => {
@@ -579,7 +578,7 @@ fn supervise_modes(
     let mut status = handle.subscribe_status();
     let cancellation = supervisor.cancellation_token();
     let mut task = spawned.task;
-    supervisor.spawn_critical("mode-owner", "mode_coordinator", async move {
+    supervisor.spawn_critical("mode-owner", Component::ModeCoordinator, async move {
         loop {
             tokio::select! {
                 result = &mut task => return map_mode_exit(result),
@@ -621,25 +620,29 @@ fn supervise_jobs(
     let cancellation = supervisor.cancellation_token();
     let mut local_task = spawned.local_task;
     let mut provider_task = spawned.provider_task;
-    supervisor.spawn_critical("background-job-owner", "background_jobs", async move {
-        tokio::select! {
-            local_result = &mut local_task => {
-                shutdown_service.shutdown();
-                let provider_result = provider_task.await;
-                map_job_exits(local_result, provider_result)
+    supervisor.spawn_critical(
+        "background-job-owner",
+        Component::BackgroundJobs,
+        async move {
+            tokio::select! {
+                local_result = &mut local_task => {
+                    shutdown_service.shutdown();
+                    let provider_result = provider_task.await;
+                    map_job_exits(local_result, provider_result)
+                }
+                provider_result = &mut provider_task => {
+                    shutdown_service.shutdown();
+                    let local_result = local_task.await;
+                    map_job_exits(local_result, provider_result)
+                }
+                () = cancellation.cancelled() => {
+                    shutdown_service.shutdown();
+                    let (local_result, provider_result) = tokio::join!(local_task, provider_task);
+                    map_job_exits(local_result, provider_result)
+                }
             }
-            provider_result = &mut provider_task => {
-                shutdown_service.shutdown();
-                let local_result = local_task.await;
-                map_job_exits(local_result, provider_result)
-            }
-            () = cancellation.cancelled() => {
-                shutdown_service.shutdown();
-                let (local_result, provider_result) = tokio::join!(local_task, provider_task);
-                map_job_exits(local_result, provider_result)
-            }
-        }
-    })?;
+        },
+    )?;
     Ok(service)
 }
 
@@ -667,7 +670,7 @@ fn supervise_library(
     let mut status = handle.subscribe_status();
     let cancellation = supervisor.cancellation_token();
     let mut task = spawned.task;
-    supervisor.spawn_critical("library-owner", "library_coordinator", async move {
+    supervisor.spawn_critical("library-owner", Component::LibraryCoordinator, async move {
         loop {
             tokio::select! {
                 result = &mut task => return map_library_exit(result),
@@ -702,8 +705,7 @@ fn map_library_exit(
 
 fn apply_library_health(health: &HealthRegistry, status: ReconciliationStatus) {
     health.set_component(
-        "library",
-        false,
+        Component::Library,
         if status == ReconciliationStatus::Failed {
             ComponentStatus::Degraded
         } else {
@@ -718,7 +720,7 @@ fn apply_mode_health(health: &HealthRegistry, status: ModeLoadState) {
         ModeLoadState::Current => ComponentStatus::Ready,
         ModeLoadState::Degraded | ModeLoadState::Failed => ComponentStatus::Degraded,
     };
-    health.set_component("modes", false, health_status);
+    health.set_component(Component::Modes, health_status);
 }
 
 pub fn initialize_tracing(config: &AppConfig) -> Result<(), RuntimeError> {
@@ -734,7 +736,7 @@ fn start_database_monitor(
     storage: Arc<SqliteStorage>,
 ) -> Result<(), RuntimeError> {
     let cancellation = supervisor.cancellation_token();
-    supervisor.spawn_critical("database-monitor", "database", async move {
+    supervisor.spawn_critical("database-monitor", Component::Database, async move {
         let first_tick = Instant::now() + DATABASE_HEALTH_INTERVAL;
         let mut interval = tokio::time::interval_at(first_tick, DATABASE_HEALTH_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -763,7 +765,7 @@ fn start_model_batch_monitor(
     jobs: Arc<music_application::jobs::JobService>,
 ) -> Result<(), RuntimeError> {
     let cancellation = supervisor.cancellation_token();
-    supervisor.spawn_critical("model-batch-monitor", "background_jobs", async move {
+    supervisor.spawn_critical("model-batch-monitor", Component::BackgroundJobs, async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
@@ -789,7 +791,7 @@ fn start_model_batch_monitor(
 fn initialize_directories(config: &AppConfig, health: &HealthRegistry) -> Result<(), RuntimeError> {
     crate::storage_admin::create_storage_directories(config)
         .map_err(|source| RuntimeError::io("initialize storage directories", source))?;
-    health.set_component("filesystem", true, ComponentStatus::Ready);
+    health.set_component(Component::Filesystem, ComponentStatus::Ready);
 
     match crate::storage_admin::seed_modes_if_empty(config) {
         Ok(
@@ -798,14 +800,14 @@ fn initialize_directories(config: &AppConfig, health: &HealthRegistry) -> Result
             | crate::storage_admin::ModeSeedOutcome::Seeded
             | crate::storage_admin::ModeSeedOutcome::TargetNotEmpty,
         ) => {
-            health.set_component("mode_seed", false, ComponentStatus::Ready);
+            health.set_component(Component::ModeSeed, ComponentStatus::Ready);
         }
         Ok(crate::storage_admin::ModeSeedOutcome::SourceUnavailable) => {
-            health.set_component("mode_seed", false, ComponentStatus::Degraded);
+            health.set_component(Component::ModeSeed, ComponentStatus::Degraded);
             tracing::warn!("configured mode seed is unavailable; continuing without seeding");
         }
         Err(error) => {
-            health.set_component("mode_seed", false, ComponentStatus::Degraded);
+            health.set_component(Component::ModeSeed, ComponentStatus::Degraded);
             tracing::warn!(error_kind = ?error.kind(), "mode seeding was incomplete");
         }
     }

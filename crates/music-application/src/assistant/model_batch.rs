@@ -27,11 +27,94 @@ pub(super) fn deserialize_track_id<'de, D: serde::Deserializer<'de>>(
     music_domain::TrackId::new(i64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
 }
 
+/// Where a provider batch is in its lifecycle. Local steps and terminal
+/// states are explicit; the provider's own in-flight states (validating,
+/// in_progress, finalizing, ...) are kept verbatim because the provider owns
+/// that list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum BatchState {
+    Uploading,
+    Uploaded,
+    Submitting,
+    Submitted,
+    Cancelling,
+    ResultsSaved,
+    Completed,
+    Failed,
+    Expired,
+    Cancelled,
+    Provider(String),
+}
+
+impl BatchState {
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "uploading" => Self::Uploading,
+            "uploaded" => Self::Uploaded,
+            "submitting" => Self::Submitting,
+            "submitted" => Self::Submitted,
+            "cancelling" => Self::Cancelling,
+            "results_saved" => Self::ResultsSaved,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "expired" => Self::Expired,
+            "cancelled" => Self::Cancelled,
+            other => Self::Provider(other.to_owned()),
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Uploading => "uploading",
+            Self::Uploaded => "uploaded",
+            Self::Submitting => "submitting",
+            Self::Submitted => "submitted",
+            Self::Cancelling => "cancelling",
+            Self::ResultsSaved => "results_saved",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Expired => "expired",
+            Self::Cancelled => "cancelled",
+            Self::Provider(state) => state,
+        }
+    }
+
+    /// The provider will not change a batch in this state again.
+    #[must_use]
+    pub const fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Expired | Self::Cancelled
+        )
+    }
+}
+
+impl PartialEq<&str> for BatchState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl From<String> for BatchState {
+    fn from(value: String) -> Self {
+        Self::parse(&value)
+    }
+}
+
+impl From<BatchState> for String {
+    fn from(value: BatchState) -> Self {
+        value.as_str().to_owned()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelBatchRecord {
     pub id: String,
     pub connection_id: String,
-    pub state: String,
+    pub state: BatchState,
     pub input_file_id: Option<String>,
     pub remote_batch_id: Option<String>,
     pub document: Value,
@@ -40,10 +123,7 @@ pub struct ModelBatchRecord {
 impl ModelBatchRecord {
     #[must_use]
     pub fn pending(&self) -> bool {
-        !matches!(
-            self.state.as_str(),
-            "completed" | "cancelled" | "failed" | "expired"
-        )
+        !self.state.is_terminal()
     }
 }
 
@@ -63,7 +143,7 @@ pub trait ModelBatchRepository: std::fmt::Debug + Send + Sync {
 #[derive(Debug)]
 pub struct ProviderBatchStatus {
     pub run_id: String,
-    pub state: String,
+    pub state: BatchState,
     pub input_file_id: String,
     pub output_file_id: Option<String>,
     pub error_file_id: Option<String>,

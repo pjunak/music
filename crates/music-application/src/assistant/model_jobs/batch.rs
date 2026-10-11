@@ -1,6 +1,6 @@
 use super::*;
 use crate::assistant::{
-    ModelBatchRecord, ModelTaggerBatch, PlannedTaggerBatch, ProviderUsageSummary,
+    BatchState, ModelBatchRecord, ModelTaggerBatch, PlannedTaggerBatch, ProviderUsageSummary,
 };
 
 impl ModelFeatureJobHandler {
@@ -51,7 +51,7 @@ impl ModelFeatureJobHandler {
         let mut record = ModelBatchRecord {
             id: context.job_id().to_owned(),
             connection_id: role.connection_id.clone(),
-            state: "uploading".to_owned(),
+            state: BatchState::Uploading,
             input_file_id: None,
             remote_batch_id: None,
             document: json!({"parameters":parameters,"inputs":inputs,"templates":templates,
@@ -85,12 +85,12 @@ impl ModelFeatureJobHandler {
                 .await
                 .map_err(model_task_failure)?,
         );
-        persist(services, &mut record, "uploaded").await?;
+        persist(services, &mut record, BatchState::Uploaded).await?;
         context
             .check_cancelled()
             .await
             .map_err(JobHandlerError::from_execution)?;
-        persist(services, &mut record, "submitting").await?;
+        persist(services, &mut record, BatchState::Submitting).await?;
         record.remote_batch_id = Some(
             services
                 .transport
@@ -105,10 +105,10 @@ impl ModelFeatureJobHandler {
                 .await
                 .map_err(model_task_failure)?,
         );
-        persist(services, &mut record, "submitted").await?;
+        persist(services, &mut record, BatchState::Submitted).await?;
         Ok(
             json!({"schema_version":"assistant-model-batch-submitted/v1", "batch_id":record.id,
-            "remote_batch_id":record.remote_batch_id, "state":record.state, "usage":usage.summary()}),
+            "remote_batch_id":record.remote_batch_id, "state":record.state.as_str(), "usage":usage.summary()}),
         )
     }
 
@@ -154,12 +154,12 @@ impl ModelFeatureJobHandler {
             .await
             .map_err(|error| JobHandlerError::new(error.code()))?;
         if record.remote_batch_id.is_none() {
-            if record.state == "submitting" && action.cancel && action.abandon_uncertain {
+            if record.state == BatchState::Submitting && action.cancel && action.abandon_uncertain {
                 record.document = json!({"result":{"batch_id":record.id,"state":"cancelled","submission_still_uncertain":true,"usage":record.document["submission_usage"],
                     "note":"Operator abandoned the local record after checking the provider account; this does not cancel an unknown remote batch."}});
-                persist(services, &mut record, "cancelled").await?;
+                persist(services, &mut record, BatchState::Cancelled).await?;
                 return Ok(record.document["result"].clone());
-            } else if record.state == "submitting" {
+            } else if record.state == BatchState::Submitting {
                 let remote = action
                     .remote_batch_id
                     .ok_or_else(|| JobHandlerError::new("batch_submission_uncertain_recover_id"))?;
@@ -174,7 +174,7 @@ impl ModelFeatureJobHandler {
                     return Err(JobHandlerError::new("batch_identity_mismatch"));
                 }
                 record.remote_batch_id = Some(remote);
-                persist(services, &mut record, "submitted").await?;
+                persist(services, &mut record, BatchState::Submitted).await?;
             } else if action.cancel {
                 if let Some(file) = &record.input_file_id {
                     services
@@ -184,7 +184,7 @@ impl ModelFeatureJobHandler {
                         .map_err(model_task_failure)?;
                 }
                 record.document = json!({"result":{"batch_id":record.id,"state":"cancelled","no_inference_submitted":true}});
-                persist(services, &mut record, "cancelled").await?;
+                persist(services, &mut record, BatchState::Cancelled).await?;
                 return Ok(record.document["result"].clone());
             } else {
                 return Err(JobHandlerError::new(
@@ -196,7 +196,7 @@ impl ModelFeatureJobHandler {
             .remote_batch_id
             .clone()
             .ok_or_else(|| JobHandlerError::new("batch_missing_id"))?;
-        if record.state != "results_saved" {
+        if record.state != BatchState::ResultsSaved {
             context
                 .check_cancelled()
                 .await
@@ -211,11 +211,8 @@ impl ModelFeatureJobHandler {
             {
                 return Err(JobHandlerError::new("batch_identity_mismatch"));
             }
-            if !matches!(
-                status.state.as_str(),
-                "completed" | "failed" | "expired" | "cancelled"
-            ) {
-                if action.cancel && status.state != "cancelling" {
+            if !status.state.is_terminal() {
+                if action.cancel && status.state != BatchState::Cancelling {
                     services
                         .transport
                         .cancel(&target, &remote)
@@ -223,13 +220,13 @@ impl ModelFeatureJobHandler {
                         .map_err(model_task_failure)?;
                 }
                 let state = if action.cancel {
-                    "cancelling"
+                    BatchState::Cancelling
                 } else {
-                    status.state.as_str()
+                    status.state.clone()
                 };
                 persist(services, &mut record, state).await?;
                 return Ok(
-                    json!({"batch_id":record.id,"state":record.state,"remote_batch_id":remote}),
+                    json!({"batch_id":record.id,"state":record.state.as_str(),"remote_batch_id":remote}),
                 );
             }
             let parameters: ModelTaggingJobParameters =
@@ -369,7 +366,7 @@ impl ModelFeatureJobHandler {
                 "suggested_tags":suggested_tags,"track_results":track_results,
                 "stale_configuration":!current,"usage":usage.summary()});
             record.document = json!({"result":result,"terminal_state":status.state,"output_file_id":status.output_file_id,"error_file_id":status.error_file_id});
-            persist(services, &mut record, "results_saved").await?;
+            persist(services, &mut record, BatchState::ResultsSaved).await?;
         }
         // Results are durable before deletion, so a cleanup failure is retryable
         // without resubmitting or reapplying provider output.
@@ -389,9 +386,9 @@ impl ModelFeatureJobHandler {
         }
         let terminal = record.document["terminal_state"]
             .as_str()
-            .ok_or_else(|| JobHandlerError::new("batch_record_invalid"))?
-            .to_owned();
-        persist(services, &mut record, &terminal).await?;
+            .map(BatchState::parse)
+            .ok_or_else(|| JobHandlerError::new("batch_record_invalid"))?;
+        persist(services, &mut record, terminal).await?;
         Ok(record.document["result"].clone())
     }
 }
@@ -399,13 +396,12 @@ impl ModelFeatureJobHandler {
 async fn persist(
     services: &crate::assistant::ModelBatchServices,
     record: &mut ModelBatchRecord,
-    next: &str,
+    next: BatchState,
 ) -> Result<(), JobHandlerError> {
-    let expected = record.state.clone();
-    record.state = next.to_owned();
+    let expected = std::mem::replace(&mut record.state, next);
     if !services
         .repository
-        .update_model_batch(&expected, record)
+        .update_model_batch(expected.as_str(), record)
         .await
         .map_err(|error| JobHandlerError::caused_by("assistant_storage_failed", error.as_ref()))?
     {

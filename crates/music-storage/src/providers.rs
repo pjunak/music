@@ -1389,7 +1389,7 @@ mod tests {
     async fn mood_models_share_configuration_but_keep_independent_gates()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         use music_application::assistant::{
-            ModelBatchRecord, ModelBatchRepository, model_tag_inference_fingerprint,
+            BatchState, ModelBatchRecord, ModelBatchRepository, model_tag_inference_fingerprint,
         };
         let (_directory, storage) = storage().await?;
         let connection = connection("aabbccddeeff00112233445566778899", "Fixture");
@@ -1434,7 +1434,7 @@ mod tests {
         let mut batch = ModelBatchRecord {
             id: "run".to_owned(),
             connection_id: connection.id.clone(),
-            state: "submitting".to_owned(),
+            state: BatchState::parse("submitting"),
             input_file_id: None,
             remote_batch_id: None,
             document: serde_json::json!({"fixture":true}),
@@ -1465,7 +1465,7 @@ mod tests {
         );
         batch.input_file_id = Some("file-owned".to_owned());
         batch.remote_batch_id = Some("batch_owned".to_owned());
-        batch.state = "submitted".to_owned();
+        batch.state = BatchState::parse("submitted");
         assert!(storage.update_model_batch("submitting", &batch).await?);
         assert!(!storage.update_model_batch("submitting", &batch).await?);
         assert_eq!(
@@ -1477,7 +1477,7 @@ mod tests {
                 .as_deref(),
             Some("batch_owned")
         );
-        batch.state = "cancelled".to_owned();
+        batch.state = BatchState::parse("cancelled");
         assert!(storage.update_model_batch("submitted", &batch).await?);
         assert!(storage.pending_model_batch().await?.is_none());
         Ok(())

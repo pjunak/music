@@ -62,7 +62,7 @@ pub use error::{
     ApiError, HttpValidationErrorBody, PlainErrorBody, PublicErrorBody, PublicErrorDetail,
     RuntimeError, ValidationErrorDetail,
 };
-pub use health::{ComponentStatus, HealthRegistry, ReadinessSnapshot, ReadinessStatus};
+pub use health::{Component, ComponentStatus, HealthRegistry, ReadinessSnapshot, ReadinessStatus};
 pub use http::CorrelationId;
 pub use playlist_evaluation_admin::{
     ConfiguredPlaylistEvaluationError, evaluate_configured_playlist_suite,

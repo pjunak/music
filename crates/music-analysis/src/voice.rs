@@ -956,7 +956,7 @@ mod tests {
     fn disabled_and_invalid_model_statuses_are_explicit_and_path_free() -> Result<(), Box<dyn Error>>
     {
         let disabled = VoiceBackend::initialize(None, "ffmpeg");
-        assert_eq!(disabled.status.status, "not_configured");
+        assert_eq!(disabled.status.status.as_str(), "not_configured");
         assert_eq!(disabled.status.reason, None);
         assert!(disabled.worker_factory.is_none());
 
@@ -1547,7 +1547,7 @@ mod tests {
         let original = std::fs::read(&model_path)?;
         std::fs::write(&path, &original)?;
         let backend = VoiceBackend::initialize(Some(&path), "unused-ffmpeg");
-        assert_eq!(backend.status.status, "ready");
+        assert_eq!(backend.status.status.as_str(), "ready");
         let factory = backend
             .worker_factory
             .ok_or("missing ready worker factory")?;
@@ -1633,7 +1633,7 @@ mod tests {
         assert_eq!(fixed.calls, 0);
 
         let backend = VoiceBackend::initialize(Some(&model_path), ffmpeg);
-        assert_eq!(backend.status.status, "ready");
+        assert_eq!(backend.status.status.as_str(), "ready");
         let signature = backend
             .status
             .source_signature

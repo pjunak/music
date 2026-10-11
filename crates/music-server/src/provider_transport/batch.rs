@@ -1,7 +1,7 @@
 use super::*;
 use music_application::assistant::{
-    BatchTransportFuture, MAX_MODEL_BATCH_BYTES, MAX_MODEL_BATCH_REQUESTS, ModelBatchTransport,
-    ModelTaskError, ProviderBatchResult, ProviderBatchStatus,
+    BatchState, BatchTransportFuture, MAX_MODEL_BATCH_BYTES, MAX_MODEL_BATCH_REQUESTS,
+    ModelBatchTransport, ModelTaskError, ProviderBatchResult, ProviderBatchStatus,
 };
 use serde_json::json;
 
@@ -237,7 +237,7 @@ impl ModelBatchTransport for ProviderNetworkBoundary {
             }
             Ok(ProviderBatchStatus {
                 run_id: field(&value["metadata"], "music_run_id")?,
-                state,
+                state: BatchState::parse(&state),
                 input_file_id: field(&value, "input_file_id")?,
                 output_file_id: (!value["output_file_id"].is_null())
                     .then(|| field(&value, "output_file_id"))

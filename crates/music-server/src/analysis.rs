@@ -14,7 +14,7 @@ use music_application::assistant::{
     AnalysisFailureState, AnalysisFailureWrite, AssistantDependencyError, ContextScope,
     ContextState, ContextWrite, CurrentTrackContext, LIBRARY_CONTEXT_JOB_KIND,
     LOCAL_CONTEXT_ANALYZER_ID, LOCAL_CONTEXT_IMPLEMENTATION_ID, LocalAnalysisRepository,
-    VoiceAnalyzerStatus, context_source_signature, parse_context_state,
+    VoiceAnalyzerState, VoiceAnalyzerStatus, context_source_signature, parse_context_state,
 };
 use music_application::jobs::{
     JobCheckpointPolicy, JobDefinition, JobExecutionContext, JobHandler, JobHandlerError,
@@ -76,7 +76,9 @@ impl ContextAnalysisJobHandler {
         let analyzer = Arc::clone(&self.analyzer);
         let voice = if self.voice_analyzer.is_ready() && self.voice_worker_factory.is_some() {
             VoiceContextPreparation::Deferred
-        } else if self.voice_analyzer.status == "unavailable" || self.voice_analyzer.is_ready() {
+        } else if self.voice_analyzer.status == VoiceAnalyzerState::Unavailable
+            || self.voice_analyzer.is_ready()
+        {
             VoiceContextPreparation::Unavailable {
                 reason: self
                     .voice_analyzer

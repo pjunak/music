@@ -1019,7 +1019,7 @@ async fn model_batch_status(
         .ok_or_else(ApiError::not_found)?;
     Ok(Json(ModelBatchStatusResponse {
         id: batch.id,
-        state: batch.state,
+        state: batch.state.into(),
         input_file_id: batch.input_file_id,
         remote_batch_id: batch.remote_batch_id,
         result: batch.document.get("result").cloned(),
@@ -3105,7 +3105,7 @@ fn library_context_summary_response(
 fn voice_analyzer_status_response(value: VoiceAnalyzerStatus) -> VoiceAnalyzerStatusResponse {
     VoiceAnalyzerStatusResponse {
         analyzer_id: value.analyzer_id,
-        status: value.status,
+        status: value.status.as_str().to_owned(),
         reason: value.reason,
         model_filename: value.model_filename,
         model_sha256: value.model_sha256,

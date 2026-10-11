@@ -36,7 +36,7 @@ use crate::auth::RuntimeAuth;
 use crate::config::AppConfig;
 use crate::devices::RuntimeDevices;
 use crate::error::{ApiError, HttpValidationErrorBody, RuntimeError};
-use crate::health::{ComponentStatus, HealthRegistry, ReadinessSnapshot};
+use crate::health::{Component, ComponentStatus, HealthRegistry, ReadinessSnapshot};
 use crate::library::RuntimeLibrary;
 use crate::playback_projection::{canonical_state, guest_state};
 use crate::provider_api::RuntimeProviders;
@@ -184,12 +184,12 @@ fn build_router_inner(config: &AppConfig, state: HttpState) -> Result<Router, Ru
         (static_directory, static_index.filter(|path| path.is_file()))
         && static_directory.is_dir()
     {
-        health.set_component("static_files", false, ComponentStatus::Ready);
+        health.set_component(Component::StaticFiles, ComponentStatus::Ready);
         router = router.fallback_service(
             ServeDir::new(static_directory).fallback(ServeFile::new(static_index)),
         );
     } else {
-        health.set_component("static_files", false, ComponentStatus::Degraded);
+        health.set_component(Component::StaticFiles, ComponentStatus::Degraded);
         router = router.fallback(root_not_found);
     }
 
@@ -461,7 +461,7 @@ mod tests {
 
     use super::build_router_without_playback as build_router;
     use crate::config::AppConfig;
-    use crate::health::{ComponentStatus, HealthRegistry};
+    use crate::health::{Component, ComponentStatus, HealthRegistry};
 
     fn test_config(values: &[(&str, String)]) -> Result<AppConfig, Box<dyn Error>> {
         let values = values
@@ -517,8 +517,8 @@ mod tests {
     async fn liveness_stays_compatible_while_readiness_is_explicit() -> Result<(), Box<dyn Error>> {
         let config = test_config(&[])?;
         let health = HealthRegistry::new();
-        health.set_component("database", true, ComponentStatus::Ready);
-        health.set_component("playback", true, ComponentStatus::Starting);
+        health.set_component(Component::Database, ComponentStatus::Ready);
+        health.set_component(Component::Playback, ComponentStatus::Starting);
         let router = build_router(&config, health)?;
 
         let liveness = router

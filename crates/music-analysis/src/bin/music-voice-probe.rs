@@ -70,7 +70,7 @@ async fn run_with_output(
     let initialization_seconds = started.elapsed().as_secs_f64();
     let cgroup_after = cgroup_snapshot(arguments.cgroup_dir.as_deref());
     let after = ProcessMemory::capture();
-    if backend.status.status != "ready" {
+    if !backend.status.is_ready() {
         return Err(format!(
             "voice backend is not ready ({})",
             backend.status.reason.as_deref().unwrap_or("unknown reason")

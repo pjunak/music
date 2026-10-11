@@ -80,7 +80,7 @@ impl CleanupRejectionRepository for SqliteStorage {
             let search = format!(
                 "{} {} {} {}",
                 proposal.path,
-                proposal.field.as_deref().unwrap_or(&proposal.kind),
+                proposal.field.as_deref().unwrap_or(proposal.kind.as_str()),
                 proposal.old,
                 proposal.new
             )
@@ -150,7 +150,10 @@ impl CleanupRejectionRepository for SqliteStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use music_application::cleanup::{CleanupService, rejections::RejectionError};
+    use music_application::cleanup::{
+        CleanupService,
+        rejections::{ProposalKind, RejectionError},
+    };
     use serde_json::json;
     use std::sync::Arc;
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -164,7 +167,7 @@ mod tests {
             op_id: "catalog:1:title:job-1".into(),
             track_id: 1,
             path: "Album/Disc 1/Song.mp3".into(),
-            kind: "tag".into(),
+            kind: ProposalKind::Tag,
             field: Some("title".into()),
             old: json!("Song"),
             new: json!("Opening"),
@@ -353,12 +356,15 @@ mod tests {
         );
         assert_eq!(service.rejected_page(None, "_0%").await?.len(), 1);
         let mut rename = proposal();
-        rename.kind = "rename".into();
+        rename.kind = ProposalKind::Rename;
         rename.field = None;
         rename.evidence = None;
         let rename_id = service.reject_proposal(rename.clone()).await?.id;
-        assert_eq!(service.restore_rejected(rename_id).await?.kind, "rename");
-        rename.kind = "folder_rename".into();
+        assert_eq!(
+            service.restore_rejected(rename_id).await?.kind,
+            ProposalKind::Rename
+        );
+        rename.kind = ProposalKind::FolderRename;
         rename.track_id = 0;
         rename.path = "Album".into();
         rename.old = json!("Album");

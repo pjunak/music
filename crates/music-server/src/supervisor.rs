@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::error::RuntimeError;
-use crate::health::{ComponentStatus, HealthRegistry};
+use crate::health::{Component, ComponentStatus, HealthRegistry};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct CriticalTaskError {
@@ -79,7 +79,7 @@ impl TaskSupervisor {
     pub fn spawn_critical<F>(
         &self,
         task: &'static str,
-        component: &'static str,
+        component: Component,
         future: F,
     ) -> Result<(), RuntimeError>
     where
@@ -153,10 +153,10 @@ impl TaskSupervisor {
     }
 }
 
-fn record_failure(inner: &SupervisorInner, component: &'static str, failure: CriticalFailure) {
+fn record_failure(inner: &SupervisorInner, component: Component, failure: CriticalFailure) {
     inner
         .health
-        .set_component(component, true, ComponentStatus::Failed);
+        .set_component(component, ComponentStatus::Failed);
     inner.failure.send_modify(|current| {
         if current.is_none() {
             *current = Some(failure);
@@ -177,15 +177,15 @@ mod tests {
 
     use super::{CriticalTaskError, TaskSupervisor};
     use crate::error::RuntimeError;
-    use crate::health::{ComponentStatus, HealthRegistry, ReadinessStatus};
+    use crate::health::{Component, ComponentStatus, HealthRegistry, ReadinessStatus};
 
     #[tokio::test]
     async fn cooperative_tasks_are_tracked_through_shutdown() -> Result<(), Box<dyn Error>> {
         let health = HealthRegistry::new();
-        health.set_component("database", true, ComponentStatus::Ready);
+        health.set_component(Component::Database, ComponentStatus::Ready);
         let supervisor = TaskSupervisor::new(health);
         let cancellation = supervisor.cancellation_token();
-        supervisor.spawn_critical("database-monitor", "database", async move {
+        supervisor.spawn_critical("database-monitor", Component::Database, async move {
             cancellation.cancelled().await;
             Ok(())
         })?;
@@ -195,7 +195,7 @@ mod tests {
         assert!(supervisor.cancellation_token().is_cancelled());
         assert!(supervisor.failure().is_none());
         assert!(matches!(
-            supervisor.spawn_critical("late", "database", async { Ok(()) }),
+            supervisor.spawn_critical("late", Component::Database, async { Ok(()) }),
             Err(RuntimeError::TaskAdmissionClosed)
         ));
         Ok(())
@@ -204,9 +204,9 @@ mod tests {
     #[tokio::test]
     async fn task_errors_cancel_the_runtime_and_fail_readiness() -> Result<(), Box<dyn Error>> {
         let health = HealthRegistry::new();
-        health.set_component("playback", true, ComponentStatus::Ready);
+        health.set_component(Component::Playback, ComponentStatus::Ready);
         let supervisor = TaskSupervisor::new(health.clone());
-        supervisor.spawn_critical("playback-owner", "playback", async {
+        supervisor.spawn_critical("playback-owner", Component::Playback, async {
             Err(CriticalTaskError::new("playback_store_failed"))
         })?;
 
@@ -232,7 +232,7 @@ mod tests {
         let supervisor = TaskSupervisor::new(health);
         let cancellation = supervisor.cancellation_token();
         let (stopped, observed) = tokio::sync::oneshot::channel();
-        supervisor.spawn_critical("startup-owner", "runtime", async move {
+        supervisor.spawn_critical("startup-owner", Component::Runtime, async move {
             cancellation.cancelled().await;
             let _ = stopped.send(());
             Ok(())

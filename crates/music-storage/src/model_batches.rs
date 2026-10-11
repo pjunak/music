@@ -1,5 +1,7 @@
 use crate::{SqliteStorage, StorageError};
-use music_application::assistant::{AssistantFuture, ModelBatchRecord, ModelBatchRepository};
+use music_application::assistant::{
+    AssistantFuture, BatchState, ModelBatchRecord, ModelBatchRepository,
+};
 use sqlx::Row;
 
 fn decode(
@@ -8,7 +10,7 @@ fn decode(
     Ok(ModelBatchRecord {
         id: row.try_get("id")?,
         connection_id: row.try_get("connection_id")?,
-        state: row.try_get("state")?,
+        state: BatchState::parse(&row.try_get::<String, _>("state")?),
         input_file_id: row.try_get("input_file_id")?,
         remote_batch_id: row.try_get("remote_batch_id")?,
         document: serde_json::from_str(&row.try_get::<String, _>("document_json")?)?,
@@ -52,7 +54,7 @@ impl ModelBatchRepository for SqliteStorage {
                 return Ok(false);
             }
             sqlx::query("INSERT INTO assistant_model_batches (id,connection_id,state,document_json) VALUES (?,?,?,?)")
-                .bind(&record.id).bind(&record.connection_id).bind(&record.state)
+                .bind(&record.id).bind(&record.connection_id).bind(record.state.as_str())
                 .bind(record.document.to_string()).execute(&self.pool).await?;
             Ok(true)
         })
@@ -70,7 +72,7 @@ impl ModelBatchRepository for SqliteStorage {
                 )) as _);
             }
             Ok(sqlx::query("UPDATE assistant_model_batches SET state=?,input_file_id=?,remote_batch_id=?,document_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND connection_id=? AND state=?")
-                .bind(&record.state).bind(&record.input_file_id).bind(&record.remote_batch_id)
+                .bind(record.state.as_str()).bind(&record.input_file_id).bind(&record.remote_batch_id)
                 .bind(record.document.to_string()).bind(&record.id).bind(&record.connection_id).bind(expected)
                 .execute(&self.pool).await?.rows_affected() == 1)
         })

@@ -142,11 +142,12 @@ impl ModelBatchTransport for Transport {
                     "paid-run"
                 }
                 .to_owned(),
-                state: self
-                    .state
-                    .lock()
-                    .map_err(|_| ModelTaskError::new("fixture_poisoned"))?
-                    .clone(),
+                state: BatchState::parse(
+                    &self
+                        .state
+                        .lock()
+                        .map_err(|_| ModelTaskError::new("fixture_poisoned"))?,
+                ),
                 input_file_id: "file-input".to_owned(),
                 output_file_id: Some("file-output".to_owned()),
                 error_file_id: None,
@@ -448,7 +449,7 @@ async fn uncertain_batches_require_owned_recovery_and_cleanup_survives_restart()
     let mut record = ModelBatchRecord {
         id: "paid-run".to_owned(),
         connection_id: "fixture".to_owned(),
-        state: "submitting".to_owned(),
+        state: BatchState::parse("submitting"),
         input_file_id: None,
         remote_batch_id: None,
         document: json!({}),
@@ -520,7 +521,7 @@ async fn uncertain_batches_require_owned_recovery_and_cleanup_survives_restart()
         .model_batch("paid-run")
         .await?
         .ok_or("missing batch fixture value")?;
-    record.state = "results_saved".to_owned();
+    record.state = BatchState::parse("results_saved");
     record.document = json!({"result":{"updated_profiles":3},"terminal_state":"cancelled","output_file_id":"file-output"});
     assert!(storage.update_model_batch("cancelling", &record).await?);
     transport.fail_delete.store(true, Ordering::SeqCst);
@@ -576,7 +577,7 @@ async fn interrupted_uploads_cancel_locally_but_uncertain_submission_requires_ex
         let record = ModelBatchRecord {
             id: "paid-run".to_owned(),
             connection_id: "fixture".to_owned(),
-            state: state.to_owned(),
+            state: BatchState::parse(state),
             input_file_id: None,
             remote_batch_id: None,
             document: json!({}),
@@ -651,7 +652,7 @@ async fn partial_batch_results_preserve_missing_usage_and_reject_stale_inference
     let mut record = ModelBatchRecord {
         id: "paid-run".to_owned(),
         connection_id: "fixture".to_owned(),
-        state: "submitted".to_owned(),
+        state: BatchState::parse("submitted"),
         input_file_id: None,
         remote_batch_id: None,
         document: json!({"parameters":{

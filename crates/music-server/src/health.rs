@@ -38,15 +38,74 @@ impl ReadinessSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ComponentRecord {
-    critical: bool,
-    status: ComponentStatus,
+/// A runtime owner reported by readiness. Critical components gate traffic;
+/// optional ones only degrade it.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Component {
+    Authentication,
+    BackgroundJobs,
+    Configuration,
+    Database,
+    DatabaseSchema,
+    Ffmpeg,
+    Filesystem,
+    Http,
+    InstanceLock,
+    Library,
+    LibraryCoordinator,
+    ModeCoordinator,
+    ModeSeed,
+    Modes,
+    Playback,
+    Runtime,
+    Sfx,
+    StaticFiles,
+    VoiceAnalysis,
+}
+
+impl Component {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Authentication => "authentication",
+            Self::BackgroundJobs => "background_jobs",
+            Self::Configuration => "configuration",
+            Self::Database => "database",
+            Self::DatabaseSchema => "database_schema",
+            Self::Ffmpeg => "ffmpeg",
+            Self::Filesystem => "filesystem",
+            Self::Http => "http",
+            Self::InstanceLock => "instance_lock",
+            Self::Library => "library",
+            Self::LibraryCoordinator => "library_coordinator",
+            Self::ModeCoordinator => "mode_coordinator",
+            Self::ModeSeed => "mode_seed",
+            Self::Modes => "modes",
+            Self::Playback => "playback",
+            Self::Runtime => "runtime",
+            Self::Sfx => "sfx",
+            Self::StaticFiles => "static_files",
+            Self::VoiceAnalysis => "voice_analysis",
+        }
+    }
+
+    #[must_use]
+    pub const fn critical(self) -> bool {
+        !matches!(
+            self,
+            Self::Ffmpeg
+                | Self::Library
+                | Self::ModeSeed
+                | Self::Modes
+                | Self::StaticFiles
+                | Self::VoiceAnalysis
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 struct HealthState {
-    components: BTreeMap<&'static str, ComponentRecord>,
+    components: BTreeMap<Component, ComponentStatus>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,11 +120,9 @@ impl HealthRegistry {
         Self { state }
     }
 
-    pub fn set_component(&self, name: &'static str, critical: bool, status: ComponentStatus) {
+    pub fn set_component(&self, component: Component, status: ComponentStatus) {
         self.state.send_modify(|state| {
-            state
-                .components
-                .insert(name, ComponentRecord { critical, status });
+            state.components.insert(component, status);
         });
     }
 
@@ -75,24 +132,21 @@ impl HealthRegistry {
         let components = state
             .components
             .iter()
-            .map(|(&name, record)| (name.to_owned(), record.status))
+            .map(|(component, status)| (component.name().to_owned(), *status))
             .collect();
         let mut has_critical = false;
         let mut critical_starting = false;
         let mut critical_failed = false;
         let mut optional_degraded = false;
-        for record in state.components.values() {
-            if record.critical {
+        for (component, status) in &state.components {
+            if component.critical() {
                 has_critical = true;
-                match record.status {
+                match status {
                     ComponentStatus::Ready => {}
                     ComponentStatus::Starting => critical_starting = true,
                     ComponentStatus::Degraded | ComponentStatus::Failed => critical_failed = true,
                 }
-            } else if matches!(
-                record.status,
-                ComponentStatus::Degraded | ComponentStatus::Failed
-            ) {
+            } else if matches!(status, ComponentStatus::Degraded | ComponentStatus::Failed) {
                 optional_degraded = true;
             }
         }
@@ -117,22 +171,22 @@ impl Default for HealthRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{ComponentStatus, HealthRegistry, ReadinessStatus};
+    use super::{Component, ComponentStatus, HealthRegistry, ReadinessStatus};
 
     #[test]
     fn critical_components_gate_readiness_and_optional_failures_degrade() {
         let health = HealthRegistry::new();
         assert_eq!(health.snapshot().status, ReadinessStatus::Starting);
 
-        health.set_component("database", true, ComponentStatus::Starting);
-        health.set_component("ffmpeg", false, ComponentStatus::Failed);
+        health.set_component(Component::Database, ComponentStatus::Starting);
+        health.set_component(Component::Ffmpeg, ComponentStatus::Failed);
         assert_eq!(health.snapshot().status, ReadinessStatus::Starting);
 
-        health.set_component("database", true, ComponentStatus::Ready);
+        health.set_component(Component::Database, ComponentStatus::Ready);
         assert_eq!(health.snapshot().status, ReadinessStatus::Degraded);
         assert!(health.snapshot().accepts_traffic());
 
-        health.set_component("playback", true, ComponentStatus::Failed);
+        health.set_component(Component::Playback, ComponentStatus::Failed);
         assert_eq!(health.snapshot().status, ReadinessStatus::NotReady);
         assert!(!health.snapshot().accepts_traffic());
     }

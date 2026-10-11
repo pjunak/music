@@ -8,7 +8,7 @@ use axum::{
     extract::{Path, Query, State},
 };
 use music_application::cleanup::rejections::{
-    CleanupReviewProposal, REJECTION_PAGE_SIZE, RejectionError,
+    CleanupReviewProposal, ProposalKind, REJECTION_PAGE_SIZE, RejectionError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -43,13 +43,15 @@ struct Proposal {
     evidence_context: Option<String>,
 }
 
-impl From<Proposal> for CleanupReviewProposal {
-    fn from(p: Proposal) -> Self {
-        Self {
+impl TryFrom<Proposal> for CleanupReviewProposal {
+    type Error = ApiError;
+
+    fn try_from(p: Proposal) -> Result<Self, ApiError> {
+        Ok(Self {
             op_id: p.op_id,
             track_id: p.track_id,
             path: p.path,
-            kind: p.kind,
+            kind: ProposalKind::parse(&p.kind).ok_or_else(ApiError::validation)?,
             field: p.field,
             old: p.old,
             new: p.new,
@@ -58,7 +60,7 @@ impl From<Proposal> for CleanupReviewProposal {
             verified: p.verified,
             evidence: p.evidence,
             evidence_context: p.evidence_context,
-        }
+        })
     }
 }
 impl From<CleanupReviewProposal> for Proposal {
@@ -67,7 +69,7 @@ impl From<CleanupReviewProposal> for Proposal {
             op_id: p.op_id,
             track_id: p.track_id,
             path: p.path,
-            kind: p.kind,
+            kind: p.kind.as_str().to_owned(),
             field: p.field,
             old: p.old,
             new: p.new,
@@ -146,7 +148,7 @@ async fn reject(
 ) -> Result<Json<Item>, ApiError> {
     let record = crate::library::library(&state)?
         .cleanup
-        .reject_proposal(proposal.into())
+        .reject_proposal(proposal.try_into()?)
         .await
         .map_err(error)?;
     Ok(Json(Item {
@@ -163,7 +165,10 @@ async fn matching(
     _operator: Operator,
     Json(proposals): Json<Vec<Proposal>>,
 ) -> Result<Json<Vec<Option<i64>>>, ApiError> {
-    let proposals = proposals.into_iter().map(Into::into).collect::<Vec<_>>();
+    let proposals = proposals
+        .into_iter()
+        .map(CleanupReviewProposal::try_from)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(
         crate::library::library(&state)?
             .cleanup

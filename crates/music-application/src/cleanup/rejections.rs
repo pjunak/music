@@ -9,13 +9,43 @@ pub const MAX_REJECTION_MATCH: usize = 100;
 pub const REJECTION_PAGE_SIZE: usize = 50;
 const REVIEW_POLICY: &str = "cleanup-rejections/v1";
 
+/// What a cleanup proposal changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalKind {
+    Tag,
+    Rename,
+    FolderRename,
+}
+
+impl ProposalKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Tag => "tag",
+            Self::Rename => "rename",
+            Self::FolderRename => "folder_rename",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "tag" => Some(Self::Tag),
+            "rename" => Some(Self::Rename),
+            "folder_rename" => Some(Self::FolderRename),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CleanupReviewProposal {
     pub op_id: String,
     pub track_id: i64,
     pub path: String,
-    pub kind: String,
+    pub kind: ProposalKind,
     pub field: Option<String>,
     pub old: Value,
     pub new: Value,
@@ -60,8 +90,8 @@ impl CleanupReviewProposal {
         {
             return Err(RejectionError::Invalid);
         }
-        match self.kind.as_str() {
-            "tag" if self.track_id > 0 => match self.field.as_deref() {
+        match self.kind {
+            ProposalKind::Tag if self.track_id > 0 => match self.field.as_deref() {
                 Some(
                     "title"
                     | "artist"
@@ -80,9 +110,9 @@ impl CleanupReviewProposal {
                             .is_some_and(|number| (1..=9999).contains(&number)) => {}
                 _ => return Err(RejectionError::Invalid),
             },
-            "rename" | "folder_rename" if self.field.is_none() => {
-                if (self.kind == "rename" && self.track_id <= 0)
-                    || (self.kind == "folder_rename" && self.track_id != 0)
+            ProposalKind::Rename | ProposalKind::FolderRename if self.field.is_none() => {
+                if (self.kind == ProposalKind::Rename && self.track_id <= 0)
+                    || (self.kind == ProposalKind::FolderRename && self.track_id != 0)
                     || !self.new.as_str().is_some_and(|name| {
                         !name.is_empty()
                             && !name.contains(['/', '\\'])
@@ -136,7 +166,7 @@ pub fn rejection_context(
     proposal: &CleanupReviewProposal,
     snapshot: &RejectionSnapshot,
 ) -> Option<String> {
-    let context = if proposal.kind == "folder_rename" {
+    let context = if proposal.kind == ProposalKind::FolderRename {
         let prefix = format!("{}/", proposal.path);
         let mut tracks = snapshot
             .tracks
@@ -157,15 +187,15 @@ pub fn rejection_context(
         let track = snapshot.tracks.iter().find(|track| {
             track.id.get() == proposal.track_id && track.path.as_str() == proposal.path
         })?;
-        let current = match proposal.kind.as_str() {
-            "rename" => json!(
+        let current = match proposal.kind {
+            ProposalKind::Rename => json!(
                 track
                     .path
                     .file_name()
                     .rsplit_once('.')
                     .map_or(track.path.file_name(), |(stem, _)| stem)
             ),
-            "tag" => match proposal.field.as_deref()? {
+            ProposalKind::Tag => match proposal.field.as_deref()? {
                 "title" => json!(track.metadata.title),
                 "artist" => json!(track.metadata.artist),
                 "album" => json!(track.metadata.album),
@@ -179,7 +209,7 @@ pub fn rejection_context(
                 "composer" => json!(track.metadata.composer),
                 _ => return None,
             },
-            _ => return None,
+            ProposalKind::FolderRename => return None,
         };
         if current != proposal.old {
             return None;
