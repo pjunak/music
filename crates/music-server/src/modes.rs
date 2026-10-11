@@ -69,32 +69,31 @@ struct ModeDetail {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 struct InterruptSpec {
     name: String,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     playlist: Option<String>,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     soundboard_item: Option<String>,
-    #[schema(required = false, schema_with = default_zero_integer_schema)]
+    #[schema(schema_with = default_zero_integer_schema)]
     fade_in_ms: i64,
-    #[schema(required = false, schema_with = default_zero_integer_schema)]
+    #[schema(schema_with = default_zero_integer_schema)]
     fade_out_ms: i64,
-    #[schema(required = false, default = true)]
+    #[schema(default = true)]
     return_to_ambient: bool,
-    #[schema(required = false, schema_with = nullable_unit_interval_schema)]
+    #[schema(schema_with = nullable_unit_interval_schema)]
     duck_to: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 struct IntegrationsSpec {
-    #[schema(required = false, schema_with = nullable_freeform_object_schema)]
+    #[schema(schema_with = nullable_freeform_object_schema)]
     lights: Option<BTreeMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct SoundboardManifest {
     id: String,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     name: Option<String>,
-    #[schema(required = false)]
     categories: Vec<SoundboardCategory>,
 }
 
@@ -102,7 +101,6 @@ pub(crate) struct SoundboardManifest {
 struct SoundboardCategory {
     id: String,
     name: String,
-    #[schema(required = false)]
     items: Vec<SoundboardItem>,
 }
 
@@ -110,9 +108,9 @@ struct SoundboardCategory {
 struct SoundboardItem {
     file: String,
     name: String,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     icon: Option<String>,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     hotkey: Option<String>,
 }
 
@@ -120,7 +118,7 @@ struct SoundboardItem {
 struct CueSfx {
     soundboard: String,
     item: String,
-    #[schema(required = false, schema_with = unit_interval_default_one_schema)]
+    #[schema(schema_with = unit_interval_default_one_schema)]
     volume: f64,
 }
 
@@ -130,7 +128,7 @@ struct CueLoop {
     item: String,
     #[schema(schema_with = loop_interval_schema)]
     interval_s: f64,
-    #[schema(required = false, schema_with = unit_interval_default_one_schema)]
+    #[schema(schema_with = unit_interval_default_one_schema)]
     volume: f64,
 }
 
@@ -138,19 +136,17 @@ struct CueLoop {
 pub(crate) struct CueSpec {
     id: String,
     name: String,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     description: Option<String>,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     preset: Option<String>,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     playlist: Option<String>,
-    #[schema(required = false, schema_with = nonnegative_default_zero_integer_schema)]
+    #[schema(schema_with = nonnegative_default_zero_integer_schema)]
     start_index: u64,
-    #[schema(required = false, schema_with = nonnegative_default_zero_integer_schema)]
+    #[schema(schema_with = nonnegative_default_zero_integer_schema)]
     start_ms: u64,
-    #[schema(required = false)]
     sfx: Vec<CueSfx>,
-    #[schema(required = false)]
     loops: Vec<CueLoop>,
 }
 
@@ -179,11 +175,10 @@ impl ToSchema for EffectSpec {}
 struct PresetManifest {
     id: String,
     name: String,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     description: Option<String>,
-    #[schema(required = false)]
     effects: Vec<EffectSpec>,
-    #[schema(required = false, schema_with = nullable_crossfade_schema)]
+    #[schema(schema_with = nullable_crossfade_schema)]
     crossfade_ms: Option<u64>,
 }
 

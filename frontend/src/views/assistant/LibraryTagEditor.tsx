@@ -68,6 +68,7 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
     total: 0,
     offset: 0,
     limit: PAGE_SIZE,
+    review_summary: { matching_tracks: 0, sources: [] },
   });
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
@@ -538,7 +539,8 @@ export function LibraryTagEditor({ refreshKey = 0, initialModelFilter = "", init
           );
         });
     }
-    if (page.review_summary || reviewFilter || sourceFilter) setReloadKey((value) => value + 1);
+    // Refresh when visible counts or filtered membership may have changed.
+    if (page.review_summary.sources.length > 0 || reviewFilter || sourceFilter) setReloadKey((value) => value + 1);
   }
 
   return (

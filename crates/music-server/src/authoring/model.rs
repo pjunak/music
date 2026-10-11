@@ -98,7 +98,7 @@ pub(super) struct AuthoringImportIssue {
     pub(super) code: String,
     pub(super) severity: ImportIssueSeverity,
     pub(super) message: String,
-    #[schema(required = false, schema_with = nullable_selection_schema)]
+    #[schema(schema_with = nullable_selection_schema)]
     pub(super) related_item: Option<AuthoringImportSelection>,
 }
 
@@ -110,9 +110,8 @@ pub(super) struct AuthoringImportItem {
     pub(super) name: String,
     pub(super) summary: String,
     pub(super) status: ImportItemStatus,
-    #[schema(required = false, schema_with = nullable_string_schema)]
+    #[schema(schema_with = nullable_string_schema)]
     pub(super) reason: Option<String>,
-    #[serde(default)]
     pub(super) issues: Vec<AuthoringImportIssue>,
 }
 
@@ -120,7 +119,7 @@ pub(super) struct AuthoringImportItem {
 #[serde(deny_unknown_fields)]
 pub(super) struct AuthoringImportPreview {
     pub(super) source: AuthoringImportSource,
-    #[schema(required = false, schema_with = nullable_mode_schema)]
+    #[schema(schema_with = nullable_mode_schema)]
     pub(super) source_mode: Option<AuthoringImportMode>,
     pub(super) target_mode: AuthoringImportMode,
     pub(super) items: Vec<AuthoringImportItem>,

@@ -40,12 +40,16 @@ import { PresetsView } from "./PresetsView";
 const cave: PresetManifest = {
   id: "cave",
   name: "Cave",
+  description: null,
+  crossfade_ms: null,
   effects: [{ type: "lowpass", frequency: 800, q: 0.7 }],
 };
 
 const warmTavern: PresetManifest = {
   id: "warm-tavern",
   name: "Warm Tavern",
+  description: null,
+  crossfade_ms: null,
   effects: [{ type: "eq", bands: [] }],
 };
 

@@ -302,7 +302,8 @@ expiry or revocation.
 - `music-protocol` owns the WebSocket tagged unions and public state DTO. The server and Rust output
   client compile against the same crate. Wire DTOs are translated explicitly and do not double as
   internal domain objects.
-- Rust types derive Serde and TypeScript bindings. Generated TypeScript is committed; CI regenerates
+- Rust types derive Serde and TypeScript bindings: WebSocket types through `ts-rs`, HTTP types
+  rendered from the generated OpenAPI document. Generated TypeScript is committed; CI regenerates
   it and fails on drift. Warnings for unsupported Serde attributes fail the export gate rather than
   being hidden.
 - Axum routes are registered with their OpenAPI definitions. The generated

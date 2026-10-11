@@ -1,4 +1,5 @@
 import { api, type BackgroundJob } from "@/core/api";
+import type * as Http from "@/generated/http";
 
 export type ProviderVerificationStatus = "never" | "verified" | "failed";
 export type ModelConformanceStatus = "never" | "passed" | "failed";
@@ -9,165 +10,33 @@ export type ModelQualityEvaluationStatus =
   | "failed"
   | "stale";
 
-export interface ProviderCapability {
-  id: string;
-  label: string;
-  description: string;
-}
+export type ProviderCapability = Http.ProviderCapabilityOut;
 
-export interface ProviderAdapter {
-  id: string;
-  label: string;
-  description: string;
-  capability_ids: string[];
-  default_model_profile?: ProviderModelProfile;
-  model_profiles?: ProviderModelProfile[];
-}
+export type ProviderAdapter = Http.ProviderAdapterOut;
 
-export interface ProviderModelProfile {
-  id: string;
-  revision: string;
-  model_ids: string[];
-  reasoning_modes: ModelThinkingMode[];
-  max_output_tokens: number | null;
-  documented: boolean;
-  notice: string;
-  source_url: string;
-}
+export type ProviderModelProfile = Http.ModelProfileResponse;
 
-export interface ModelRoleDefinition {
-  id: string;
-  label: string;
-  description: string;
-  required_capability_ids: string[];
-  configuration_available: boolean;
-}
+export type ModelRoleDefinition = Http.ModelRoleDefinitionOut;
 
-export interface ProviderFrameworkStatus {
-  credential_storage_ready: boolean;
-  credential_storage_error: string | null;
-  credential_storage_source: "environment" | "file" | null;
-  credential_storage_key_id: string | null;
-  credential_storage_key_file_path: string | null;
-  credential_storage_host_directory_hint: string | null;
-  credential_storage_can_initialize: boolean;
-  credential_storage_initialization_error: string | null;
-  capabilities: ProviderCapability[];
-  adapters: ProviderAdapter[];
-  roles: ModelRoleDefinition[];
-}
+export type ProviderFrameworkStatus = Http.ProviderFrameworkStatusOut;
 
-export interface ProviderCredentialStorageResetResult {
-  deleted_credentials: number;
-  master_key_removed: boolean;
-  master_key_removal_error: string | null;
-  status: ProviderFrameworkStatus;
-}
+export type ProviderCredentialStorageResetResult = Http.ProviderCredentialStorageResetOut;
 
-export interface ProviderConnection {
-  id: string;
-  name: string;
-  adapter_id: string;
-  base_url: string;
-  credential_saved: boolean;
-  key_hint: string | null;
-  allow_private_network: boolean;
-  verification_status: ProviderVerificationStatus;
-  verification_error_code: string | null;
-  verified_models: string[];
-  verified_capability_ids: string[];
-  last_verified_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
+export type ProviderConnection = Http.ProviderConnectionOut;
 
-export interface ProviderConnectionCreate {
-  name: string;
-  adapter_id: string;
-  base_url: string;
-  api_key: string;
-  allow_private_network: boolean;
-}
+export type ProviderConnectionCreate = Http.ProviderConnectionCreate;
 
-export interface ProviderConnectionUpdate {
-  name?: string;
-  adapter_id?: string;
-  base_url?: string;
-  api_key?: string;
-  allow_private_network?: boolean;
-}
+export type ProviderConnectionUpdate = Http.ProviderConnectionUpdate;
 
-export interface ProviderVerification {
-  connection: ProviderConnection;
-  verified: boolean;
-  error_code: string | null;
-  models: string[];
-}
+export type ProviderVerification = Http.ProviderVerificationOut;
 
-export interface ModelRole {
-  role_id: string;
-  label: string;
-  description: string;
-  required_capability_ids: string[];
-  configuration_available: boolean;
-  connection_id: string | null;
-  connection_name: string | null;
-  model_id: string;
-  enabled: boolean;
-  effective_enabled: boolean;
-  timeout_seconds: number;
-  max_output_tokens: number;
-  thinking_mode: ModelThinkingMode;
-  verification_status: ProviderVerificationStatus | null;
-  conformance_status: ModelConformanceStatus;
-  conformance_error_code: string | null;
-  last_conformance_at: string | null;
-  updated_at: string | null;
-}
+export type ModelRole = Http.ModelRoleOut;
 
-export interface ModelConformance {
-  role: ModelRole;
-  passed: boolean;
-  error_code: string | null;
-  contract_version: "assistant-provider-conformance/v3";
-  provider_model_id: string | null;
-  finish_reason: string | null;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  duration_ms: number;
-  reasoning_tokens?: number | null;
-  request_settings?: {
-    adapter_id: string;
-    endpoint_path: string;
-    model_id: string;
-    model_profile: ProviderModelProfile;
-    thinking_mode: ModelThinkingMode;
-    max_output_tokens: number;
-    timeout_seconds: number;
-  };
-}
+export type ModelConformance = Http.ModelConformanceOut;
 
-export interface ModelQualityEvaluation {
-  evaluation_id: string;
-  role_id: string;
-  label: string;
-  description: string;
-  status: ModelQualityEvaluationStatus;
-  suite_id: string;
-  passed_cases: number;
-  total_cases: number;
-  last_job_id: string | null;
-  last_evaluated_at: string | null;
-}
+export type ModelQualityEvaluation = Http.ModelQualityEvaluationOut;
 
-export interface ModelRoleUpdate {
-  connection_id: string;
-  model_id: string;
-  enabled: boolean;
-  timeout_seconds?: number;
-  max_output_tokens?: number;
-  thinking_mode?: ModelThinkingMode;
-}
+export type ModelRoleUpdate = Http.ModelRoleUpdate;
 
 export const assistantProvidersApi = {
   getStatus: () =>

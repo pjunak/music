@@ -23,8 +23,8 @@ function isSummary(value: unknown): value is Summary {
   });
 }
 
-export function TagReviewSummary({ summary }: { summary: Summary | undefined }) {
-  // Older servers omit this field. Invalid responses must not become apparent zero counts.
+export function TagReviewSummary({ summary }: { summary: Summary }) {
+  // Invalid responses must not become apparent zero counts.
   if (!isSummary(summary)) return null;
   const reviewed = summary.sources.reduce(
     (sum, row) => sum + row.accepted + row.rejected, 0,

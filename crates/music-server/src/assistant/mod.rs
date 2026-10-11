@@ -299,8 +299,7 @@ struct PlaylistCandidateResponse {
     confidence: ConfidenceWire,
     reasons: Vec<String>,
     default_selected: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(required = false, schema_with = nullable_positive_integer_schema)]
+    #[schema(schema_with = nullable_positive_integer_schema)]
     sequence_position: Option<usize>,
     #[schema(schema_with = unit_number_schema)]
     planning_energy: f64,
@@ -325,17 +324,17 @@ struct PlaylistSuggestionResponse {
 #[serde(deny_unknown_fields)]
 #[schema(as = TagVocabularyEntry)]
 struct TagVocabularyEntryWire {
-    #[schema(pattern = "^[a-z0-9][a-z0-9._-]{1,63}$")]
+    #[schema(required = true, pattern = "^[a-z0-9][a-z0-9._-]{1,63}$")]
     id: String,
-    #[schema(min_length = 1, max_length = 64)]
+    #[schema(required = true, min_length = 1, max_length = 64)]
     name: String,
-    #[schema(min_length = 2, max_length = 300)]
+    #[schema(required = true, min_length = 2, max_length = 300)]
     description: String,
     #[serde(default)]
-    #[schema(required = false, max_items = 24)]
+    #[schema(required = true, max_items = 24)]
     aliases: Vec<String>,
     #[serde(default)]
-    #[schema(required = false, max_items = 32)]
+    #[schema(required = true, max_items = 32)]
     context_cues: Vec<String>,
 }
 
@@ -343,15 +342,15 @@ struct TagVocabularyEntryWire {
 #[serde(deny_unknown_fields)]
 #[schema(as = TagVocabularyGroup)]
 struct TagVocabularyGroupWire {
-    #[schema(pattern = "^[a-z0-9][a-z0-9_-]{1,31}$")]
+    #[schema(required = true, pattern = "^[a-z0-9][a-z0-9_-]{1,31}$")]
     key: String,
-    #[schema(min_length = 1, max_length = 64)]
+    #[schema(required = true, min_length = 1, max_length = 64)]
     label: String,
     #[serde(default)]
-    #[schema(required = false, max_length = 300, default = "")]
+    #[schema(required = true, max_length = 300, default = "")]
     description: String,
     #[serde(default)]
-    #[schema(required = false, max_items = 100)]
+    #[schema(required = true, max_items = 100)]
     tags: Vec<TagVocabularyEntryWire>,
 }
 
@@ -663,7 +662,7 @@ struct LibraryTagTrackResponse {
     manual_tags: Vec<String>,
     analysis_tags: Vec<String>,
     analysis_suggestions: Vec<AnalysisTagSuggestionResponse>,
-    #[schema(required = false, schema_with = model_analysis_status_schema)]
+    #[schema(schema_with = model_analysis_status_schema)]
     model_analysis: ModelAnalysisStatus,
 }
 
@@ -678,7 +677,6 @@ struct LibraryTagPageResponse {
     offset: usize,
     #[schema(schema_with = positive_integer_schema)]
     limit: usize,
-    #[schema(required = false)]
     review_summary: TagReviewSummaryResponse,
 }
 
@@ -1089,13 +1087,18 @@ struct ModelTaggingStartRequest {
 #[serde(default, deny_unknown_fields)]
 #[schema(as = ModelTaggingLimits)]
 struct ModelTaggingLimitsWire {
-    #[schema(minimum = 1, maximum = 10000, default = 20)]
+    #[schema(required = true, minimum = 1, maximum = 10000, default = 20)]
     max_tracks: usize,
-    #[schema(minimum = 1, maximum = 1000, default = 10)]
+    #[schema(required = true, minimum = 1, maximum = 1000, default = 10)]
     max_requests: usize,
-    #[schema(minimum = 1000, maximum = 100000000, default = 1000000)]
+    #[schema(
+        required = true,
+        minimum = 1000,
+        maximum = 100000000,
+        default = 1000000
+    )]
     max_token_reservation: u64,
-    #[schema(default = true)]
+    #[schema(required = true, default = true)]
     stop_on_empty_batch: bool,
 }
 
@@ -1210,7 +1213,7 @@ struct LibraryContextPassSummaryResponse {
     skipped_tracks: usize,
     #[schema(schema_with = nonnegative_integer_schema)]
     total_tracks: usize,
-    #[schema(required = false, default = true)]
+    #[schema(default = true)]
     enabled: bool,
 }
 

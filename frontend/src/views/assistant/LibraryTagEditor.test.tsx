@@ -68,6 +68,7 @@ const track: LibraryTagTrack = {
   album: "Campaign Music",
   manual_tags: ["medieval"],
   analysis_tags: ["tavern", "festive"],
+  model_analysis: { status: "current", job_id: "run-30", updated_at_unix_seconds: 1788700000, context_status: "full", input_snapshot: null, suggested_tag_count: 2 },
   analysis_suggestions: [
     {
       tag: "tavern",
@@ -94,6 +95,7 @@ const page: LibraryTagPage = {
   total: 1,
   offset: 0,
   limit: 50,
+  review_summary: { matching_tracks: 1, sources: [] },
 };
 
 beforeEach(() => {
@@ -112,7 +114,7 @@ describe("LibraryTagEditor", () => {
   it("exports selected tracks with and without model results without writing tags", async () => {
     vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({ ...page, total: 2, items: [track, {
       ...track, track_id: 8, title: "Unprocessed song", manual_tags: [], analysis_tags: [], analysis_suggestions: [],
-      model_analysis: { status: "missing", job_id: null, updated_at_unix_seconds: null },
+      model_analysis: { status: "missing", job_id: null, updated_at_unix_seconds: null, context_status: null, input_snapshot: null, suggested_tag_count: null },
     }] });
     const user = userEvent.setup();
     render(<LibraryTagEditor />);
@@ -154,7 +156,7 @@ describe("LibraryTagEditor", () => {
 
   it.each(["current", "stale", "missing"] as const)("shows %s AI provenance independently of suggested tags", async (status) => {
     vi.mocked(assistantApi.listLibraryTags).mockResolvedValue({ ...page, items: [{ ...track,
-      analysis_suggestions: [], model_analysis: { status, job_id: status === "missing" ? null : "run-30", updated_at_unix_seconds: status === "missing" ? null : 1788700000 },
+      analysis_suggestions: [], model_analysis: { status, job_id: status === "missing" ? null : "run-30", updated_at_unix_seconds: status === "missing" ? null : 1788700000, context_status: null, input_snapshot: null, suggested_tag_count: null },
     }] });
     render(<LibraryTagEditor />);
     await screen.findByRole("heading", { name: "Tavern Dance" });
@@ -240,7 +242,6 @@ describe("LibraryTagEditor", () => {
     render(<LibraryTagEditor />);
 
     expect(await screen.findByRole("heading", { name: "Tavern Dance" })).toBeInTheDocument();
-    expect(screen.queryByText(/Review summary/)).not.toBeInTheDocument();
     expect(screen.getByText("Your tags")).toBeInTheDocument();
     expect(screen.getByText("Generated suggestions")).toBeInTheDocument();
     expect(screen.queryByText("Audio signal evidence")).not.toBeInTheDocument();

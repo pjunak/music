@@ -36,6 +36,9 @@ import {
   modelSuggestionRequestFromJob,
 } from "./modelSuggestionJobs";
 
+/** The server's default request length, used when a stored request omits it. */
+const DEFAULT_TARGET_MINUTES = 60;
+
 type PlanningMethod = "local" | "model";
 
 interface PlaylistImportDocument {
@@ -98,7 +101,7 @@ export function PlaylistBuilderView({
     (state) => state.state?.is_playing ?? false,
   );
   const [prompt, setPrompt] = useState("");
-  const [targetMinutes, setTargetMinutes] = useState(60);
+  const [targetMinutes, setTargetMinutes] = useState(DEFAULT_TARGET_MINUTES);
   const [energyCurve, setEnergyCurve] = useState<PlaylistEnergyCurve>("steady");
   const [minBpm, setMinBpm] = useState("");
   const [maxBpm, setMaxBpm] = useState("");
@@ -168,7 +171,7 @@ export function PlaylistBuilderView({
 
   const restoreRequest = useCallback((request: PlaylistSuggestionRequest) => {
     setPrompt(request.prompt);
-    setTargetMinutes(request.target_minutes);
+    setTargetMinutes(request.target_minutes ?? DEFAULT_TARGET_MINUTES);
     setEnergyCurve(request.energy_curve ?? "steady");
     setMinBpm(request.min_bpm === undefined ? "" : String(request.min_bpm));
     setMaxBpm(request.max_bpm === undefined ? "" : String(request.max_bpm));
@@ -287,7 +290,7 @@ export function PlaylistBuilderView({
     const maximumBpm = optionalNumber(maxBpm);
     return {
       prompt: prompt.trim(),
-      target_minutes: Math.min(600, Math.max(5, targetMinutes || 60)),
+      target_minutes: Math.min(600, Math.max(5, targetMinutes || DEFAULT_TARGET_MINUTES)),
       candidate_limit: 40,
       energy_curve: energyCurve,
       include_unknown_bpm: includeUnknownBpm,

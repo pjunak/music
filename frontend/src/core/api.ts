@@ -19,6 +19,7 @@ import type {
   TrackInPlaylist,
   TreeResponse,
 } from "@/core/types";
+import type * as Http from "@/generated/http";
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -193,22 +194,9 @@ export type AuthoringImportKind =
   | "preset"
   | "cue";
 
-export interface AuthoringImportItem {
-  kind: AuthoringImportKind;
-  resource_id: string;
-  name: string;
-  summary: string;
-  status: "ready" | "conflict" | "invalid";
-  reason: string | null;
-  issues: AuthoringImportIssue[];
-}
+export type AuthoringImportItem = Http.AuthoringImportItem;
 
-export interface AuthoringImportIssue {
-  code: string;
-  severity: "warning" | "error";
-  message: string;
-  related_item: AuthoringImportSelection | null;
-}
+export type AuthoringImportIssue = Http.AuthoringImportIssue;
 
 function formatApiDetail(detail: unknown): string | null {
   if (typeof detail === "string") return detail;
@@ -238,23 +226,11 @@ function formatApiDetail(detail: unknown): string | null {
     : null;
 }
 
-export interface AuthoringImportPreview {
-  source: { type: "mode" | "document"; id: string; name: string };
-  source_mode?: { id: string; name: string } | null;
-  target_mode: { id: string; name: string };
-  items: AuthoringImportItem[];
-}
+export type AuthoringImportPreview = Http.AuthoringImportPreview;
 
-export interface AuthoringImportSelection {
-  kind: AuthoringImportKind;
-  resource_id: string;
-}
+export type AuthoringImportSelection = Http.AuthoringImportSelection;
 
-export interface AuthoringImportResult {
-  imported: AuthoringImportItem[];
-  skipped: AuthoringImportItem[];
-  missing_track_paths: string[];
-}
+export type AuthoringImportResult = Http.AuthoringImportResult;
 
 export const authoringImportApi = {
   previewMode: (sourceModeId: string, targetModeId: string) =>
@@ -296,104 +272,31 @@ export const authoringImportApi = {
     }),
 };
 
-export interface PlaylistSuggestionIntent {
-  matched_moods: string[];
-  search_terms: string[];
-  energy: number;
-  brightness: number;
-  tension: number;
-}
+export type PlaylistSuggestionIntent = Http.PlaylistIntent;
 
 export type PlaylistEnergyCurve = "steady" | "rising" | "falling" | "arc";
 
-export interface PlaylistSuggestionPlan {
-  energy_curve: PlaylistEnergyCurve;
-  selected_tracks: number;
-  selected_duration_s: number;
-}
+export type PlaylistSuggestionPlan = Http.PlaylistPlan;
 
-export interface PlaylistSuggestionCandidate {
-  track_id: number;
-  path: string;
-  title: string;
-  display_title: string;
-  artist: string;
-  album: string;
-  origin: string;
-  genre: string;
-  manual_tags: string[];
-  length_s: number;
-  bpm: number | null;
-  match_score: number;
-  confidence: "high" | "medium" | "low";
-  reasons: string[];
-  default_selected: boolean;
-  sequence_position: number | null;
-  planning_energy: number;
-}
+export type PlaylistSuggestionCandidate = Http.PlaylistCandidate;
 
-export interface PlaylistSuggestion {
-  engine: string;
-  library_tracks: number;
-  eligible_tracks: number;
-  intent: PlaylistSuggestionIntent;
-  plan: PlaylistSuggestionPlan;
-  candidates: PlaylistSuggestionCandidate[];
-}
+export type PlaylistSuggestion = Http.PlaylistSuggestionResponse;
 
-export interface PlaylistSuggestionRequest {
-  prompt: string;
-  target_minutes: number;
-  candidate_limit?: number;
-  min_bpm?: number;
-  max_bpm?: number;
-  include_unknown_bpm?: boolean;
-  exclude_track_ids?: number[];
-  energy_curve?: PlaylistEnergyCurve;
-}
+export type PlaylistSuggestionRequest = Http.PlaylistSuggestionRequest;
 
 export const MODEL_PLAYLIST_DISCLOSURE_VERSION =
   "assistant-playlist-model-disclosure/v4" as const;
 
-export interface ModelPlaylistDisclosure {
-  version: typeof MODEL_PLAYLIST_DISCLOSURE_VERSION;
-  shared_with_provider: string[];
-  never_shared: string[];
-  maximum_candidates: number;
-  may_incur_cost: boolean;
-}
+export type ModelPlaylistDisclosure = Http.ModelPlaylistDisclosure;
 
-export interface ModelPlaylistAvailability {
-  available: boolean;
-  reason_code: string | null;
-  role_id: "playlist_planner";
-  connection_name: string | null;
-  model_id: string | null;
-  quality_evaluation_id: "playlist-quality-v1";
-  job_kind: string;
-  disclosure: ModelPlaylistDisclosure;
-}
+export type ModelPlaylistAvailability = Http.ModelPlaylistAvailability;
 
 export const MODEL_EQ_DISCLOSURE_VERSION =
   "assistant-eq-draft-disclosure/v2" as const;
 
-export interface ModelEqDisclosure {
-  version: typeof MODEL_EQ_DISCLOSURE_VERSION;
-  shared_with_provider: string[];
-  never_shared: string[];
-  may_incur_cost: boolean;
-}
+export type ModelEqDisclosure = Http.ModelEqDisclosure;
 
-export interface ModelEqAvailability {
-  available: boolean;
-  reason_code: string | null;
-  role_id: "eq_assistant";
-  connection_name: string | null;
-  model_id: string | null;
-  quality_evaluation_id: "eq-quality-v1";
-  job_kind: string;
-  disclosure: ModelEqDisclosure;
-}
+export type ModelEqAvailability = Http.ModelEqAvailability;
 
 export interface EqPresetDraft {
   name: string;
@@ -413,22 +316,9 @@ export type ModelTaggingScope =
 
 export type ModelTaggingContextPolicy = "include" | "skip";
 
-export interface ModelTaggingDisclosure {
-  version: typeof MODEL_TAGGING_DISCLOSURE_VERSION;
-  shared_with_provider: string[];
-  never_shared: string[];
-  allowed_tags: string[];
-  tracks_per_request: number;
-  invalid_response_retry_limit: number;
-  may_incur_cost: boolean;
-}
+export type ModelTaggingDisclosure = Http.ModelTaggingDisclosure;
 
-export interface ModelTaggingLimits {
-  max_tracks: number;
-  max_requests: number;
-  max_token_reservation: number;
-  stop_on_empty_batch?: boolean;
-}
+export type ModelTaggingLimits = Http.ModelTaggingLimits;
 
 export const DEFAULT_MODEL_TAGGING_LIMITS: ModelTaggingLimits = {
   max_tracks: 20, max_requests: 10, max_token_reservation: 1_000_000, stop_on_empty_batch: true,
@@ -439,32 +329,7 @@ export interface ModelBatchStatus {
   remote_batch_id: string | null; result: Record<string, unknown> | null;
 }
 
-export interface ModelTaggingAvailability {
-  execution_mode: "standard" | "batch";
-  batch_available: boolean;
-  pending_batch_id: string | null;
-  limits: ModelTaggingLimits;
-  run_tracks: number;
-  deferred_tracks: number;
-  token_reservation: number;
-  available: boolean;
-  reason_code: string | null;
-  role_id: "music_tagger";
-  connection_name: string | null;
-  model_id: string | null;
-  quality_evaluation_id: "music-tagging-quality-v1";
-  job_kind: string;
-  library_tracks: number;
-  scope_tracks: number;
-  planned_tracks: number;
-  tracks_with_full_context: number;
-  tracks_with_partial_context: number;
-  tracks_missing_context: number;
-  current_profiles: number;
-  tracks_needing_tags: number;
-  estimated_provider_requests: number;
-  disclosure: ModelTaggingDisclosure;
-}
+export type ModelTaggingAvailability = Http.ModelTaggingAvailability;
 
 export type BackgroundJobStatus =
   | "queued"
@@ -474,168 +339,44 @@ export type BackgroundJobStatus =
   | "failed"
   | "cancelled";
 
-export interface BackgroundJob {
-  id: string;
-  kind: string;
-  status: BackgroundJobStatus;
-  parameters: Record<string, unknown>;
-  result: Record<string, unknown> | null;
-  error: string | null;
-  progress_current: number;
-  progress_total: number | null;
-  progress_phase: string;
-  progress_message: string;
-  attempts: number;
-  retry_of_id: string | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-}
+export type BackgroundJob = Http.BackgroundJobOut;
 
-export interface LibraryContextSummary {
-  library_tracks: number;
-  analyzed_tracks: number;
-  failed_tracks: number;
-  stale_tracks: number;
-  last_updated_at: string | null;
-  analyzer: "local-context/v3";
-  voice_analyzer: {
-    analyzer_id: "essentia-musicnn-voice/v2";
-    status: "not_configured" | "ready" | "unavailable";
-    reason:
-      | "model_missing"
-      | "model_unreadable"
-      | "unsupported_model"
-      | "runtime_missing"
-      | null;
-    model_filename: string;
-    model_sha256: string;
-  };
-  passes: {
-    audio_context: LibraryContextPassSummary;
-    voice_detection: LibraryContextPassSummary;
-  };
-  full_tracks: number;
-  partial_tracks: number;
-  missing_tracks: number;
-}
+export type LibraryContextSummary = Http.LibraryContextSummary;
 
-export interface LibraryContextPassSummary {
-  completed_tracks: number;
-  failed_tracks: number;
-  skipped_tracks: number;
-  total_tracks: number;
-  enabled: boolean;
-}
+export type LibraryContextPassSummary = Http.LibraryContextPassSummary;
 
-export interface TrackContextDetail {
-  track_id: number;
-  title: string;
-  artist: string;
-  status: "full" | "partial" | "missing" | "stale" | "failed";
-  analyzer_id: "local-context/v3";
-  updated_at: string | null;
-  summary: Record<string, unknown> | null;
-  timeline: Array<Record<string, number>>;
-  sections: Array<Record<string, unknown>>;
-  technical: Record<string, unknown> | null;
-  stages: Record<string, unknown> | null;
-  error: string | null;
-}
+export type TrackContextDetail = Http.TrackContextDetail;
 
-export interface StarterTagGroup {
-  key: string;
-  label: string;
-  tags: string[];
-}
+export type StarterTagGroup = Http.StarterTagGroupOut;
 
-export interface ManualTagCatalog {
-  starter_groups: StarterTagGroup[];
-  used_tags: string[];
-  tag_usage: ManualTagUsage[];
-}
+export type ManualTagCatalog = Http.ManualTagCatalog;
 
-export interface TagVocabularyEntry {
-  id: string;
-  name: string;
-  description: string;
-  aliases: string[];
-  context_cues: string[];
-}
+export type TagVocabularyEntry = Http.TagVocabularyEntry;
 
-export interface TagVocabularyGroup {
-  key: string;
-  label: string;
-  description: string;
-  tags: TagVocabularyEntry[];
-}
+export type TagVocabularyGroup = Http.TagVocabularyGroup;
 
-export interface TagVocabulary {
-  schema_version: "assistant-tag-vocabulary/v1";
-  revision: number;
-  fingerprint: string;
-  groups: TagVocabularyGroup[];
-}
+export type TagVocabulary = Http.TagVocabularyOut;
 
-export interface ManualTagUsage {
-  tag: string;
-  track_count: number;
-}
+export type ManualTagUsage = Http.ManualTagUsage;
 
-export interface BulkManualTagFailure {
-  track_id: number;
-  error: string;
-}
+export type BulkManualTagFailure = Http.BulkManualTagFailure;
 
-export interface BulkManualTagResult {
-  requested_tracks: number;
-  matched_tracks: number;
-  changed_track_ids: number[];
-  missing_track_ids: number[];
-  failures: BulkManualTagFailure[];
-}
+export type BulkManualTagResult = Http.BulkManualTagResult;
 
-export interface ManualTagRenameResult {
-  source: string;
-  target: string;
-  affected_tracks: number;
-  merged: boolean;
-}
+export type ManualTagRenameResult = Http.ManualTagRenameResult;
 
 export type AnalysisTagReviewDecision = "pending" | "accepted" | "rejected";
 
-export interface AnalysisTagSuggestion {
-  tag: string;
-  analyzer_id: string;
-  source_signature: string;
-  support: "supported" | "tentative";
-  evidence_ids: string[];
-  contradiction_ids: string[];
-  evidence: string[];
-  status: AnalysisTagReviewDecision;
-}
+export type AnalysisTagSuggestion = Http.AnalysisTagSuggestionOut;
 
-export interface AnalysisTagReviewResult {
-  track_id: number;
-  tag: string;
-  analyzer_id: string;
-  source_signature: string;
-  decision: AnalysisTagReviewDecision;
-  manual_tags: string[];
-}
+export type AnalysisTagReviewResult = Http.AnalysisTagReviewResult;
 
 export type BulkAnalysisTagReviewDecision = Exclude<
   AnalysisTagReviewDecision,
   "pending"
 >;
 
-export interface AnalysisTagReviewTarget {
-  track_id: number;
-  tag: string;
-  analyzer_id: string;
-  source_signature: string;
-}
+export type AnalysisTagReviewTarget = Http.BulkAnalysisTagReviewItem;
 
 export interface BulkAnalysisTagReviewApplied extends AnalysisTagReviewTarget {
   decision: BulkAnalysisTagReviewDecision;
@@ -646,53 +387,16 @@ export interface BulkAnalysisTagReviewFailure extends AnalysisTagReviewTarget {
   error: string;
 }
 
-export interface BulkAnalysisTagReviewResult {
-  requested_items: number;
-  applied: BulkAnalysisTagReviewApplied[];
-  failures: BulkAnalysisTagReviewFailure[];
-}
+export type BulkAnalysisTagReviewResult = Http.BulkAnalysisTagReviewResult;
 
-export interface LibraryTagTrack {
-  track_id: number;
-  path: string;
-  title: string;
-  display_title: string;
-  artist: string;
-  album: string;
-  manual_tags: string[];
-  analysis_tags: string[];
-  analysis_suggestions: AnalysisTagSuggestion[];
-  model_analysis?: {
-    status: "current" | "stale" | "missing";
-    job_id: string | null;
-    updated_at_unix_seconds: number | null;
-    suggested_tag_count?: number | null;
-    evidence?: string[];
-    context_status?: "full" | "partial" | "missing" | null;
-    input_snapshot?: Record<string, unknown> | null;
-  };
-}
+export type LibraryTagTrack = Http.LibraryTagTrack;
 
 export type ModelTagFilter = "processed" | "current" | "stale" | "missing" | "with_suggestions" | "without_suggestions";
 export type TagSuggestionSource = "model" | "catalog";
 
-export interface TagReviewSummary {
-  matching_tracks: number;
-  sources: {
-    analyzer_id: string;
-    pending: number;
-    accepted: number;
-    rejected: number;
-  }[];
-}
+export type TagReviewSummary = Http.TagReviewSummary;
 
-export interface LibraryTagPage {
-  items: LibraryTagTrack[];
-  total: number;
-  offset: number;
-  limit: number;
-  review_summary?: TagReviewSummary;
-}
+export type LibraryTagPage = Http.LibraryTagPage;
 
 export const jobsApi = {
   list: (
@@ -882,15 +586,7 @@ export const assistantApi = {
     ),
 };
 
-export interface ActiveSession {
-  session_id: string;
-  /** Deprecated alias of session_id; contains no bearer-token material. */
-  token_prefix: string;
-  created_at: string;
-  expires_at: string;
-  last_seen: string;
-  is_current: boolean;
-}
+export type ActiveSession = Http.ActiveSessionResponse;
 
 export const authApi = {
   listSessions: () => api.get<ActiveSession[]>("/api/auth/sessions"),
@@ -991,86 +687,32 @@ export interface SearchParams {
   order?: SortOrder;
 }
 
-export interface SearchResponse {
-  tracks: Track[];
-  total: number;
-  limit: number;
-  offset: number;
-  sort: LibrarySortKey;
-  order: SortOrder;
-}
+export type SearchResponse = Http.SearchResponse;
 
-export interface UploadResult {
-  saved: Track[];
-  destination: string;
-  /** Filenames skipped because they already existed and conflict was "skip". */
-  skipped: string[];
-}
+export type UploadResult = Http.UploadResult;
 
 /** How an upload handles a filename that already exists at the destination.
  *  "rename" keeps both (foo.mp3 -> foo-1.mp3), "overwrite" replaces, "skip"
  *  leaves the existing file untouched. */
 export type UploadConflict = "rename" | "overwrite" | "skip";
 
-export interface UploadCheckItem {
-  dest: string;
-  name: string;
-}
+export type UploadCheckItem = Http.UploadCheckItem;
 
-export interface RescanResult {
-  added: number;
-  updated: number;
-  removed: number;
-  unchanged: number;
-}
+export type RescanResult = Http.RescanResult;
 
-export interface MetadataUpdate {
-  title?: string;
-  artist?: string;
-  album_artist?: string;
-  album?: string;
-  track_no?: number | null;
-  disc_no?: number | null;
-  year?: number | null;
-  release_date?: string;
-  original_release_date?: string;
-  composer?: string;
-  genre?: string;
-  bpm?: number | null;
-  // DB-only fields — not written to the file's tags. See backend.
-  display_title?: string;
-  origin?: string;
-}
+export type MetadataUpdate = Http.TrackMetadataUpdate;
 
-export interface BulkMetadataUpdate {
-  track_ids: number[];
-  updates: MetadataUpdate;
-}
+export type BulkMetadataUpdate = Http.BulkMetadataUpdate;
 
-export interface BulkMetadataSkip {
-  track_id: number;
-  reason: string;
-}
+export type BulkMetadataSkip = Http.BulkMetadataSkip;
 
-export interface BulkMetadataResult {
-  updated: Track[];
-  skipped: BulkMetadataSkip[];
-}
+export type BulkMetadataResult = Http.BulkMetadataResult;
 
-export interface BulkActionSkip {
-  track_id: number;
-  reason: string;
-}
+export type BulkActionSkip = Http.BulkActionSkip;
 
-export interface BulkMoveResult {
-  moved: Track[];
-  skipped: BulkActionSkip[];
-}
+export type BulkMoveResult = Http.BulkMoveResult;
 
-export interface BulkDeleteResult {
-  deleted_ids: number[];
-  skipped: BulkActionSkip[];
-}
+export type BulkDeleteResult = Http.BulkDeleteResult;
 
 export const libraryApi = {
   getTrack: (id: number) => api.get<Track>(`/api/library/tracks/${id}`),
@@ -1164,12 +806,7 @@ export type CleanupRuleId =
   | "tag_year"
   | "rename_folders";
 
-export interface CleanupScope {
-  type: "all" | "folder" | "tracks";
-  path?: string;
-  recursive?: boolean;
-  track_ids?: number[];
-}
+export type CleanupScope = Http.CleanupScope;
 
 export interface CleanupOp {
   op_id: string;
@@ -1193,98 +830,38 @@ export interface CleanupReviewProposal extends Omit<CleanupOp, "kind" | "evidenc
   evidence: CleanupOp["evidence"] | null;
   evidence_context: string | null;
 }
-export interface CleanupRejectedItem {
-  id: number;
+// The server stores proposals as opaque review records; the frontend reads
+// them back with the same evidence shape it submitted.
+export type CleanupRejectedItem = Omit<Http.CleanupRejectedItem, "proposal"> & {
   proposal: CleanupReviewProposal;
-  rejected_at: number;
-  current: boolean;
-}
-export interface CleanupRejectedPage {
+};
+export type CleanupRejectedPage = Omit<Http.CleanupRejectedPage, "items"> & {
   items: CleanupRejectedItem[];
-  next_before: number | null;
-}
+};
 
-export interface CleanupTrackPlan {
-  track_id: number;
-  path: string;
-  ops: CleanupOp[];
-  notes: string[];
-}
+export type CleanupTrackPlan = Http.CleanupTrackPlanOut;
 
 /** A proposed folder rename (leaf-only — `path` stays, its last segment
  *  becomes `new`). Reviewed and applied alongside the per-track ops. */
-export interface CleanupFolderSuggestion {
-  op_id: string;
-  path: string;
-  old: string;
-  new: string;
-  rules: string[];
-  confidence: "high" | "low";
-}
+export type CleanupFolderSuggestion = Http.CleanupFolderOut;
 
-export interface CleanupAnalyzeResult {
-  scanned: number;
-  plans: CleanupTrackPlan[];
-  folders: CleanupFolderSuggestion[];
-  /** Names an online lookup could still settle — resolve via
-   *  cleanupApi.verify, then re-analyze (verdicts are cached forever,
-   *  each name is only ever looked up once). */
-  pending_lookups: string[];
-}
+export type CleanupAnalyzeResult = Http.AnalyzeResult;
 
-export interface CleanupVerifyResult {
-  verified: number;
-  failed: string[];
-}
+export type CleanupVerifyResult = Http.VerifyResult;
 
-export interface CleanupOpIn {
-  track_id: number;
-  kind: "rename" | "tag" | "folder_rename";
-  field: string | null;
-  old: string | number | null;
-  new: string | number | null;
-  /** Folder path for folder_rename ops (track_id is unused, sent as 0). */
-  path?: string;
-}
+export type CleanupOpIn = Http.CleanupOpIn;
 
-export interface CleanupApplyResult {
-  batch_id: number | null;
-  applied: number;
-  skipped: BulkActionSkip[];
-}
+export type CleanupApplyResult = Http.ApplyResult;
 
-export interface CleanupBatchSummary {
-  id: number;
-  created_at: string;
-  scope_label: string;
-  item_count: number;
-  reverted_at: string | null;
-}
+export type CleanupBatchSummary = Http.BatchSummary;
 
 export interface CleanupBatchDetail extends CleanupBatchSummary {
   items: unknown[];
 }
 
-export interface CleanupRevertResult {
-  reverted: number;
-  skipped: BulkActionSkip[];
-}
+export type CleanupRevertResult = Http.RevertResult;
 
-export interface CleanupSource {
-  id: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-  capabilities: string[];
-  credential_kind: string | null;
-  credential_saved: boolean;
-  credential_source: "saved" | "environment" | null;
-  key_hint: string | null;
-  configured: boolean;
-  available: boolean;
-  configuration_hint: string | null;
-  unavailable_reason: string | null;
-}
+export type CleanupSource = Http.CleanupSourceOut;
 
 export interface CleanupCatalogTagSuggestion extends AnalysisTagReviewTarget {
   source_tag: string;
@@ -1360,16 +937,7 @@ export interface CleanupEnrichmentResult {
   plans: CleanupEnrichmentPlan[];
 }
 
-export interface CleanupModelStatus {
-  available: boolean;
-  reason_code: string | null;
-  model_id: string | null;
-  disclosure_version: string;
-  shared_with_provider: string[];
-  never_shared: string[];
-  maximum_candidates: number;
-  may_incur_cost: boolean;
-}
+export type CleanupModelStatus = Http.CleanupModelStatus;
 
 export interface CleanupModelResult {
   schema_version: "assistant-library-cleanup-result/v1";
@@ -1444,36 +1012,16 @@ export const cleanupApi = {
 
 // --- SFX ---------------------------------------------------------------
 
-export interface SfxFile {
-  name: string;
-  path: string;
-  size_bytes: number;
-  modified_at: string;
-  referenced: boolean;
-}
+export type SfxFile = Http.SfxFileOut;
 
-export interface SfxFolder {
-  name: string;
-  path: string;
-  file_count: number;
-  has_children: boolean;
-}
+export type SfxFolder = Http.SfxFolderOut;
 
 // Files immediately in one folder; the hierarchy comes from /api/sfx/folders.
-export interface SfxTreeResponse {
-  path: string;
-  files: SfxFile[];
-}
+export type SfxTreeResponse = Http.SfxTreeResponse;
 
-export interface SfxFoldersResponse {
-  folders: SfxFolder[];
-}
+export type SfxFoldersResponse = Http.SfxFoldersResponse;
 
-export interface SfxUploadResult {
-  saved: SfxFile[];
-  destination: string;
-  skipped: string[];
-}
+export type SfxUploadResult = Http.SfxUploadResult;
 
 export const sfxApi = {
   allFiles: () => api.get<SfxFile[]>("/api/sfx/files"),
@@ -1625,9 +1173,9 @@ export const modesAdminApi = {
       `/api/modes/${encodeURIComponent(modeId)}/interrupts/${index}`,
     ),
 
-  createCue: (modeId: string, payload: Cue) =>
+  createCue: (modeId: string, payload: Http.CreateCueRequest) =>
     api.post<Cue>(`/api/modes/${encodeURIComponent(modeId)}/cues`, payload),
-  updateCue: (modeId: string, cueId: string, payload: Omit<Cue, "id">) =>
+  updateCue: (modeId: string, cueId: string, payload: Http.CueBody) =>
     api.put<Cue>(
       `/api/modes/${encodeURIComponent(modeId)}/cues/${encodeURIComponent(cueId)}`,
       payload,
@@ -1681,19 +1229,9 @@ export const presetsAdminApi = {
 // count, last rescan, mode load errors — a per-mode preset error is
 // folded into that mode's error string — connected devices) without
 // SSH'ing into the host.
-export interface LoaderStatus {
-  last_load_at: number | null;
-  loaded_ids: string[];
-  errors: Record<string, string>;
-}
+export type LoaderStatus = Http.LoaderStatus;
 
-export interface DiagnosticsResponse {
-  track_count: number;
-  last_scan_at: number | null;
-  modes: LoaderStatus;
-  connected_device_count: number;
-  state_revision: number;
-}
+export type DiagnosticsResponse = Http.DiagnosticsResponse;
 
 export const diagnosticsApi = {
   get: () => api.get<DiagnosticsResponse>("/api/diagnostics"),

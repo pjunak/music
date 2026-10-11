@@ -3,8 +3,8 @@ import type { LibraryTagPage, LibraryTagTrack } from "./api";
 import { requireCurrentTagPage, requireCurrentTagTrack } from "./analysisResponse";
 
 const suggestion = {tag:"calm",analyzer_id:"model-context-tagger/v8",source_signature:"a".repeat(64),support:"tentative",evidence:["The quiet opening may suit this use."],evidence_ids:["audio.sections.s1"],contradiction_ids:["audio.sections.s3"],status:"pending"};
-const track = {track_id:1,path:"song.flac",title:"Song",display_title:"Song",artist:"",album:"",manual_tags:[],analysis_tags:["calm"],analysis_suggestions:[suggestion]} as LibraryTagTrack;
-const page = {items:[track],total:1,offset:0,limit:50} as LibraryTagPage;
+const track = {track_id:1,path:"song.flac",title:"Song",display_title:"Song",artist:"",album:"",manual_tags:[],analysis_tags:["calm"],analysis_suggestions:[suggestion],model_analysis:{ status: "missing", job_id: null, updated_at_unix_seconds: null, context_status: null, input_snapshot: null, suggested_tag_count: null }} as LibraryTagTrack;
+const page = {items:[track],total:1,offset:0,limit:50,review_summary:{matching_tracks:1,sources:[]}} as LibraryTagPage;
 
 describe("current song analysis responses", () => {
   it("preserves per-tag support and abstention without changing authored tags", () => {

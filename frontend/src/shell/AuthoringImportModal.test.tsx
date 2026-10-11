@@ -46,6 +46,7 @@ function mode(id: string, name: string): ModeSummary {
 
 const modePreview: AuthoringImportPreview = {
   source: { type: "mode", id: "source", name: "Source mode" },
+  source_mode: { id: "source", name: "Source mode" },
   target_mode: { id: "target", name: "Target mode" },
   items: [
     {
@@ -93,6 +94,7 @@ const modePreview: AuthoringImportPreview = {
 };
 
 const documentPreview: AuthoringImportPreview = {
+  source_mode: null,
   source: {
     type: "document",
     id: "authoring-import/v1",

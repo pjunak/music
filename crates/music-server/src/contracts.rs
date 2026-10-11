@@ -8,7 +8,10 @@ use serde::Serialize;
 
 use crate::http::openapi_document;
 
+mod typescript_http;
+
 const TYPESCRIPT_PATH: &str = "frontend/src/generated/protocol.ts";
+const HTTP_TYPESCRIPT_PATH: &str = "frontend/src/generated/http.ts";
 const OPENAPI_PATH: &str = "contracts/generated/rust/openapi.json";
 
 #[derive(Debug)]
@@ -59,23 +62,24 @@ pub struct ContractArtifact {
 
 /// Render every checked-in contract from the authoritative Rust declarations.
 pub fn render_contracts() -> Result<Vec<ContractArtifact>, ContractError> {
+    // Going through `Value` sorts object keys, keeping the files stable.
+    let openapi =
+        serde_json::to_value(openapi_document()).map_err(|source| ContractError::Json {
+            document: "OpenAPI",
+            source,
+        })?;
     Ok(vec![
         ContractArtifact {
             relative_path: TYPESCRIPT_PATH,
             content: music_protocol::typescript_bindings(),
         },
         ContractArtifact {
+            relative_path: HTTP_TYPESCRIPT_PATH,
+            content: typescript_http::http_typescript(&openapi),
+        },
+        ContractArtifact {
             relative_path: OPENAPI_PATH,
-            // Going through `Value` sorts object keys, keeping the file stable.
-            content: pretty_json(
-                &serde_json::to_value(openapi_document()).map_err(|source| {
-                    ContractError::Json {
-                        document: "OpenAPI",
-                        source,
-                    }
-                })?,
-                "OpenAPI",
-            )?,
+            content: pretty_json(&openapi, "OpenAPI")?,
         },
     ])
 }

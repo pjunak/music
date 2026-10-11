@@ -95,11 +95,8 @@ struct TrackResponse {
     artist: String,
     album_artist: String,
     album: String,
-    #[schema(required = false)]
     release_date: String,
-    #[schema(required = false)]
     original_release_date: String,
-    #[schema(required = false)]
     composer: String,
     #[schema(required = true, schema_with = openapi_nullable_integer)]
     track_no: Option<u32>,
@@ -322,7 +319,6 @@ fn multipart_upload_files_schema() -> RefOr<Schema> {
 struct UploadResponse {
     saved: Vec<TrackResponse>,
     destination: String,
-    #[schema(required = false)]
     skipped: Vec<String>,
 }
 

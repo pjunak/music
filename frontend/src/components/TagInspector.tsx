@@ -3,7 +3,7 @@ import type { ChangeEvent } from "react";
 
 import { libraryApi } from "@/core/api";
 import type { MetadataUpdate } from "@/core/api";
-import { trackReleaseDate, validMetadataDate } from "@/core/metadataDate";
+import { validMetadataDate } from "@/core/metadataDate";
 import { toast } from "@/core/toast";
 import { trackTitle } from "@/core/trackDisplay";
 import type { Track } from "@/core/types";
@@ -77,7 +77,6 @@ const TAG_FIELDS: FieldDef[] = [
 const ALL_FIELDS = [...LIBRARY_FIELDS, ...TAG_FIELDS];
 
 function fieldStr(t: Track, key: FieldKey): string {
-  if (key === "release_date") return trackReleaseDate(t);
   const v = t[key];
   return v === null || v === undefined ? "" : String(v);
 }

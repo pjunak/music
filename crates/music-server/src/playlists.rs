@@ -87,7 +87,7 @@ struct PlaylistMetaResponse {
     automatic: bool,
     #[schema(required = true, schema_with = nullable_automatic_rule_schema)]
     automatic_rule: Option<AutomaticPlaylistRuleResponse>,
-    #[schema(required = false, schema_with = openapi_nullable_string)]
+    #[schema(schema_with = openapi_nullable_string)]
     automatic_rule_error: Option<String>,
     #[schema(required = true, schema_with = openapi_nullable_datetime)]
     automatic_refreshed_at: Option<String>,
@@ -164,34 +164,34 @@ enum AutomaticOrderRequest {
 #[schema(as = AutomaticPlaylistRuleV1)]
 struct AutomaticPlaylistRuleRequest {
     #[serde(rename = "schema")]
-    #[schema(schema_with = automatic_rule_version_schema)]
+    #[schema(required = true, schema_with = automatic_rule_version_schema)]
     schema_version: String,
     #[serde(default)]
-    #[schema(required = false, schema_with = automatic_tags_schema)]
+    #[schema(required = true, schema_with = automatic_tags_schema)]
     include_tags: Vec<String>,
     #[serde(default = "default_match")]
-    #[schema(required = false, schema_with = automatic_match_schema)]
+    #[schema(required = true, schema_with = automatic_match_schema)]
     r#match: AutomaticMatchRequest,
     #[serde(default)]
-    #[schema(required = false, schema_with = automatic_tags_schema)]
+    #[schema(required = true, schema_with = automatic_tags_schema)]
     exclude_tags: Vec<String>,
     #[serde(default = "default_tag_sources")]
-    #[schema(required = false, schema_with = automatic_tag_sources_schema)]
+    #[schema(required = true, schema_with = automatic_tag_sources_schema)]
     tag_sources: AutomaticTagSourcesRequest,
     #[serde(default)]
-    #[schema(required = false, schema_with = nullable_bpm_schema)]
+    #[schema(required = true, schema_with = nullable_bpm_schema)]
     min_bpm: Option<u32>,
     #[serde(default)]
-    #[schema(required = false, schema_with = nullable_bpm_schema)]
+    #[schema(required = true, schema_with = nullable_bpm_schema)]
     max_bpm: Option<u32>,
     #[serde(default = "default_true")]
-    #[schema(required = false, default = true)]
+    #[schema(required = true, default = true)]
     include_unknown_bpm: bool,
     #[serde(default = "default_maximum_tracks")]
-    #[schema(required = false, schema_with = automatic_maximum_tracks_schema)]
+    #[schema(required = true, schema_with = automatic_maximum_tracks_schema)]
     maximum_tracks: u16,
     #[serde(default = "default_order")]
-    #[schema(required = false, schema_with = automatic_order_schema)]
+    #[schema(required = true, schema_with = automatic_order_schema)]
     order_by: AutomaticOrderRequest,
 }
 

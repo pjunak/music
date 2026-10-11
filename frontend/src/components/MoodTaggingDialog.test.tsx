@@ -113,6 +113,7 @@ const reviewPage: LibraryTagPage = {
   total: 1,
   offset: 0,
   limit: 50,
+  review_summary: { matching_tracks: 1, sources: [] },
   items: [
     {
       track_id: 9,
@@ -123,6 +124,7 @@ const reviewPage: LibraryTagPage = {
       album: "Wilderness",
       manual_tags: [],
       analysis_tags: [],
+      model_analysis: { status: "missing", job_id: null, updated_at_unix_seconds: null, context_status: null, input_snapshot: null, suggested_tag_count: null },
       analysis_suggestions: [
         {
           tag: "forest",

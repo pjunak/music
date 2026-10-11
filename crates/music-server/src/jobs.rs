@@ -71,7 +71,7 @@ pub(crate) struct BackgroundJobResponse {
     error: Option<String>,
     #[schema(schema_with = nonnegative_integer_schema)]
     progress_current: u64,
-    #[schema(required = false, schema_with = nullable_nonnegative_integer_schema)]
+    #[schema(schema_with = nullable_nonnegative_integer_schema)]
     progress_total: Option<u64>,
     progress_phase: String,
     progress_message: String,

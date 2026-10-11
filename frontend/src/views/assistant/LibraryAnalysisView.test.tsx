@@ -78,7 +78,7 @@ const summary: LibraryContextSummary = {
 
 const unavailableTagger: ModelTaggingAvailability = {
   execution_mode: "standard", batch_available: false, pending_batch_id: null,
-  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000 },
+  limits: { max_tracks: 100, max_requests: 10, max_token_reservation: 1_000_000, stop_on_empty_batch: true },
   run_tracks: 1, deferred_tracks: 0, token_reservation: 200_000,
   available: false,
   reason_code: "role_not_configured",
@@ -151,6 +151,7 @@ beforeEach(() => {
     total: 0,
     offset: 0,
     limit: 50,
+    review_summary: { matching_tracks: 0, sources: [] },
   });
   vi.mocked(jobsApi.list).mockResolvedValue([]);
 });

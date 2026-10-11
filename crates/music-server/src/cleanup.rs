@@ -490,7 +490,7 @@ struct CleanupOperationResponse {
     rules: Vec<String>,
     #[schema(schema_with = cleanup_confidence_schema)]
     confidence: String,
-    #[schema(required = false, default = false)]
+    #[schema(default = false)]
     verified: bool,
 }
 

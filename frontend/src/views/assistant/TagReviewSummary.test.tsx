@@ -34,8 +34,8 @@ describe("TagReviewSummary", () => {
     { matching_tracks: 1, sources: [{ analyzer_id: "source", pending: 0.5, accepted: 0, rejected: 0 }] },
     { matching_tracks: 1, sources: [{ analyzer_id: "source", pending: Number.MAX_SAFE_INTEGER, accepted: 1, rejected: 0 }] },
     { matching_tracks: 1, sources: Array(2).fill({ analyzer_id: "source", pending: 1, accepted: 0, rejected: 0 }) },
-  ])("omits unavailable or malformed counts (%j)", (summary) => {
-    const { container } = render(<TagReviewSummary summary={summary as Summary | undefined} />);
+  ])("omits malformed counts (%j)", (summary) => {
+    const { container } = render(<TagReviewSummary summary={summary as unknown as Summary} />);
     expect(container).toBeEmptyDOMElement();
   });
 });

@@ -669,7 +669,8 @@
           "resource_id",
           "name",
           "summary",
-          "status"
+          "status",
+          "issues"
         ],
         "type": "object"
       },
@@ -987,7 +988,16 @@
           }
         },
         "required": [
-          "schema"
+          "schema",
+          "include_tags",
+          "match",
+          "exclude_tags",
+          "tag_sources",
+          "min_bpm",
+          "max_bpm",
+          "include_unknown_bpm",
+          "maximum_tracks",
+          "order_by"
         ],
         "type": "object"
       },
@@ -1928,7 +1938,8 @@
           "old",
           "new",
           "rules",
-          "confidence"
+          "confidence",
+          "verified"
         ],
         "type": "object"
       },
@@ -2520,7 +2531,8 @@
         "required": [
           "soundboard",
           "item",
-          "interval_s"
+          "interval_s",
+          "volume"
         ],
         "type": "object"
       },
@@ -2572,7 +2584,8 @@
         },
         "required": [
           "soundboard",
-          "item"
+          "item",
+          "volume"
         ],
         "type": "object"
       },
@@ -2664,7 +2677,11 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "start_index",
+          "start_ms",
+          "sfx",
+          "loops"
         ],
         "type": "object"
       },
@@ -3403,7 +3420,10 @@
           }
         },
         "required": [
-          "name"
+          "name",
+          "fade_in_ms",
+          "fade_out_ms",
+          "return_to_ambient"
         ],
         "type": "object"
       },
@@ -3638,7 +3658,8 @@
           "completed_tracks",
           "failed_tracks",
           "skipped_tracks",
-          "total_tracks"
+          "total_tracks",
+          "enabled"
         ],
         "type": "object"
       },
@@ -3768,7 +3789,8 @@
           "items",
           "total",
           "offset",
-          "limit"
+          "limit",
+          "review_summary"
         ],
         "type": "object"
       },
@@ -3897,7 +3919,8 @@
           "album",
           "manual_tags",
           "analysis_tags",
-          "analysis_suggestions"
+          "analysis_suggestions",
+          "model_analysis"
         ],
         "type": "object"
       },
@@ -5392,6 +5415,12 @@
             "type": "boolean"
           }
         },
+        "required": [
+          "max_tracks",
+          "max_requests",
+          "max_token_reservation",
+          "stop_on_empty_batch"
+        ],
         "type": "object"
       },
       "ModelTaggingPlanRequest": {
@@ -6189,7 +6218,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "effects"
         ],
         "type": "object"
       },
@@ -6970,7 +7000,8 @@
         },
         "required": [
           "saved",
-          "destination"
+          "destination",
+          "skipped"
         ],
         "type": "object"
       },
@@ -6991,7 +7022,8 @@
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "items"
         ],
         "type": "object"
       },
@@ -7053,7 +7085,8 @@
           }
         },
         "required": [
-          "id"
+          "id",
+          "categories"
         ],
         "type": "object"
       },
@@ -7313,7 +7346,9 @@
         "required": [
           "id",
           "name",
-          "description"
+          "description",
+          "aliases",
+          "context_cues"
         ],
         "type": "object"
       },
@@ -7344,7 +7379,9 @@
         },
         "required": [
           "key",
-          "label"
+          "label",
+          "description",
+          "tags"
         ],
         "type": "object"
       },
@@ -7888,6 +7925,9 @@
           "artist",
           "album_artist",
           "album",
+          "release_date",
+          "original_release_date",
+          "composer",
           "track_no",
           "disc_no",
           "year",
@@ -8030,7 +8070,8 @@
         },
         "required": [
           "saved",
-          "destination"
+          "destination",
+          "skipped"
         ],
         "type": "object"
       },

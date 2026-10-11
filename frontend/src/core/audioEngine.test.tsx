@@ -32,6 +32,8 @@ vi.mock("@/core/playbackEngine", () => ({
 const preset: PresetManifest = {
   id: "cave",
   name: "Cave",
+  description: null,
+  crossfade_ms: null,
   effects: [{ type: "lowpass", frequency: 800 }],
 };
 

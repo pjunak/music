@@ -198,7 +198,7 @@ pub struct PlainErrorBody {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, ToSchema)]
 #[schema(as = HTTPValidationError)]
 pub struct HttpValidationErrorBody {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub detail: Vec<ValidationErrorDetail>,
 }
 

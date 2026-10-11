@@ -191,6 +191,7 @@ function modelJob(
 }
 
 const preview: AuthoringImportPreview = {
+  source_mode: null,
   source: {
     type: "document",
     id: "authoring-import/v1",

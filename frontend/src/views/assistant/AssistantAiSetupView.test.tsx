@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ProviderApiModule from "@/core/assistantProvidersApi";
 import type * as ApiModule from "@/core/api";
 import type { BackgroundJob } from "@/core/api";
+import type { ModelProfileResponse, ModelRequestSettingsResponse } from "@/generated/http";
 import type {
   ModelQualityEvaluation,
   ModelRole,
@@ -70,6 +71,22 @@ import { toast } from "@/core/toast";
 
 import { AssistantAiSetupView } from "./AssistantAiSetupView";
 
+// Mirrors the server's profile for an unreviewed compatible model.
+const genericProfile: ModelProfileResponse = {
+  id: "compatible-unverified", revision: "v1", model_ids: [], reasoning_modes: ["provider_default", "enabled", "disabled"],
+  max_output_tokens: null, documented: false, notice: "This model has no reviewed settings profile.", source_url: "",
+};
+
+const jevProfile: ModelProfileResponse = {
+  id: "typesafe-jev", revision: "fixture", model_ids: ["jev-1.13.0"], reasoning_modes: ["provider_default"],
+  max_output_tokens: null, documented: true, notice: "Native typed decisions", source_url: "https://docs.typesafe.ai/models",
+};
+
+const requestSettings: ModelRequestSettingsResponse = {
+  adapter_id: "openai-compatible/v1", endpoint_path: "/v1/chat/completions", max_output_tokens: 1024,
+  model_id: "planner-large-2026", model_profile: genericProfile, thinking_mode: "provider_default", timeout_seconds: 60,
+};
+
 const frameworkStatus: ProviderFrameworkStatus = {
   credential_storage_ready: true,
   credential_storage_error: null,
@@ -97,6 +114,8 @@ const frameworkStatus: ProviderFrameworkStatus = {
       label: "OpenAI-compatible API",
       description: "Connects to a provider with a compatible models endpoint.",
       capability_ids: ["structured-text/v1"],
+      model_profiles: [genericProfile],
+      default_model_profile: genericProfile,
     },
   ],
   roles: [
@@ -240,9 +259,7 @@ describe("AssistantAiSetupView", () => {
     const nativeConnection = { ...connection, adapter_id: "typesafe-systemone/v1", verified_models: ["jev-latest", "jev-preview"] };
     const nativeRole: ModelRole = { ...musicTaggingRole, required_capability_ids: ["mood-decisions/v1"], model_id: "jev-1.13.0", enabled: false, effective_enabled: false, conformance_status: "never" };
     vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({ ...frameworkStatus, adapters: [...frameworkStatus.adapters, {
-      id: "typesafe-systemone/v1", label: "TypeSafe Jev", description: "Typed mood decisions", capability_ids: ["mood-decisions/v1", "typed-decisions/v1"], model_profiles: [{
-        id: "typesafe-jev", revision: "fixture", model_ids: ["jev-1.13.0"], reasoning_modes: ["provider_default"], max_output_tokens: null, documented: true, notice: "Native typed decisions", source_url: "https://docs.typesafe.ai/models",
-      }],
+      id: "typesafe-systemone/v1", label: "TypeSafe Jev", description: "Typed mood decisions", capability_ids: ["mood-decisions/v1", "typed-decisions/v1"], model_profiles: [jevProfile], default_model_profile: jevProfile,
     }] });
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([nativeConnection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([nativeRole, role]);
@@ -267,9 +284,7 @@ describe("AssistantAiSetupView", () => {
     const user = userEvent.setup();
     const nativeConnection = { ...connection, adapter_id: "typesafe-systemone/v1", verified_models: ["jev-latest", "jev-preview"] };
     vi.mocked(assistantProvidersApi.getStatus).mockResolvedValue({ ...frameworkStatus, adapters: [{
-      id: "typesafe-systemone/v1", label: "TypeSafe Jev", description: "Typed mood decisions", capability_ids: ["mood-decisions/v1", "typed-decisions/v1"], model_profiles: [{
-        id: "typesafe-jev", revision: "fixture", model_ids: ["jev-1.13.0"], reasoning_modes: ["provider_default"], max_output_tokens: null, documented: true, notice: "Native typed decisions", source_url: "https://docs.typesafe.ai/models",
-      }],
+      id: "typesafe-systemone/v1", label: "TypeSafe Jev", description: "Typed mood decisions", capability_ids: ["mood-decisions/v1", "typed-decisions/v1"], model_profiles: [jevProfile], default_model_profile: jevProfile,
     }] });
     vi.mocked(assistantProvidersApi.listConnections).mockResolvedValue([nativeConnection]);
     vi.mocked(assistantProvidersApi.listRoles).mockResolvedValue([{
@@ -770,6 +785,8 @@ describe("AssistantAiSetupView", () => {
       input_tokens: 42,
       output_tokens: 18,
       duration_ms: 812,
+      reasoning_tokens: null,
+      request_settings: requestSettings,
     });
     render(<AssistantAiSetupView />);
 
@@ -863,6 +880,8 @@ describe("AssistantAiSetupView", () => {
       input_tokens: 42,
       output_tokens: 18,
       duration_ms: 812,
+      reasoning_tokens: null,
+      request_settings: requestSettings,
     });
     vi.mocked(assistantProvidersApi.updateRole).mockRejectedValue(
       new Error("Role changed while the model test was running."),
@@ -914,6 +933,8 @@ describe("AssistantAiSetupView", () => {
       input_tokens: 39,
       output_tokens: 11,
       duration_ms: 947,
+      reasoning_tokens: null,
+      request_settings: requestSettings,
     });
     render(<AssistantAiSetupView />);
 

@@ -12,8 +12,9 @@ import type { PresetManifest } from "@/core/api";
 import { toast } from "@/core/toast";
 import type {
   Cue,
-  CueLoop,
-  CueSfx,
+  CueBody,
+  CueLoopInput,
+  CueSfxInput,
   ModeDetail,
   PlaylistMeta,
   SoundboardManifest,
@@ -117,8 +118,8 @@ function CueEditorForm({
   const [playlist, setPlaylist] = useState(cue.playlist ?? "");
   const [startIndex, setStartIndex] = useState(cue.start_index ?? 0);
   const [startMs, setStartMs] = useState(cue.start_ms ?? 0);
-  const [sfx, setSfx] = useState<CueSfx[]>(() => (cue.sfx ?? []).map((s) => ({ ...s })));
-  const [loops, setLoops] = useState<CueLoop[]>(
+  const [sfx, setSfx] = useState<CueSfxInput[]>(() => (cue.sfx ?? []).map((s) => ({ ...s })));
+  const [loops, setLoops] = useState<CueLoopInput[]>(
     () => (cue.loops ?? []).map((l) => ({ ...l })),
   );
   const [tracks, setTracks] = useState<TrackInPlaylist[]>([]);
@@ -178,7 +179,7 @@ function CueEditorForm({
         setBusy(false);
         return;
       }
-      const body: Omit<Cue, "id"> = {
+      const body: CueBody = {
         name: name.trim(),
         description: description.trim() || null,
         preset: preset || null,

@@ -1,5 +1,3 @@
-import type { Track } from "./types";
-
 /** Preserve source precision; these are calendar dates, never instants. */
 export function validMetadataDate(value: string): boolean {
   const match = /^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/.exec(value);
@@ -13,8 +11,4 @@ export function validMetadataDate(value: string): boolean {
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   return Number(match[3]) >= 1 && Number(match[3]) <= days[month - 1];
-}
-
-export function trackReleaseDate(track: Pick<Track, "release_date" | "year">): string {
-  return track.release_date ?? (track.year == null ? "" : String(track.year).padStart(4, "0"));
 }

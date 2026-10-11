@@ -113,8 +113,8 @@ describe("TagInspector", () => {
     });
   });
 
-  it("clears the release date including a legacy year value", async () => {
-    const t = track({ id: 3, year: 1999 });
+  it("clears the release date", async () => {
+    const t = track({ id: 3, year: 1999, release_date: "1999" });
     render(<TagInspector selectedTracks={[t]} onSaved={() => {}} />);
     const year = screen.getByLabelText("Release date");
     expect(year).toHaveValue("1999");

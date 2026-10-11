@@ -12,6 +12,10 @@ is selected using [the validation matrix](VALIDATION.md).
   reduced, persisted, and only then published; HTTP and WebSocket actions use the same owner.
 - `music-protocol` is the wire contract. Update Rust schemas, frontend types and
   guards, compatibility behavior, external-client docs, and tests together.
+- HTTP response and request types are generated into `frontend/src/generated/http.ts`
+  by `music-cli contracts export`; frontend code aliases them instead of copying
+  shapes. Response-reachable nullable fields are always present (serde writes `null`).
+  Refine only server-opaque JSON with a typed overlay on the generated type.
 - Clients reconcile server snapshots. Do not create an independent frontend
   truth or optimistically invent lasting playback state.
 - Registration uses a stable `client_id`. Reconnects register again and receive

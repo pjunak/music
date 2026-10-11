@@ -104,7 +104,6 @@ struct SfxFoldersResponse {
 struct SfxUploadResponse {
     saved: Vec<SfxFileResponse>,
     destination: String,
-    #[schema(required = false)]
     skipped: Vec<String>,
 }
 
