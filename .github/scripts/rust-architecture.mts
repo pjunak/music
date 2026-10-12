@@ -218,7 +218,13 @@ export function sourceStateViolations(files: readonly SourceFile[]): string[] {
   return [...new Set(violations)].sort();
 }
 
-function productionSource(content: string): string {
+/** Test-only files are `#[path]` test modules (`*_tests.rs`, `*_tests/`). */
+export function isTestSourcePath(path: string): boolean {
+  return /(?:^|\/)[^/]*_tests(?:\.rs$|\/)/u.test(path);
+}
+
+function productionSource(path: string, content: string): string {
+  if (isTestSourcePath(path)) return "";
   const source = String(content);
   const testModule = /^\s*#\[cfg\(test\)\]\s*\r?\n\s*mod\s+tests\s*\{/mu.exec(source);
   return testModule ? source.slice(0, testModule.index) : source;
@@ -233,7 +239,7 @@ export function sourceConcurrencyViolations(files: readonly SourceFile[]): strin
   const unboundedChannel = /\bmpsc::unbounded_channel\s*\(|\bmpsc::channel\s*\(\s*\)|\b(?:async_channel|crossbeam_channel|flume)::unbounded\s*\(/gu;
   for (const file of files) {
     const path = portablePath(file.path);
-    const source = productionSource(file.content);
+    const source = productionSource(path, file.content);
     if (occurrenceCount(source, unboundedChannel) > 0) {
       violations.push(`${path}: unbounded production channel is forbidden`);
     }

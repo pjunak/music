@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   architectureViolations,
+  isTestSourcePath,
   sourceConcurrencyViolations,
   sourceStateViolations,
 } from "./rust-architecture.mts";
@@ -161,6 +162,17 @@ await test("unbounded channels and new detached task sites fail", () => {
     "crates/music-server/src/new_owner.rs: production tokio::spawn count changed (approved 0, observed 1); review ownership and supervision",
     "crates/music-server/src/new_owner.rs: unbounded production channel is forbidden",
   ]);
+});
+
+await test("extracted test modules are not production code", () => {
+  assert.equal(isTestSourcePath("crates/music-server/src/websocket_tests.rs"), true);
+  assert.equal(isTestSourcePath("crates/music-storage/src/jobs_fault_tests/model_batches.rs"), true);
+  assert.equal(isTestSourcePath("crates/music-server/src/websocket.rs"), false);
+  assert.equal(isTestSourcePath("crates/music-server/src/latest_owner.rs"), false);
+  assert.deepEqual(sourceConcurrencyViolations([{
+    path: "crates/music-server/src/websocket_tests.rs",
+    content: "tokio::spawn(async move { serve().await });",
+  }]), []);
 });
 
 await test("reviewed task sites pass and test-only spawns are ignored", () => {
