@@ -1709,7 +1709,7 @@ mod tests {
         let track_path = directory.path().join("voice-soak.wav");
         write_tone_wav(&track_path, 4)?;
         let backend = VoiceBackend::initialize(Some(&model_path), ffmpeg);
-        assert_eq!(backend.status.status, "ready");
+        assert_eq!(backend.status.status.as_str(), "ready");
         let idle_after_preflight = resident_set_bytes()?;
         assert!(
             idle_after_preflight <= baseline_rss.saturating_add(IDLE_RSS_ALLOWANCE_BYTES),
