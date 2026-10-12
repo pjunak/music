@@ -4,7 +4,6 @@ use crate::assistant::{
 };
 
 impl ModelFeatureJobHandler {
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn submit_tagging_batch(
         &self,
         context: &JobExecutionContext,
@@ -35,15 +34,17 @@ impl ModelFeatureJobHandler {
         let mut usage = start_model_run(
             context,
             role,
-            TAGGING_QUALITY_EVALUATION_ID,
-            Some(&parameters.disclosure_version),
-            parameters,
-            &templates
-                .iter()
-                .map(|profile| &profile.source_signature)
-                .collect::<Vec<_>>(),
-            requests.len(),
-            ModelReviewDestination::TrackTagReview,
+            ModelRunPurpose {
+                evaluation_id: TAGGING_QUALITY_EVALUATION_ID,
+                disclosure_version: Some(&parameters.disclosure_version),
+                scope: parameters,
+                evidence: &templates
+                    .iter()
+                    .map(|profile| &profile.source_signature)
+                    .collect::<Vec<_>>(),
+                max_attempts: requests.len(),
+                destination: ModelReviewDestination::TrackTagReview,
+            },
         )
         .await?;
         usage.limit_token_reservation(parameters.limits.max_token_reservation);

@@ -87,14 +87,18 @@ impl ModelFeatureJobHandler {
         parameters: ModelTagCleanupJobParameters,
     ) -> Result<Value, JobHandlerError> {
         validate_feature_header(
-            &parameters.role_id,
-            "tag_cleanup",
-            &parameters.quality_evaluation_id,
-            TAG_CLEANUP_QUALITY_EVALUATION_ID,
-            &parameters.disclosure_version,
-            "assistant-model-tag-cleanup-disclosure/v3",
-            parameters.consent,
-            &parameters.role_fingerprint,
+            FeatureHeader {
+                role_id: &parameters.role_id,
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: &parameters.disclosure_version,
+                consent: parameters.consent,
+                role_fingerprint: &parameters.role_fingerprint,
+            },
+            FeatureContract {
+                role_id: "tag_cleanup",
+                evaluation_id: TAG_CLEANUP_QUALITY_EVALUATION_ID,
+                disclosure_version: "assistant-model-tag-cleanup-disclosure/v3",
+            },
         )?;
         let role = self
             .quality
@@ -154,15 +158,17 @@ impl ModelFeatureJobHandler {
         let mut provider_usage = start_model_run(
             context,
             &role,
-            &parameters.quality_evaluation_id,
-            Some(&parameters.disclosure_version),
-            &parameters,
-            &(
-                &parameters.catalog_signature,
-                &parameters.vocabulary_fingerprint,
-            ),
-            total_batches,
-            ModelReviewDestination::TagCleanupReview,
+            ModelRunPurpose {
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: Some(&parameters.disclosure_version),
+                scope: &parameters,
+                evidence: &(
+                    &parameters.catalog_signature,
+                    &parameters.vocabulary_fingerprint,
+                ),
+                max_attempts: total_batches,
+                destination: ModelReviewDestination::TagCleanupReview,
+            },
         )
         .await?;
         while let Some(request) = task.next_request() {

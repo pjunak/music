@@ -9,9 +9,7 @@ pub use actor::{
     ResolvedPlaybackCommand, SpawnedPlaybackActor, SystemPlaybackClock, SystemQueueRandom,
     start_playback_actor,
 };
-pub use catalog_commands::{
-    CatalogCommandError, CatalogCommands, CatalogRequest, InterruptFade, PlaylistProblem,
-};
+pub use catalog_commands::{CatalogCommandError, CatalogCommands, CatalogRequest, PlaylistProblem};
 pub use persistence::{
     PersistedStateError, PlaybackStateStore, StoreCompareAndSwap, StoreFuture,
     StoredPlaybackSnapshot, decode_persisted_state, encode_persisted_state,

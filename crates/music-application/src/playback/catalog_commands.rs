@@ -9,8 +9,8 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 use music_domain::{
-    CuePlayback, CuePlaylist, CuePreset, CueSfx, LoopingSfx, PlaybackCommand, PlaybackState,
-    TrackId, UnitInterval,
+    CuePlayback, CuePlaylist, CuePreset, CueSfx, InterruptFade, LoopingSfx, PlaybackCommand,
+    PlaybackState, TrackId, UnitInterval,
 };
 
 use super::{CatalogGeneration, PlaybackActorError, PlaybackActorHandle, ResolvedPlaybackCommand};
@@ -55,15 +55,6 @@ pub enum CatalogRequest {
         volume: UnitInterval,
     },
     StartLoop(LoopingSfx),
-}
-
-/// How an interrupt enters and leaves the ambient lane.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct InterruptFade {
-    pub return_to_ambient: bool,
-    pub fade_in_ms: u32,
-    pub fade_out_ms: u32,
-    pub duck_to: Option<UnitInterval>,
 }
 
 /// Why a catalog request was not applied. `Display` is the operator-facing
@@ -725,13 +716,7 @@ fn invalid_reference(request: &CatalogRequest) -> CatalogCommandError {
 }
 
 fn interrupt(track_ids: Vec<TrackId>, fade: InterruptFade) -> PlaybackCommand {
-    PlaybackCommand::FireInterruptSequence {
-        track_ids,
-        return_to_ambient: fade.return_to_ambient,
-        fade_in_ms: fade.fade_in_ms,
-        fade_out_ms: fade.fade_out_ms,
-        duck_to: fade.duck_to,
-    }
+    PlaybackCommand::FireInterruptSequence { track_ids, fade }
 }
 
 fn cue_item<'a>(

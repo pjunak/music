@@ -217,6 +217,12 @@ fn prepare_inner(
     journal_id: &RecoveryJournalId,
     mutation: &ModeMutation,
 ) -> Result<PreparedModeMutation, ModeFilesystemMutationError> {
+    let staging = Staging {
+        root,
+        stage,
+        stage_relative,
+        journal_id,
+    };
     let (operation, plan) = match mutation {
         ModeMutation::CreateMode { manifest, .. } => {
             let target = manifest.id.clone();
@@ -276,10 +282,7 @@ fn prepare_inner(
         ModeMutation::PutManifest {
             mode_id, manifest, ..
         } => prepare_file_write(
-            root,
-            stage,
-            stage_relative,
-            journal_id,
+            staging,
             "write_manifest",
             format!("{mode_id}/manifest.yaml"),
             serialize_document(manifest).map_err(|_| {
@@ -294,10 +297,7 @@ fn prepare_inner(
             create_only,
             ..
         } => prepare_file_write(
-            root,
-            stage,
-            stage_relative,
-            journal_id,
+            staging,
             "write_soundboard",
             format!("{mode_id}/soundboards/{soundboard_id}.yaml"),
             serialize_document(document).map_err(|_| {
@@ -323,10 +323,7 @@ fn prepare_inner(
             create_only,
             ..
         } => prepare_file_write(
-            root,
-            stage,
-            stage_relative,
-            journal_id,
+            staging,
             "write_cue",
             format!("{mode_id}/cues/{cue_id}.yaml"),
             serialize_document(document).map_err(|error| {
@@ -350,10 +347,7 @@ fn prepare_inner(
             create_only,
             ..
         } => prepare_file_write(
-            root,
-            stage,
-            stage_relative,
-            journal_id,
+            staging,
             "write_preset",
             format!("{mode_id}/presets/{preset_id}.yaml"),
             serialize_document(document).map_err(|error| {
@@ -379,16 +373,15 @@ fn prepare_inner(
             playlists,
             ..
         } => prepare_import_resources(
-            root,
-            stage,
-            stage_relative,
-            journal_id,
+            staging,
             mode_id,
-            manifest,
-            soundboards,
-            cues,
-            presets,
-            playlists,
+            &ImportDocuments {
+                manifest,
+                soundboards,
+                cues,
+                presets,
+                playlists,
+            },
         )?,
     };
     Ok(PreparedModeMutation {
@@ -401,19 +394,42 @@ fn prepare_inner(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The staging area of one journaled mode mutation.
+#[derive(Clone, Copy)]
+struct Staging<'a> {
+    root: &'a Path,
+    stage: &'a Path,
+    stage_relative: &'a str,
+    journal_id: &'a RecoveryJournalId,
+}
+
+/// The documents one mode import writes as a single journaled step.
+struct ImportDocuments<'a> {
+    manifest: &'a ModeDocument,
+    soundboards: &'a BTreeMap<String, SoundboardDocument>,
+    cues: &'a BTreeMap<String, CueDocument>,
+    presets: &'a BTreeMap<String, PresetDocument>,
+    playlists: &'a [ModeImportPlaylist],
+}
+
 fn prepare_import_resources(
-    root: &Path,
-    stage: &Path,
-    stage_relative: &str,
-    journal_id: &RecoveryJournalId,
+    staging: Staging<'_>,
     mode_id: &str,
-    manifest: &ModeDocument,
-    soundboards: &BTreeMap<String, SoundboardDocument>,
-    cues: &BTreeMap<String, CueDocument>,
-    presets: &BTreeMap<String, PresetDocument>,
-    playlists: &[ModeImportPlaylist],
+    documents: &ImportDocuments<'_>,
 ) -> Result<(&'static str, FilesystemMutationPlan), ModeFilesystemMutationError> {
+    let Staging {
+        root,
+        stage_relative,
+        journal_id,
+        ..
+    } = staging;
+    let ImportDocuments {
+        manifest,
+        soundboards,
+        cues,
+        presets,
+        playlists,
+    } = *documents;
     ensure_mode_target(root, mode_id)?;
     let mut documents = vec![(
         format!("{mode_id}/manifest.yaml"),
@@ -453,9 +469,7 @@ fn prepare_import_resources(
     let mut writes = Vec::with_capacity(documents.len());
     for (index, (target, content, create_only)) in documents.into_iter().enumerate() {
         writes.push(stage_import_write(
-            root,
-            stage,
-            stage_relative,
+            staging,
             index,
             target,
             &content,
@@ -491,16 +505,19 @@ fn prepare_import_resources(
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
 fn stage_import_write(
-    root: &Path,
-    stage: &Path,
-    stage_relative: &str,
+    staging: Staging<'_>,
     index: usize,
     target: String,
     content: &str,
     create_only: bool,
 ) -> Result<FilesystemWritePlan, ModeFilesystemMutationError> {
+    let Staging {
+        root,
+        stage,
+        stage_relative,
+        ..
+    } = staging;
     let target_path = rooted_target(root, &target)?;
     let target_existed = regular_file_exists(&target_path)?;
     if create_only && target_existed {
@@ -526,17 +543,19 @@ fn stage_import_write(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn prepare_file_write(
-    root: &Path,
-    stage: &Path,
-    stage_relative: &str,
-    journal_id: &RecoveryJournalId,
+    staging: Staging<'_>,
     operation: &'static str,
     target: String,
     content: String,
     create_only: bool,
 ) -> Result<(&'static str, FilesystemMutationPlan), ModeFilesystemMutationError> {
+    let Staging {
+        root,
+        stage,
+        stage_relative,
+        journal_id,
+    } = staging;
     let target_path = rooted_target(root, &target)?;
     let target_existed = regular_file_exists(&target_path)?;
     if create_only && target_existed {

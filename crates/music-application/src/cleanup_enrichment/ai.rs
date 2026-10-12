@@ -3,7 +3,8 @@ use crate::assistant::{
     CleanupModelDecision, LIBRARY_CLEANUP_DISCLOSURE, LIBRARY_CLEANUP_ENGINE_ID,
     LIBRARY_CLEANUP_QUALITY_ID, LibraryCleanupModelTask, LibraryCleanupTask,
     LibraryEditionModelTask, ModelQualityService, ModelReviewDestination, ModelRunManifest,
-    ProviderUsageAccumulator, StructuredModelTransport, execute_recorded_provider_request,
+    ModelRunPurpose, ProviderUsageAccumulator, StructuredModelTransport,
+    execute_recorded_provider_request,
 };
 use crate::cleanup::{CleanupScope, CleanupService};
 use crate::cleanup_sources::CleanupSourceService;
@@ -146,12 +147,14 @@ impl CleanupAiJobHandler {
         let mut usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(
             context,
             &role,
-            LIBRARY_CLEANUP_QUALITY_ID,
-            Some(LIBRARY_CLEANUP_DISCLOSURE),
-            &parameters,
-            &request,
-            1,
-            ModelReviewDestination::LibraryCleanupReview,
+            ModelRunPurpose {
+                evaluation_id: LIBRARY_CLEANUP_QUALITY_ID,
+                disclosure_version: Some(LIBRARY_CLEANUP_DISCLOSURE),
+                scope: &parameters,
+                evidence: &request,
+                max_attempts: 1,
+                destination: ModelReviewDestination::LibraryCleanupReview,
+            },
         )?);
         context
             .checkpoint(usage.checkpoint())

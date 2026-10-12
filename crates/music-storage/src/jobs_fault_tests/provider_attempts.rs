@@ -1,9 +1,9 @@
 use super::*;
 use music_application::assistant::{
-    ModelReviewDestination, ModelRunManifest, ModelTaskError, ModelTransportFuture,
-    ProviderAttemptOutcome, ProviderExecutionTarget, ProviderSecret, ProviderUsageAccumulator,
-    ResolvedRoleExecution, StructuredModelRequest, StructuredModelResult, StructuredModelTransport,
-    ThinkingMode, execute_recorded_provider_request,
+    ModelReviewDestination, ModelRunManifest, ModelRunPurpose, ModelTaskError,
+    ModelTransportFuture, ProviderAttemptOutcome, ProviderExecutionTarget, ProviderSecret,
+    ProviderUsageAccumulator, ResolvedRoleExecution, StructuredModelRequest, StructuredModelResult,
+    StructuredModelTransport, ThinkingMode, execute_recorded_provider_request,
 };
 
 const KIND: &str = "test.provider-attempt";
@@ -120,12 +120,14 @@ impl JobHandler for Handler {
             let manifest = ModelRunManifest::new(
                 context,
                 &role,
-                "test-quality",
-                Some("test-disclosure"),
-                &json!({"scope": "private-scope"}),
-                &json!({"evidence": "private-evidence"}),
-                self.max_attempts,
-                ModelReviewDestination::EqAuthoring,
+                ModelRunPurpose {
+                    evaluation_id: "test-quality",
+                    disclosure_version: Some("test-disclosure"),
+                    scope: &json!({"scope": "private-scope"}),
+                    evidence: &json!({"evidence": "private-evidence"}),
+                    max_attempts: self.max_attempts,
+                    destination: ModelReviewDestination::EqAuthoring,
+                },
             )?;
             let mut usage = ProviderUsageAccumulator::for_run(manifest);
             if let Some(budget) = self.token_budget {
@@ -650,12 +652,14 @@ impl JobHandler for JevHandler {
             let mut usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(
                 context,
                 &role,
-                "fixture",
-                None,
-                &inputs,
-                &inputs,
-                tasks.iter().map(|task| task.max_requests).sum(),
-                ModelReviewDestination::TrackTagReview,
+                ModelRunPurpose {
+                    evaluation_id: "fixture",
+                    disclosure_version: None,
+                    scope: &inputs,
+                    evidence: &inputs,
+                    max_attempts: tasks.iter().map(|task| task.max_requests).sum(),
+                    destination: ModelReviewDestination::TrackTagReview,
+                },
             )?);
             usage.limit_token_reservation(tasks.iter().map(|task| task.token_reservation).sum());
             let mut completed = Vec::new();

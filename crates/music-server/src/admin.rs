@@ -332,22 +332,19 @@ fn copy_modes_snapshot(source: &Path, destination: &Path) -> Result<ModesSnapsho
     }
     let canonical_root = fs::canonicalize(source)
         .map_err(|source_error| io_error("resolve modes directory", source, source_error))?;
-    let mut snapshot = ModesSnapshot {
-        directories: vec![MODES_PATH.to_owned()],
-        files: Vec::new(),
+    let mut copy = ModesCopy {
+        source_root: source,
+        destination_root: destination,
+        canonical_root: &canonical_root,
+        entry_count: 0,
+        total_bytes: 0,
+        snapshot: ModesSnapshot {
+            directories: vec![MODES_PATH.to_owned()],
+            files: Vec::new(),
+        },
     };
-    let mut entry_count = 0_usize;
-    let mut total_bytes = 0_u64;
-    copy_modes_directory(
-        source,
-        destination,
-        &canonical_root,
-        source,
-        0,
-        &mut entry_count,
-        &mut total_bytes,
-        &mut snapshot,
-    )?;
+    copy.copy_directory(source, 0)?;
+    let mut snapshot = copy.snapshot;
     snapshot.directories.sort();
     snapshot
         .files
@@ -355,74 +352,71 @@ fn copy_modes_snapshot(source: &Path, destination: &Path) -> Result<ModesSnapsho
     Ok(snapshot)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn copy_modes_directory(
-    source_root: &Path,
-    destination_root: &Path,
-    canonical_root: &Path,
-    directory: &Path,
-    depth: usize,
-    entry_count: &mut usize,
-    total_bytes: &mut u64,
-    snapshot: &mut ModesSnapshot,
-) -> Result<(), BackupError> {
-    if depth > MAX_MODE_DEPTH {
-        return Err(BackupError::LimitExceeded(
-            "the maximum modes directory depth",
-        ));
-    }
-    let mut entries = fs::read_dir(directory)
-        .map_err(|source| io_error("read modes directory", directory, source))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|source| io_error("read modes directory entry", directory, source))?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
+/// A bounded, symlink-free copy of the modes tree into a backup workspace.
+struct ModesCopy<'a> {
+    source_root: &'a Path,
+    destination_root: &'a Path,
+    canonical_root: &'a Path,
+    entry_count: usize,
+    total_bytes: u64,
+    snapshot: ModesSnapshot,
+}
 
-    for entry in entries {
-        *entry_count = entry_count
-            .checked_add(1)
-            .ok_or(BackupError::LimitExceeded("the modes entry count"))?;
-        if *entry_count > MAX_MODE_ENTRIES {
-            return Err(BackupError::LimitExceeded("the modes entry count"));
+impl ModesCopy<'_> {
+    fn copy_directory(&mut self, directory: &Path, depth: usize) -> Result<(), BackupError> {
+        if depth > MAX_MODE_DEPTH {
+            return Err(BackupError::LimitExceeded(
+                "the maximum modes directory depth",
+            ));
         }
-        let source_path = entry.path();
-        let entry_metadata = symlink_metadata(&source_path, "inspect modes entry")?;
-        if entry_metadata.file_type().is_symlink() {
-            return Err(BackupError::UnsafePath(source_path));
-        }
-        ensure_beneath_root(&source_path, canonical_root)?;
-        let relative = source_path
-            .strip_prefix(source_root)
-            .map_err(|_| BackupError::UnsafePath(source_path.clone()))?;
-        let portable_relative = portable_relative_path(relative)?;
-        let archive_path = format!("{MODES_PATH}/{portable_relative}");
-        let destination_path = destination_root.join(relative);
+        let mut entries = fs::read_dir(directory)
+            .map_err(|source| io_error("read modes directory", directory, source))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| io_error("read modes directory entry", directory, source))?;
+        entries.sort_by_key(std::fs::DirEntry::file_name);
 
-        if entry_metadata.is_dir() {
-            create_directory(&destination_path, "create modes backup directory")?;
-            snapshot.directories.push(archive_path);
-            copy_modes_directory(
-                source_root,
-                destination_root,
-                canonical_root,
-                &source_path,
-                depth + 1,
-                entry_count,
-                total_bytes,
-                snapshot,
-            )?;
-        } else if entry_metadata.is_file() {
-            let (sha256, bytes) =
-                copy_and_hash_mode_file(&source_path, &destination_path, total_bytes)?;
-            snapshot.files.push(FileManifestEntry {
-                path: archive_path,
-                bytes,
-                sha256,
-            });
-        } else {
-            return Err(BackupError::UnsafePath(source_path));
+        for entry in entries {
+            self.entry_count = self
+                .entry_count
+                .checked_add(1)
+                .ok_or(BackupError::LimitExceeded("the modes entry count"))?;
+            if self.entry_count > MAX_MODE_ENTRIES {
+                return Err(BackupError::LimitExceeded("the modes entry count"));
+            }
+            let source_path = entry.path();
+            let entry_metadata = symlink_metadata(&source_path, "inspect modes entry")?;
+            if entry_metadata.file_type().is_symlink() {
+                return Err(BackupError::UnsafePath(source_path));
+            }
+            ensure_beneath_root(&source_path, self.canonical_root)?;
+            let relative = source_path
+                .strip_prefix(self.source_root)
+                .map_err(|_| BackupError::UnsafePath(source_path.clone()))?;
+            let portable_relative = portable_relative_path(relative)?;
+            let archive_path = format!("{MODES_PATH}/{portable_relative}");
+            let destination_path = self.destination_root.join(relative);
+
+            if entry_metadata.is_dir() {
+                create_directory(&destination_path, "create modes backup directory")?;
+                self.snapshot.directories.push(archive_path);
+                self.copy_directory(&source_path, depth + 1)?;
+            } else if entry_metadata.is_file() {
+                let (sha256, bytes) = copy_and_hash_mode_file(
+                    &source_path,
+                    &destination_path,
+                    &mut self.total_bytes,
+                )?;
+                self.snapshot.files.push(FileManifestEntry {
+                    path: archive_path,
+                    bytes,
+                    sha256,
+                });
+            } else {
+                return Err(BackupError::UnsafePath(source_path));
+            }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 fn ensure_beneath_root(path: &Path, canonical_root: &Path) -> Result<(), BackupError> {

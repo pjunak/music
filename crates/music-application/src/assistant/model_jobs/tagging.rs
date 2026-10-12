@@ -51,6 +51,17 @@ fn not_run_after(error: &ModelTaskError) -> ModelTaskError {
     }
 }
 
+/// State shared by the normal and safety-repeat passes of one tagging
+/// quality evaluation.
+struct TaggingEvaluationRun {
+    usage: ProviderUsageAccumulator,
+    retry_budget: u8,
+    progress: TaggingQualityProgress,
+    /// After a deterministic failure the remaining cases are recorded as not
+    /// run instead of spending further provider requests.
+    deterministic_execution_failure: Option<ModelTaskError>,
+}
+
 impl ModelEvaluationJobHandler {
     pub(super) async fn execute_tagging(
         &self,
@@ -83,7 +94,7 @@ impl ModelEvaluationJobHandler {
             .iter()
             .filter(|case| case.gate == TagQualityGate::Safety)
             .count();
-        let mut progress = TaggingQualityProgress::new(&execution_cases);
+        let progress = TaggingQualityProgress::new(&execution_cases);
         update_progress(
             context,
             0,
@@ -129,21 +140,14 @@ impl ModelEvaluationJobHandler {
             } else {
                 tagging_attempt_budget(planned_requests)
             };
-        let mut usage =
-            start_evaluation_run(context, &execution.role, parameters, max_attempts).await?;
-        let mut retry_budget = MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT;
-        let mut deterministic_execution_failure = None;
+        let mut run = TaggingEvaluationRun {
+            usage: start_evaluation_run(context, &execution.role, parameters, max_attempts).await?,
+            retry_budget: MODEL_TAGGER_INVALID_RESPONSE_RETRY_LIMIT,
+            progress,
+            deterministic_execution_failure: None,
+        };
         let results = self
-            .evaluate_tagging_cases(
-                context,
-                &execution.role,
-                &execution_cases,
-                &mut usage,
-                &mut retry_budget,
-                &mut progress,
-                false,
-                &mut deterministic_execution_failure,
-            )
+            .evaluate_tagging_cases(context, &execution.role, &execution_cases, &mut run, false)
             .await?;
         let safety_cases = execution_cases
             .iter()
@@ -151,17 +155,9 @@ impl ModelEvaluationJobHandler {
             .cloned()
             .collect::<Vec<_>>();
         let repeats = self
-            .evaluate_tagging_cases(
-                context,
-                &execution.role,
-                &safety_cases,
-                &mut usage,
-                &mut retry_budget,
-                &mut progress,
-                true,
-                &mut deterministic_execution_failure,
-            )
+            .evaluate_tagging_cases(context, &execution.role, &safety_cases, &mut run, true)
             .await?;
+        let usage = run.usage;
         let evaluated = merge_safety_repeats(results, repeats).map_err(model_task_failure)?;
         let merged = match baseline {
             Some(baseline) => merge_tagging_retest(baseline, evaluated)?,
@@ -201,18 +197,20 @@ impl ModelEvaluationJobHandler {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn evaluate_tagging_cases(
         &self,
         context: &JobExecutionContext,
         role: &ResolvedRoleExecution,
         cases: &[TagQualityCase],
-        usage: &mut ProviderUsageAccumulator,
-        retry_budget: &mut u8,
-        progress: &mut TaggingQualityProgress,
+        run: &mut TaggingEvaluationRun,
         safety_repeat: bool,
-        deterministic_execution_failure: &mut Option<ModelTaskError>,
     ) -> Result<Vec<TagQualityCaseResult>, JobHandlerError> {
+        let TaggingEvaluationRun {
+            usage,
+            retry_budget,
+            progress,
+            deterministic_execution_failure,
+        } = run;
         let mut results = Vec::with_capacity(cases.len());
         let batches = crate::assistant::plan_tag_quality_batches_for_adapter(
             cases,
@@ -302,14 +300,18 @@ impl ModelFeatureJobHandler {
     ) -> Result<Value, JobHandlerError> {
         parameters.limits.validate().map_err(model_task_failure)?;
         validate_feature_header(
-            &parameters.role_id,
-            "music_tagger",
-            &parameters.quality_evaluation_id,
-            TAGGING_QUALITY_EVALUATION_ID,
-            &parameters.disclosure_version,
-            "assistant-model-music-tagging-disclosure/v16",
-            parameters.consent,
-            &parameters.role_fingerprint,
+            FeatureHeader {
+                role_id: &parameters.role_id,
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: &parameters.disclosure_version,
+                consent: parameters.consent,
+                role_fingerprint: &parameters.role_fingerprint,
+            },
+            FeatureContract {
+                role_id: "music_tagger",
+                evaluation_id: TAGGING_QUALITY_EVALUATION_ID,
+                disclosure_version: "assistant-model-music-tagging-disclosure/v16",
+            },
         )?;
         let role = self
             .quality
@@ -497,15 +499,17 @@ impl ModelFeatureJobHandler {
         let mut provider_usage = start_model_run(
             context,
             &role,
-            &parameters.quality_evaluation_id,
-            Some(&parameters.disclosure_version),
-            &parameters,
-            &signatures
-                .iter()
-                .map(|(id, signature)| (id.get(), signature))
-                .collect::<Vec<_>>(),
-            max_attempts.min(parameters.limits.max_requests),
-            ModelReviewDestination::TrackTagReview,
+            ModelRunPurpose {
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: Some(&parameters.disclosure_version),
+                scope: &parameters,
+                evidence: &signatures
+                    .iter()
+                    .map(|(id, signature)| (id.get(), signature))
+                    .collect::<Vec<_>>(),
+                max_attempts: max_attempts.min(parameters.limits.max_requests),
+                destination: ModelReviewDestination::TrackTagReview,
+            },
         )
         .await?;
         provider_usage.limit_token_reservation(parameters.limits.max_token_reservation);

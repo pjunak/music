@@ -11,12 +11,12 @@ use music_application::ErrorChain;
 use music_application::auth::{SecretSessionToken, SessionLookup, SessionTouch, UnixSeconds};
 use music_application::playback::{
     CatalogCommandError, CatalogCommands, CatalogRequest, ClientRegistration, ConnectionId,
-    InterruptFade, PlaybackActorError, PlaybackActorHandle, PlaybackPublication,
-    ResolvedPlaybackCommand,
+    PlaybackActorError, PlaybackActorHandle, PlaybackPublication, ResolvedPlaybackCommand,
 };
 use music_domain::{
-    CrossfadeType as DomainCrossfadeType, DomainEvent, LoopMode as DomainLoopMode, LoopingSfx,
-    PlaybackCommand, ShuffleMode as DomainShuffleMode, TrackId, UnitInterval as DomainUnitInterval,
+    CrossfadeType as DomainCrossfadeType, DomainEvent, InterruptFade, LoopMode as DomainLoopMode,
+    LoopingSfx, PlaybackCommand, ShuffleMode as DomainShuffleMode, TrackId,
+    UnitInterval as DomainUnitInterval,
 };
 use music_protocol::{ClientAction, ErrorCode, ServerMessage};
 use tokio::sync::{broadcast, mpsc, watch};

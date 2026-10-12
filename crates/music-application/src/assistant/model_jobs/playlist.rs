@@ -105,14 +105,18 @@ impl ModelFeatureJobHandler {
         parameters: ModelPlaylistJobParameters,
     ) -> Result<Value, JobHandlerError> {
         validate_feature_header(
-            &parameters.role_id,
-            "playlist_planner",
-            &parameters.quality_evaluation_id,
-            PLAYLIST_QUALITY_EVALUATION_ID,
-            &parameters.disclosure_version,
-            "assistant-playlist-model-disclosure/v4",
-            parameters.consent,
-            &parameters.role_fingerprint,
+            FeatureHeader {
+                role_id: &parameters.role_id,
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: &parameters.disclosure_version,
+                consent: parameters.consent,
+                role_fingerprint: &parameters.role_fingerprint,
+            },
+            FeatureContract {
+                role_id: "playlist_planner",
+                evaluation_id: PLAYLIST_QUALITY_EVALUATION_ID,
+                disclosure_version: "assistant-playlist-model-disclosure/v4",
+            },
         )?;
         update_progress(
             context,
@@ -161,12 +165,14 @@ impl ModelFeatureJobHandler {
         let mut usage = start_model_run(
             context,
             &role,
-            &parameters.quality_evaluation_id,
-            Some(&parameters.disclosure_version),
-            &parameters,
-            &model_request,
-            usize::from(model_request.is_some()),
-            ModelReviewDestination::PlaylistPreview,
+            ModelRunPurpose {
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: Some(&parameters.disclosure_version),
+                scope: &parameters,
+                evidence: &model_request,
+                max_attempts: usize::from(model_request.is_some()),
+                destination: ModelReviewDestination::PlaylistPreview,
+            },
         )
         .await?;
         let suggestion = if let Some(suggestion) = task.immediate_result() {

@@ -62,6 +62,17 @@ struct CatalogAccess<'a> {
     lastfm_api_key: Option<&'a str>,
 }
 
+/// One track and the local context its catalog identification uses.
+#[derive(Clone, Copy)]
+struct TrackEnrichmentInput<'a> {
+    track: &'a IndexedTrack,
+    /// The track as local evidence suggests it should be tagged.
+    hypothesis: &'a IndexedTrack,
+    evidence: &'a LocalEvidence,
+    siblings: &'a [IndexedTrack],
+    indexed_siblings: &'a [&'a IndexedTrack],
+}
+
 impl CleanupEnrichmentJobHandler {
     #[must_use]
     pub fn new(services: CleanupEnrichmentServices, connector: Arc<dyn CatalogConnector>) -> Self {
@@ -359,11 +370,13 @@ impl CleanupEnrichmentJobHandler {
             } else {
                 match self
                     .enrich_track(
-                        track,
-                        &hypothesis,
-                        &evidence,
-                        &siblings,
-                        &indexed_siblings,
+                        TrackEnrichmentInput {
+                            track,
+                            hypothesis: &hypothesis,
+                            evidence: &evidence,
+                            siblings: &siblings,
+                            indexed_siblings: &indexed_siblings,
+                        },
                         catalog,
                         vocabulary.as_ref(),
                         context.job_id(),
@@ -476,18 +489,20 @@ impl CleanupEnrichmentJobHandler {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn enrich_track(
         &self,
-        track: &IndexedTrack,
-        hypothesis: &IndexedTrack,
-        evidence: &LocalEvidence,
-        siblings: &[IndexedTrack],
-        indexed_siblings: &[&IndexedTrack],
+        input: TrackEnrichmentInput<'_>,
         catalog: CatalogAccess<'_>,
         vocabulary: Option<&TagVocabularySnapshot>,
         job_id: &str,
     ) -> Result<Map<String, Value>, CatalogError> {
+        let TrackEnrichmentInput {
+            track,
+            hypothesis,
+            evidence,
+            siblings,
+            indexed_siblings,
+        } = input;
         let mut resolution = resolve_identity(
             self.connector.as_ref(),
             track,

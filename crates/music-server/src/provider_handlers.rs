@@ -488,14 +488,14 @@ fn parse_chat_completions_result(payload: &Value) -> StructuredModelResult {
         .and_then(|choices| choices.first())
         .and_then(Value::as_object)
     else {
-        return structured_model_result(
-            false,
-            Some("invalid_response"),
-            None,
-            provider_model_id,
-            None,
-            input_tokens,
-            output_tokens,
+        return rejected_response(
+            "invalid_response",
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason: None,
+                input_tokens,
+                output_tokens,
+            },
         );
     };
     let finish_reason = optional_bounded_text(choice.get("finish_reason"), 64);
@@ -529,14 +529,14 @@ fn parse_chat_completions_result(payload: &Value) -> StructuredModelResult {
             .map(|_| "unexpected_tool_call")
     });
     if let Some(code) = failure {
-        return structured_model_result(
-            false,
-            Some(code),
-            None,
-            provider_model_id,
-            finish_reason,
-            input_tokens,
-            output_tokens,
+        return rejected_response(
+            code,
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason,
+                input_tokens,
+                output_tokens,
+            },
         );
     }
     let Some(content) = choice
@@ -553,14 +553,14 @@ fn parse_chat_completions_result(payload: &Value) -> StructuredModelResult {
         } else {
             "invalid_response"
         };
-        return structured_model_result(
-            false,
-            Some(code),
-            None,
-            provider_model_id,
-            finish_reason,
-            input_tokens,
-            output_tokens,
+        return rejected_response(
+            code,
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason,
+                input_tokens,
+                output_tokens,
+            },
         );
     };
     parse_structured_text(
@@ -583,14 +583,14 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
         .and_then(Value::as_u64);
     match payload.get("status").and_then(Value::as_str) {
         Some("failed") => {
-            return structured_model_result(
-                false,
-                Some(safe_provider_error_code(payload).unwrap_or("upstream_error")),
-                None,
-                provider_model_id,
-                None,
-                input_tokens,
-                output_tokens,
+            return rejected_response(
+                safe_provider_error_code(payload).unwrap_or("upstream_error"),
+                ResponseMetadata {
+                    provider_model_id,
+                    finish_reason: None,
+                    input_tokens,
+                    output_tokens,
+                },
             );
         }
         Some("incomplete") => {
@@ -598,42 +598,43 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
                 .get("incomplete_details")
                 .and_then(Value::as_object)
                 .and_then(|details| optional_bounded_text(details.get("reason"), 64));
-            return structured_model_result(
-                false,
-                Some(if finish_reason.as_deref() == Some("content_filter") {
-                    "model_refusal"
-                } else {
-                    "incomplete_structured_output"
-                }),
-                None,
-                provider_model_id,
-                finish_reason,
-                input_tokens,
-                output_tokens,
+            let error_code = if finish_reason.as_deref() == Some("content_filter") {
+                "model_refusal"
+            } else {
+                "incomplete_structured_output"
+            };
+            return rejected_response(
+                error_code,
+                ResponseMetadata {
+                    provider_model_id,
+                    finish_reason,
+                    input_tokens,
+                    output_tokens,
+                },
             );
         }
         Some("completed") => {}
         _ => {
-            return structured_model_result(
-                false,
-                Some("invalid_response"),
-                None,
-                provider_model_id,
-                None,
-                input_tokens,
-                output_tokens,
+            return rejected_response(
+                "invalid_response",
+                ResponseMetadata {
+                    provider_model_id,
+                    finish_reason: None,
+                    input_tokens,
+                    output_tokens,
+                },
             );
         }
     }
     let Some(output) = payload.get("output").and_then(Value::as_array) else {
-        return structured_model_result(
-            false,
-            Some("invalid_response"),
-            None,
-            provider_model_id,
-            None,
-            input_tokens,
-            output_tokens,
+        return rejected_response(
+            "invalid_response",
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason: None,
+                input_tokens,
+                output_tokens,
+            },
         );
     };
     let mut text = String::new();
@@ -643,14 +644,14 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
             item.get("type").and_then(Value::as_str),
             Some("function_call" | "custom_tool_call")
         ) {
-            return structured_model_result(
-                false,
-                Some("unexpected_tool_call"),
-                None,
-                provider_model_id,
-                Some("tool_calls".to_owned()),
-                input_tokens,
-                output_tokens,
+            return rejected_response(
+                "unexpected_tool_call",
+                ResponseMetadata {
+                    provider_model_id,
+                    finish_reason: Some("tool_calls".to_owned()),
+                    input_tokens,
+                    output_tokens,
+                },
             );
         }
         if item.get("type").and_then(Value::as_str) != Some("message") {
@@ -661,14 +662,14 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
             .and_then(Value::as_str)
             .is_some_and(|status| status != "completed")
         {
-            return structured_model_result(
-                false,
-                Some("incomplete_structured_output"),
-                None,
-                provider_model_id,
-                None,
-                input_tokens,
-                output_tokens,
+            return rejected_response(
+                "incomplete_structured_output",
+                ResponseMetadata {
+                    provider_model_id,
+                    finish_reason: None,
+                    input_tokens,
+                    output_tokens,
+                },
             );
         }
         let Some(parts) = item.get("content").and_then(Value::as_array) else {
@@ -687,18 +688,18 @@ fn parse_responses_result(payload: &Value) -> StructuredModelResult {
         }
     }
     if refused || text.is_empty() {
-        return structured_model_result(
-            false,
-            Some(if refused {
+        return rejected_response(
+            if refused {
                 "model_refusal"
             } else {
                 "empty_structured_output"
-            }),
-            None,
-            provider_model_id,
-            Some("stop".to_owned()),
-            input_tokens,
-            output_tokens,
+            },
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason: Some("stop".to_owned()),
+                input_tokens,
+                output_tokens,
+            },
         );
     }
     parse_structured_text(
@@ -718,14 +719,14 @@ fn parse_structured_text(
     output_tokens: Option<u64>,
 ) -> StructuredModelResult {
     if content.trim().is_empty() {
-        return structured_model_result(
-            false,
-            Some("empty_structured_output"),
-            None,
-            provider_model_id,
-            finish_reason,
-            input_tokens,
-            output_tokens,
+        return rejected_response(
+            "empty_structured_output",
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason,
+                input_tokens,
+                output_tokens,
+            },
         );
     }
     let payload = match serde_json::from_str::<Value>(content) {
@@ -737,48 +738,61 @@ fn parse_structured_text(
             } else {
                 "invalid_structured_output"
             };
-            return structured_model_result(
-                false,
-                Some(code),
-                None,
-                provider_model_id,
-                finish_reason,
-                input_tokens,
-                output_tokens,
+            return rejected_response(
+                code,
+                ResponseMetadata {
+                    provider_model_id,
+                    finish_reason,
+                    input_tokens,
+                    output_tokens,
+                },
             );
         }
     };
     if payload.is_none() {
-        return structured_model_result(
-            false,
-            Some("invalid_structured_output"),
-            None,
+        return rejected_response(
+            "invalid_structured_output",
+            ResponseMetadata {
+                provider_model_id,
+                finish_reason,
+                input_tokens,
+                output_tokens,
+            },
+        );
+    }
+    accepted_response(
+        payload,
+        ResponseMetadata {
             provider_model_id,
             finish_reason,
             input_tokens,
             output_tokens,
-        );
-    }
-    structured_model_result(
-        true,
-        None,
-        payload,
-        provider_model_id,
-        finish_reason,
-        input_tokens,
-        output_tokens,
+        },
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn structured_model_result(
-    succeeded: bool,
-    error_code: Option<&str>,
-    payload: Option<Value>,
+/// What a provider reported about one response, kept on every outcome.
+struct ResponseMetadata {
     provider_model_id: Option<String>,
     finish_reason: Option<String>,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+}
+
+/// A received response that failed validation with `error_code`.
+fn rejected_response(error_code: &str, metadata: ResponseMetadata) -> StructuredModelResult {
+    received_response(false, Some(error_code), None, metadata)
+}
+
+fn accepted_response(payload: Option<Value>, metadata: ResponseMetadata) -> StructuredModelResult {
+    received_response(true, None, payload, metadata)
+}
+
+fn received_response(
+    succeeded: bool,
+    error_code: Option<&str>,
+    payload: Option<Value>,
+    metadata: ResponseMetadata,
 ) -> StructuredModelResult {
     StructuredModelResult {
         token_details: Default::default(),
@@ -786,10 +800,10 @@ fn structured_model_result(
         succeeded,
         error_code: error_code.map(str::to_owned),
         payload,
-        provider_model_id,
-        finish_reason,
-        input_tokens,
-        output_tokens,
+        provider_model_id: metadata.provider_model_id,
+        finish_reason: metadata.finish_reason,
+        input_tokens: metadata.input_tokens,
+        output_tokens: metadata.output_tokens,
     }
 }
 

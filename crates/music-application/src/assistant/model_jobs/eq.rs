@@ -65,14 +65,18 @@ impl ModelFeatureJobHandler {
         parameters: ModelEqJobParameters,
     ) -> Result<Value, JobHandlerError> {
         validate_feature_header(
-            &parameters.role_id,
-            "eq_assistant",
-            &parameters.quality_evaluation_id,
-            EQ_QUALITY_EVALUATION_ID,
-            &parameters.disclosure_version,
-            "assistant-eq-draft-disclosure/v2",
-            parameters.consent,
-            &parameters.role_fingerprint,
+            FeatureHeader {
+                role_id: &parameters.role_id,
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: &parameters.disclosure_version,
+                consent: parameters.consent,
+                role_fingerprint: &parameters.role_fingerprint,
+            },
+            FeatureContract {
+                role_id: "eq_assistant",
+                evaluation_id: EQ_QUALITY_EVALUATION_ID,
+                disclosure_version: "assistant-eq-draft-disclosure/v2",
+            },
         )?;
         update_progress(
             context,
@@ -106,12 +110,14 @@ impl ModelFeatureJobHandler {
         let mut usage = start_model_run(
             context,
             &role,
-            &parameters.quality_evaluation_id,
-            Some(&parameters.disclosure_version),
-            &parameters,
-            &task.request(),
-            1,
-            ModelReviewDestination::EqAuthoring,
+            ModelRunPurpose {
+                evaluation_id: &parameters.quality_evaluation_id,
+                disclosure_version: Some(&parameters.disclosure_version),
+                scope: &parameters,
+                evidence: &task.request(),
+                max_attempts: 1,
+                destination: ModelReviewDestination::EqAuthoring,
+            },
         )
         .await?;
         let result = execute_provider_request(

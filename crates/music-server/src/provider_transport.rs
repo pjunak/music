@@ -93,15 +93,15 @@ impl ProviderNetworkBoundary {
             handler.models_path()
         );
         let response = self
-            .get_json(
-                &url,
-                target.api_key.expose_secret(),
-                target.allow_private_network,
-                VERIFICATION_TIMEOUT,
-                MAX_VERIFICATION_BYTES,
-                VERIFIER_USER_AGENT,
-                handler.additional_headers(),
-            )
+            .get_json(JsonRequest {
+                url: &url,
+                api_key: target.api_key.expose_secret(),
+                allow_private_network: target.allow_private_network,
+                timeout: VERIFICATION_TIMEOUT,
+                max_response_bytes: MAX_VERIFICATION_BYTES,
+                user_agent: VERIFIER_USER_AGENT,
+                additional_headers: handler.additional_headers(),
+            })
             .await;
         let response = match response {
             Ok(response) => response,
@@ -156,13 +156,15 @@ impl ProviderNetworkBoundary {
         let url = format!("{}{}", target.base_url.trim_end_matches('/'), prepared.path);
         let response = self
             .post_json(
-                &url,
-                target.api_key.expose_secret(),
-                target.allow_private_network,
-                Duration::from_secs(u64::from(target.timeout_seconds)),
-                MAX_EXECUTION_RESPONSE_BYTES,
-                EXECUTOR_USER_AGENT,
-                prepared.additional_headers,
+                JsonRequest {
+                    url: &url,
+                    api_key: target.api_key.expose_secret(),
+                    allow_private_network: target.allow_private_network,
+                    timeout: Duration::from_secs(u64::from(target.timeout_seconds)),
+                    max_response_bytes: MAX_EXECUTION_RESPONSE_BYTES,
+                    user_agent: EXECUTOR_USER_AGENT,
+                    additional_headers: prepared.additional_headers,
+                },
                 &prepared.payload,
             )
             .await;
@@ -183,67 +185,35 @@ impl ProviderNetworkBoundary {
         handler.parse_structured_response(&response.payload)
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn get_json(
         &self,
-        raw_url: &str,
-        api_key: &str,
-        allow_private_network: bool,
-        timeout: Duration,
-        max_response_bytes: usize,
-        user_agent: &str,
-        additional_headers: &[(&str, &str)],
+        request: JsonRequest<'_>,
     ) -> Result<JsonHttpResponse, ProviderTransportError> {
-        self.request_json(
-            raw_url,
-            api_key,
-            allow_private_network,
-            timeout,
-            max_response_bytes,
-            user_agent,
-            additional_headers,
-            None,
-        )
-        .await
+        self.request_json(request, None).await
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn post_json(
         &self,
-        raw_url: &str,
-        api_key: &str,
-        allow_private_network: bool,
-        timeout: Duration,
-        max_response_bytes: usize,
-        user_agent: &str,
-        additional_headers: &[(&str, &str)],
+        request: JsonRequest<'_>,
         payload: &Value,
     ) -> Result<JsonHttpResponse, ProviderTransportError> {
-        self.request_json(
-            raw_url,
+        self.request_json(request, Some(payload)).await
+    }
+
+    async fn request_json(
+        &self,
+        request: JsonRequest<'_>,
+        payload: Option<&Value>,
+    ) -> Result<JsonHttpResponse, ProviderTransportError> {
+        let JsonRequest {
+            url: raw_url,
             api_key,
             allow_private_network,
             timeout,
             max_response_bytes,
             user_agent,
             additional_headers,
-            Some(payload),
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn request_json(
-        &self,
-        raw_url: &str,
-        api_key: &str,
-        allow_private_network: bool,
-        timeout: Duration,
-        max_response_bytes: usize,
-        user_agent: &str,
-        additional_headers: &[(&str, &str)],
-        payload: Option<&Value>,
-    ) -> Result<JsonHttpResponse, ProviderTransportError> {
+        } = request;
         let body = payload
             .map(serde_json::to_vec)
             .transpose()
@@ -378,6 +348,18 @@ impl music_application::assistant::StructuredModelTransport for ProviderNetworkB
             self, target, request,
         ))
     }
+}
+
+/// Where and how to send one provider JSON request.
+#[derive(Debug, Clone, Copy)]
+struct JsonRequest<'a> {
+    url: &'a str,
+    api_key: &'a str,
+    allow_private_network: bool,
+    timeout: Duration,
+    max_response_bytes: usize,
+    user_agent: &'a str,
+    additional_headers: &'a [(&'a str, &'a str)],
 }
 
 #[derive(Debug)]
@@ -1246,15 +1228,15 @@ mod tests {
         let (address, server) = test_server(app).await?;
         let boundary = ProviderNetworkBoundary::new();
         let error = boundary
-            .get_json(
-                &format!("http://{address}/declared"),
-                "key",
-                true,
-                VERIFICATION_TIMEOUT,
-                1_024,
-                "test/1",
-                &[],
-            )
+            .get_json(JsonRequest {
+                url: &format!("http://{address}/declared"),
+                api_key: "key",
+                allow_private_network: true,
+                timeout: VERIFICATION_TIMEOUT,
+                max_response_bytes: 1_024,
+                user_agent: "test/1",
+                additional_headers: &[],
+            })
             .await
             .err()
             .ok_or("oversized response unexpectedly succeeded")?;

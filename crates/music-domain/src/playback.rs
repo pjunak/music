@@ -262,6 +262,16 @@ impl PlaybackState {
     }
 }
 
+/// How an interrupt takes over the ambient lane and hands it back.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InterruptFade {
+    pub return_to_ambient: bool,
+    pub fade_in_ms: u32,
+    pub fade_out_ms: u32,
+    /// Duck ambient to this level instead of pausing it.
+    pub duck_to: Option<UnitInterval>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlaybackCommand {
     SetGroupVolume(UnitInterval),
@@ -318,10 +328,7 @@ pub enum PlaybackCommand {
     },
     FireInterruptSequence {
         track_ids: Vec<TrackId>,
-        return_to_ambient: bool,
-        fade_in_ms: u32,
-        fade_out_ms: u32,
-        duck_to: Option<UnitInterval>,
+        fade: InterruptFade,
     },
     InterruptSkipNext {
         expected_track_id: Option<TrackId>,
@@ -538,21 +545,9 @@ pub fn reduce(
             source_playlist_id,
             context.clock.monotonic_ms,
         )?,
-        PlaybackCommand::FireInterruptSequence {
-            track_ids,
-            return_to_ambient,
-            fade_in_ms,
-            fade_out_ms,
-            duck_to,
-        } => fire_interrupt(
-            &mut next,
-            track_ids,
-            return_to_ambient,
-            fade_in_ms,
-            fade_out_ms,
-            duck_to,
-            context.clock.monotonic_ms,
-        )?,
+        PlaybackCommand::FireInterruptSequence { track_ids, fade } => {
+            fire_interrupt(&mut next, track_ids, fade, context.clock.monotonic_ms)?
+        }
         PlaybackCommand::InterruptSkipNext { expected_track_id } => {
             interrupt_skip_next(&mut next, expected_track_id, context.clock.monotonic_ms)?
         }
@@ -1087,19 +1082,21 @@ fn ambient_play_sequence(
     Ok(true)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn fire_interrupt(
     state: &mut PlaybackState,
     track_ids: Vec<TrackId>,
-    return_to_ambient: bool,
-    fade_in_ms: u32,
-    fade_out_ms: u32,
-    duck_to: Option<UnitInterval>,
+    fade: InterruptFade,
     now_ms: u64,
 ) -> Result<bool, PlaybackError> {
     let Some((&current, queue)) = track_ids.split_first() else {
         return Ok(false);
     };
+    let InterruptFade {
+        return_to_ambient,
+        fade_in_ms,
+        fade_out_ms,
+        duck_to,
+    } = fade;
     if duck_to.is_none() {
         freeze_ambient(&mut state.ambient, now_ms);
     }
@@ -1194,8 +1191,9 @@ mod tests {
 
     use super::{
         ClockSample, CrossfadeType, CuePlayback, CuePlaylist, CuePreset, CueSfx, DomainEvent,
-        LoopMode, LoopingSfx, PersistenceIntent, PlaybackCommand, PlaybackError, PlaybackState,
-        ReductionContext, ShuffleMode, TrackId, UnitInterval, materialize_positions, reduce,
+        InterruptFade, LoopMode, LoopingSfx, PersistenceIntent, PlaybackCommand, PlaybackError,
+        PlaybackState, ReductionContext, ShuffleMode, TrackId, UnitInterval, materialize_positions,
+        reduce,
     };
 
     fn track(id: i64) -> Result<TrackId, PlaybackError> {
@@ -1459,10 +1457,12 @@ mod tests {
             &ambient,
             PlaybackCommand::FireInterruptSequence {
                 track_ids: vec![track(2)?],
-                return_to_ambient: true,
-                fade_in_ms: 100,
-                fade_out_ms: 200,
-                duck_to: None,
+                fade: InterruptFade {
+                    return_to_ambient: true,
+                    fade_in_ms: 100,
+                    fade_out_ms: 200,
+                    duck_to: None,
+                },
             },
             2_000,
         )?;
@@ -1475,10 +1475,12 @@ mod tests {
             &ambient,
             PlaybackCommand::FireInterruptSequence {
                 track_ids: vec![track(2)?],
-                return_to_ambient: true,
-                fade_in_ms: 0,
-                fade_out_ms: 0,
-                duck_to: Some(UnitInterval::new(0.25)?),
+                fade: InterruptFade {
+                    return_to_ambient: true,
+                    fade_in_ms: 0,
+                    fade_out_ms: 0,
+                    duck_to: Some(UnitInterval::new(0.25)?),
+                },
             },
             2_000,
         )?;

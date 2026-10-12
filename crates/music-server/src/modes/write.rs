@@ -207,6 +207,25 @@ struct CreateCueRequest {
     loops: Vec<CueLoopIn>,
 }
 
+impl CreateCueRequest {
+    /// The new cue's ID and the body shared with cue updates.
+    fn into_parts(self) -> (String, CueBodyRequest) {
+        (
+            self.id,
+            CueBodyRequest {
+                name: self.name,
+                description: self.description,
+                preset: self.preset,
+                playlist: self.playlist,
+                start_index: self.start_index,
+                start_ms: self.start_ms,
+                sfx: self.sfx,
+                loops: self.loops,
+            },
+        )
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct EffectSpecIn {
     #[serde(rename = "type")]
@@ -800,18 +819,8 @@ async fn create_cue(
     )?;
     let catalog = mode_catalog(&state)?;
     mode(&catalog, &mode_id)?;
-    let cue_id = payload.id;
-    let document = cue_document(
-        &cue_id,
-        payload.name,
-        payload.description,
-        payload.preset,
-        payload.playlist,
-        payload.start_index,
-        payload.start_ms,
-        payload.sfx,
-        payload.loops,
-    );
+    let (cue_id, body) = payload.into_parts();
+    let document = cue_document(&cue_id, body);
     let result = commit(
         &state,
         ModeMutation::PutCue {
@@ -856,17 +865,7 @@ async fn update_cue(
         &payload.loops,
     )?;
     let catalog = mode_catalog(&state)?;
-    let document = cue_document(
-        &cue_id,
-        payload.name,
-        payload.description,
-        payload.preset,
-        payload.playlist,
-        payload.start_index,
-        payload.start_ms,
-        payload.sfx,
-        payload.loops,
-    );
+    let document = cue_document(&cue_id, payload);
     let result = commit(
         &state,
         ModeMutation::PutCue {
@@ -1400,18 +1399,17 @@ fn validate_cue_fields(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn cue_document(
-    cue_id: &str,
-    name: String,
-    description: Option<String>,
-    preset: Option<String>,
-    playlist: Option<String>,
-    start_index: u64,
-    start_ms: u64,
-    sfx: Vec<CueSfxIn>,
-    loops: Vec<CueLoopIn>,
-) -> CueDocument {
+fn cue_document(cue_id: &str, body: CueBodyRequest) -> CueDocument {
+    let CueBodyRequest {
+        name,
+        description,
+        preset,
+        playlist,
+        start_index,
+        start_ms,
+        sfx,
+        loops,
+    } = body;
     CueDocument {
         id: Some(cue_id.to_owned()),
         name,

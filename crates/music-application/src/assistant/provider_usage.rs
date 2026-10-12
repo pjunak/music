@@ -51,18 +51,31 @@ pub struct ModelRunManifest {
     max_token_reservation: Option<u64>,
 }
 
+/// What one model run is for. Its fingerprints are recorded in the run
+/// manifest before any provider call.
+pub struct ModelRunPurpose<'a, S: Serialize, E: Serialize> {
+    pub evaluation_id: &'a str,
+    pub disclosure_version: Option<&'a str>,
+    pub scope: &'a S,
+    pub evidence: &'a E,
+    pub max_attempts: usize,
+    pub destination: ModelReviewDestination,
+}
+
 impl ModelRunManifest {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new<S: Serialize, E: Serialize>(
         context: &JobExecutionContext,
         role: &ResolvedRoleExecution,
-        evaluation_id: &str,
-        disclosure_version: Option<&str>,
-        scope: &impl Serialize,
-        evidence: &impl Serialize,
-        max_attempts: usize,
-        review_destination: ModelReviewDestination,
+        purpose: ModelRunPurpose<'_, S, E>,
     ) -> Result<Self, JobHandlerError> {
+        let ModelRunPurpose {
+            evaluation_id,
+            disclosure_version,
+            scope,
+            evidence,
+            max_attempts,
+            destination: review_destination,
+        } = purpose;
         let max_attempts = u64::try_from(max_attempts)
             .map_err(|error| JobHandlerError::caused_by("model_run_budget_overflow", &error))?;
         let max_output_tokens = effective_output_allowance(role);

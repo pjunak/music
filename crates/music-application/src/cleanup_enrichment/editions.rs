@@ -14,7 +14,6 @@ pub(super) struct EditionResolution {
     pub partial: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn resolve_editions(
     connector: &dyn CatalogConnector,
     track: &IndexedTrack,

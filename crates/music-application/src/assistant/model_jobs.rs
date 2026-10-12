@@ -33,31 +33,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use super::{
-    ModelReviewDestination, ModelRunManifest, StructuredModelTransport,
+    ModelReviewDestination, ModelRunManifest, ModelRunPurpose, StructuredModelTransport,
     execute_recorded_provider_request as execute_provider_request,
 };
 
-#[allow(clippy::too_many_arguments)]
-async fn start_model_run(
+async fn start_model_run<S: Serialize, E: Serialize>(
     context: &JobExecutionContext,
     role: &ResolvedRoleExecution,
-    evaluation_id: &str,
-    disclosure_version: Option<&str>,
-    scope: &impl Serialize,
-    evidence: &impl Serialize,
-    max_attempts: usize,
-    destination: ModelReviewDestination,
+    purpose: ModelRunPurpose<'_, S, E>,
 ) -> Result<ProviderUsageAccumulator, JobHandlerError> {
-    let usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(
-        context,
-        role,
-        evaluation_id,
-        disclosure_version,
-        scope,
-        evidence,
-        max_attempts,
-        destination,
-    )?);
+    let usage = ProviderUsageAccumulator::for_run(ModelRunManifest::new(context, role, purpose)?);
     context
         .checkpoint(usage.checkpoint())
         .await
@@ -75,12 +60,14 @@ async fn start_evaluation_run(
     start_model_run(
         context,
         role,
-        &parameters.evaluation_id,
-        None,
-        parameters,
-        &(&parameters.evaluation_id, &role.fingerprint),
-        max_attempts,
-        ModelReviewDestination::QualityEvaluation,
+        ModelRunPurpose {
+            evaluation_id: &parameters.evaluation_id,
+            disclosure_version: None,
+            scope: parameters,
+            evidence: &(&parameters.evaluation_id, &role.fingerprint),
+            max_attempts,
+            destination: ModelReviewDestination::QualityEvaluation,
+        },
     )
     .await
 }
@@ -695,21 +682,31 @@ pub fn model_feature_job_handlers(
     .collect()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn validate_feature_header(
-    role_id: &str,
-    expected_role_id: &str,
-    evaluation_id: &str,
-    expected_evaluation_id: &str,
-    disclosure_version: &str,
-    expected_disclosure_version: &str,
+/// What a model feature job claims about its role, evaluation and consent.
+struct FeatureHeader<'a> {
+    role_id: &'a str,
+    evaluation_id: &'a str,
+    disclosure_version: &'a str,
     consent: bool,
-    fingerprint: &str,
+    role_fingerprint: &'a str,
+}
+
+/// The role, quality evaluation and disclosure a feature requires.
+struct FeatureContract {
+    role_id: &'static str,
+    evaluation_id: &'static str,
+    disclosure_version: &'static str,
+}
+
+fn validate_feature_header(
+    header: FeatureHeader<'_>,
+    expected: FeatureContract,
 ) -> Result<(), JobHandlerError> {
-    if role_id != expected_role_id
-        || evaluation_id != expected_evaluation_id
-        || disclosure_version != expected_disclosure_version
-        || !consent
+    let fingerprint = header.role_fingerprint;
+    if header.role_id != expected.role_id
+        || header.evaluation_id != expected.evaluation_id
+        || header.disclosure_version != expected.disclosure_version
+        || !header.consent
         || fingerprint.len() != 64
         || !fingerprint
             .bytes()

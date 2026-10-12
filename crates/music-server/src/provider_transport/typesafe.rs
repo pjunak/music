@@ -43,10 +43,21 @@ impl TypedDecisionTransport for ProviderNetworkBoundary {
             let Ok(_permit) = self.request_slots.try_acquire() else {
                 return failed_structured_model("provider_busy", ProviderAttemptOutcome::NotSent);
             };
-            let response = self.post_json(&format!("{}/systemone",target.base_url.trim_end_matches('/')),
-                target.api_key.expose_secret(),target.allow_private_network,Duration::from_secs(u64::from(target.timeout_seconds)),
-                MAX_EXECUTION_RESPONSE_BYTES,EXECUTOR_USER_AGENT,&[],
-                &serde_json::json!({"model":target.model_id,"state":request.state,"questions":request.questions})).await;
+            let url = format!("{}/systemone", target.base_url.trim_end_matches('/'));
+            let response = self
+                .post_json(
+                    JsonRequest {
+                        url: &url,
+                        api_key: target.api_key.expose_secret(),
+                        allow_private_network: target.allow_private_network,
+                        timeout: Duration::from_secs(u64::from(target.timeout_seconds)),
+                        max_response_bytes: MAX_EXECUTION_RESPONSE_BYTES,
+                        user_agent: EXECUTOR_USER_AGENT,
+                        additional_headers: &[],
+                    },
+                    &serde_json::json!({"model":target.model_id,"state":request.state,"questions":request.questions}),
+                )
+                .await;
             let response = match response {
                 Ok(response) => response,
                 Err(error) => return failed_structured_model(error.code(), error.outcome),

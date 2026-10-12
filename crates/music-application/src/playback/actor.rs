@@ -2655,10 +2655,12 @@ mod tests {
             .execute(ResolvedPlaybackCommand::at_generation(
                 PlaybackCommand::FireInterruptSequence {
                     track_ids: vec![track_id],
-                    return_to_ambient: true,
-                    fade_in_ms: 0,
-                    fade_out_ms: 0,
-                    duck_to: None,
+                    fade: music_domain::InterruptFade {
+                        return_to_ambient: true,
+                        fade_in_ms: 0,
+                        fade_out_ms: 0,
+                        duck_to: None,
+                    },
                 },
                 generation,
             ))
