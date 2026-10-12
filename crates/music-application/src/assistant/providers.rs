@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::TryRngCore;
-use rand::rngs::OsRng;
+use rand::TryRng;
+use rand::rngs::SysRng;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -2044,7 +2044,7 @@ fn bounded_optional_text(value: Option<String>, maximum: usize) -> Option<String
 
 fn random_conformance_challenge() -> Result<String, ProviderServiceError> {
     let mut bytes = [0_u8; CONFORMANCE_CHALLENGE_BYTES];
-    OsRng.try_fill_bytes(&mut bytes).map_err(|_| {
+    SysRng.try_fill_bytes(&mut bytes).map_err(|_| {
         ProviderServiceError::public(
             ProviderServiceErrorKind::Unavailable,
             "secure_random_unavailable",

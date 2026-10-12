@@ -8,8 +8,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rand::TryRngCore;
-use rand::rngs::OsRng;
+use rand::TryRng;
+use rand::rngs::SysRng;
 use zeroize::Zeroizing;
 
 const SESSION_TOKEN_BYTES: usize = 48;
@@ -405,7 +405,7 @@ pub struct SystemSessionTokenSource;
 impl SessionTokenSource for SystemSessionTokenSource {
     fn generate(&self) -> Result<SecretSessionToken, DependencyError> {
         let mut bytes = [0_u8; SESSION_TOKEN_BYTES];
-        OsRng
+        SysRng
             .try_fill_bytes(&mut bytes)
             .map_err(|source| -> DependencyError { Box::new(source) })?;
         Ok(SecretSessionToken::new(URL_SAFE_NO_PAD.encode(bytes)))

@@ -9,7 +9,7 @@ use music_domain::{
     PlaybackCommand, PlaybackError, PlaybackState, ReductionContext, ShuffleMode, TrackId,
     materialize_positions, reduce,
 };
-use rand::Rng;
+use rand::RngExt;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;

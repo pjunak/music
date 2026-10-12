@@ -11,7 +11,7 @@ use music_application::assistant::{
     ProviderCredentialResetOutcome, ProviderCredentialSource, ProviderRepository,
 };
 use music_storage::{CredentialVault, SecretString};
-use rand::TryRngCore;
+use rand::TryRng;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -131,7 +131,7 @@ impl RuntimeCredentialStore {
             .as_deref()
             .ok_or_else(|| CredentialStoreError::public("master_key_file_not_configured"))?;
         let mut key = [0_u8; MASTER_KEY_BYTES];
-        if let Err(source) = rand::rngs::OsRng.try_fill_bytes(&mut key) {
+        if let Err(source) = rand::rngs::SysRng.try_fill_bytes(&mut key) {
             key.zeroize();
             return Err(CredentialStoreError::io(
                 "master_key_generation_failed",

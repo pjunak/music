@@ -1714,7 +1714,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "music-domain",
- "rand 0.9.5",
+ "rand 0.10.2",
  "schemars",
  "serde",
  "serde_json",
@@ -1795,7 +1795,7 @@ dependencies = [
  "music-media",
  "music-protocol",
  "music-storage",
- "rand 0.9.5",
+ "rand 0.10.2",
  "reqwest",
  "rpassword",
  "serde",
