@@ -489,20 +489,14 @@ multi-stage image (`node:26.7.0-alpine` + `rust:1.97.1-trixie` builders → non-
 
 ## Automated deployment
 
-A successful current-main build publishes the verified image and waits for the
-infrastructure deployment to finish. Production runs are queued so new commits
-do not cancel an active rollout. Superseded sources skip publication. Application
-checks and the exact-image smoke gate still run before publication.
+A successful current-main build publishes the verified image, then starts infra's
+**Deploy** workflow with `service=music` and the image digest. This run is green
+once the image is handed over; the deployment result is the Deploy run in
+[pjunak/infra](https://github.com/pjunak/infra/actions/workflows/deploy.yml).
+Production runs are queued and superseded sources skip publication. Application
+checks and the exact-image smoke gate run before publication.
 
-Set `INFRA_REPO=pjunak/infra` and `INFRA_DISPATCH_TOKEN`, scoped to infra with
-Contents read and Actions write. The target is the `music` stack;
-`INFRA_SERVICE` is no longer used. Server SSH credentials stay in infra.
-
-Use **Deploy published release** with a completed build run ID to retry its
-retained `published-image` artifact without rebuilding. The shared pinned infra
-client checks the source and publication job, dispatches the exact digest and
-waits for the exact returned deployment run and its health-checked result.
-Dispatch uses infra's main-only workflow with `service=music`, full source `sha`,
-immutable `image_ref` and unique `request_id`; the infra registry approves that
-stack/image pair. Failure or an unknown result fails the workflow. Inspect infra
-Actions before retrying an ambiguous request. See the [shared contract](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md).
+Requires the `INFRA_REPO=pjunak/infra` variable and the `INFRA_DISPATCH_TOKEN`
+secret (Actions write on infra). Server SSH credentials stay in infra. To retry
+or roll back, run infra's Deploy manually with the digest; see infra's
+[application deployments](https://github.com/pjunak/infra/blob/main/docs/application-deployments.md).

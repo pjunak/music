@@ -1,7 +1,7 @@
 name: Build and dispatch
 
 # Verifies and publishes the canonical Rust server + React SPA image, then
-# asks the infrastructure repository to deploy the exact source revision.
+# hands its digest to the infrastructure repository's Deploy workflow.
 #
 # Required secret  : INFRA_DISPATCH_TOKEN  (fine-grained PAT on the infra repo)
 # Required variable: INFRA_REPO            (e.g. pjunak/infra)
@@ -133,24 +133,6 @@ jobs:
           docker buildx imagetools create --tag "${IMAGE_NAME}:latest" "$image_ref"
           echo "image_ref=${image_ref}" >> "$GITHUB_OUTPUT"
 
-      - name: Retain published release metadata
-        if: steps.current.outputs.current == 'true'
-        env:
-          IMAGE_REF: ${{ steps.promote.outputs.image_ref }}
-        run: |
-          set -euo pipefail
-          [[ "$IMAGE_REF" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]]
-          mkdir -p release
-          jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" --arg image "$IMAGE_REF" \
-            '{format: 1, repository: $repository, sha: $sha, image_ref: $image}' > release/published-image.json
-      - uses: actions/upload-artifact@v7
-        if: steps.current.outputs.current == 'true'
-        with:
-          name: published-image
-          path: release/published-image.json
-          if-no-files-found: error
-          retention-days: 30
-
   output-release:
     name: Publish tested Linux speaker download
     needs: [verify, release]
@@ -174,26 +156,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   deploy:
-    name: Deploy and verify music
+    name: Hand the image to infra
     needs: release
     if: needs.release.outputs.image_ref != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          repository: ${{ vars.INFRA_REPO }}
-          token: ${{ secrets.INFRA_DISPATCH_TOKEN }}
-          ref: 3e220931eb61ae311d3371674c921a047581dcc9
-          persist-credentials: false
-          sparse-checkout: scripts/application-release.py
-          sparse-checkout-cone-mode: false
-      - name: Dispatch and wait for infrastructure health
-        run: python3 scripts/application-release.py deploy
+      - name: Dispatch infra's Deploy for music
         env:
-          APP_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
           INFRA_REPO: ${{ vars.INFRA_REPO }}
-          DEPLOY_SERVICE: music
-          DEPLOY_SHA: ${{ github.sha }}
-          DEPLOY_IMAGE: ${{ needs.release.outputs.image_ref }}
+          IMAGE_REF: ${{ needs.release.outputs.image_ref }}
+        run: |
+          set -euo pipefail
+          gh workflow run deploy.yml --repo "$INFRA_REPO" --ref main -f service=music -f image_ref="$IMAGE_REF"
+          echo "Deploying \`$IMAGE_REF\`; result: https://github.com/$INFRA_REPO/actions/workflows/deploy.yml" >> "$GITHUB_STEP_SUMMARY"
