@@ -19,6 +19,9 @@ updates:
     directory: "/frontend"
     schedule:
       interval: "weekly"
+    # The frontend is TypeScript; replace the default npm "javascript" label.
+    labels:
+      - "dependencies"
     groups:
       vitest:
         patterns:
