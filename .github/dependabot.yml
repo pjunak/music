@@ -6,6 +6,11 @@ updates:
       - "/fuzz"
     schedule:
       interval: "weekly"
+    ignore:
+      # Truncates the file when shrinking a tag that ends at EOF; the FLAC
+      # metadata tests fail: https://github.com/Serial-ATA/lofty-rs/issues/731
+      - dependency-name: "lofty"
+        versions: ["0.25.4"]
     groups:
       utoipa:
         patterns:
