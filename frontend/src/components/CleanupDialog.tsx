@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { applyCleanupSelection } from "@/components/cleanupApply";
+import type { CleanupApplySummary } from "@/components/cleanupApply";
 import { mergeEnrichment, replaceEdition, rejectedOperationIds, reviewProposal, selectUnambiguous, toggleReviewOperation } from "@/components/cleanupReview";
 import { CleanupRejectedPanel } from "@/components/CleanupRejectedPanel";
 import { CleanupEvidence, CleanupEvidenceImport, CleanupEditionTarget } from "@/components/CleanupEvidence";
@@ -9,7 +11,7 @@ import { CleanupHistoryPanel } from "@/components/CleanupHistoryPanel";
 import { CleanupCatalogCopy } from "@/components/CleanupCatalogCopy";
 import { WarnIcon } from "@/components/icons";
 import { Modal } from "@/components/Modal";
-import { assistantApi, cleanupApi, jobsApi } from "@/core/api";
+import { cleanupApi, jobsApi } from "@/core/api";
 import type {
   BackgroundJob,
   CleanupAnalyzeResult,
@@ -151,11 +153,9 @@ const DEFAULT_RULES: CleanupRuleId[] = RULE_GROUPS.flatMap((g) =>
   g.rules.filter((r) => r.defaultOn).map((r) => r.id),
 );
 
-const APPLY_CHUNK = 20;
 // Names per /verify call — the server paces MusicBrainz at 1 req/s with
 // two queries per name, so 5 keeps each request ~10s.
 const VERIFY_CHUNK = 5;
-const REVIEW_CHUNK = 500;
 const CLEANUP_ENRICHMENT_JOB_KIND = "library.cleanup-enrichment";
 // Mirrors the provider job's bound; its execution-time check remains authoritative.
 const MAX_CATALOG_TRACKS = 500;
@@ -285,13 +285,7 @@ export function CleanupWorkflow({
   // chunks; whatever resolved so far still feeds the re-analysis.
   const skipCheckRef = useRef(false);
   const mountedRef = useRef(true);
-  const [summary, setSummary] = useState<{
-    applied: number;
-    skipped: { track_id: number; reason: string }[];
-    batchId: number | null;
-    acceptedTags: number;
-    tagFailures: number;
-  } | null>(null);
+  const [summary, setSummary] = useState<CleanupApplySummary | null>(null);
 
   useEffect(
     () => () => {
@@ -634,56 +628,19 @@ export function CleanupWorkflow({
     if (ops.length === 0 && tagTargets.length === 0) return;
     setStep("applying");
     setProgress({ done: 0, total: ops.length + tagTargets.length });
-    let batchId: number | null = null;
-    let applied = 0;
-    let acceptedTags = 0;
-    let tagFailures = 0;
-    const skipped: { track_id: number; reason: string }[] = [];
-    // Catalog review targets are bound to the metadata signature that produced
-    // them. Accept those explicit choices before an embedded-metadata repair
-    // changes that signature; accepted operator tags then remain durable.
-    for (let i = 0; i < tagTargets.length; i += REVIEW_CHUNK) {
-      const chunk = tagTargets.slice(i, i + REVIEW_CHUNK);
-      try {
-        const review = await assistantApi.reviewAnalysisTagsBulk(chunk, "accepted");
-        acceptedTags += review.applied.length;
-        tagFailures += review.failures.length;
-      } catch (error) {
-        tagFailures += chunk.length;
-        toast.error(
-          "Mood tag review stopped partway",
-          error instanceof Error ? error.message : undefined,
-        );
-        break;
-      }
-      setProgress({
-        done: Math.min(i + REVIEW_CHUNK, tagTargets.length),
-        total: ops.length + tagTargets.length,
-      });
-    }
-    try {
-      for (let i = 0; i < ops.length; i += APPLY_CHUNK) {
-        const chunk = ops.slice(i, i + APPLY_CHUNK);
-        const r = await cleanupApi.apply(chunk, batchId, scopeLabel);
-        batchId = r.batch_id ?? batchId;
-        applied += r.applied;
-        skipped.push(...r.skipped);
-        setProgress({
-          done: tagTargets.length + Math.min(i + APPLY_CHUNK, ops.length),
-          total: ops.length + tagTargets.length,
-        });
-      }
-    } catch (e) {
+    const outcome = await applyCleanupSelection(ops, tagTargets, scopeLabel, (done, total) =>
+      setProgress({ done, total }),
+    );
+    if (outcome.tagError !== null) toast.error("Mood tag review stopped partway", outcome.tagError);
+    if (outcome.applyError !== null) {
       toast.error(
         "Apply stopped partway",
-        `${applied} change${applied === 1 ? "" : "s"} landed before the error: ${
-          e instanceof Error ? e.message : "unknown"
-        }`,
+        `${outcome.applied} change${outcome.applied === 1 ? "" : "s"} landed before the error: ${outcome.applyError}`,
       );
     }
-    setSummary({ applied, skipped, batchId, acceptedTags, tagFailures });
+    setSummary(outcome);
     setStep("done");
-    if (applied > 0 || acceptedTags > 0) onApplied();
+    if (outcome.applied > 0 || outcome.acceptedTags > 0) onApplied();
   }
 
   function downloadCatalogResult() {
