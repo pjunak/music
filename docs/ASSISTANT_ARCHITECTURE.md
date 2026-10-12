@@ -403,7 +403,7 @@ operator request / indexed library / local audio
 | Role preparation and stale-gate enforcement | [`providers.rs`](../crates/music-application/src/assistant/providers.rs), [`provider_api.rs`](../crates/music-server/src/provider_api.rs) | role fingerprint, conformance, quality, and active-job tests | [ADR-004](ADR-004-durable-model-quality-gates.md) |
 | Run manifests and attempt/token accounting | [`provider_usage.rs`](../crates/music-application/src/assistant/provider_usage.rs), [`model_jobs.rs`](../crates/music-application/src/assistant/model_jobs.rs) | SQLite-backed provider attempt fault tests and local HTTP fixtures | [ADR-019](ADR-019-model-run-records-and-attempt-outcomes.md) |
 | Durable job lifecycle | [`jobs.rs`](../crates/music-application/src/jobs.rs), [`jobs.rs`](../crates/music-storage/src/jobs.rs), [`jobs.rs`](../crates/music-server/src/jobs.rs) | persisted-boundary fault tests in `music-storage` | [Repository persistence rules](ENGINEERING.md#persistence-and-deployment) |
-| Browser API/types and review workflows | [`frontend/src/core/api.ts`](../frontend/src/core/api.ts), [`frontend/src/views/assistant/`](../frontend/src/views/assistant) | colocated Vitest files | [Assistant UX philosophy](assistant-ux-philosophy.md) |
+| Browser API/types and review workflows | [`frontend/src/core/api/assistant.ts`](../frontend/src/core/api/assistant.ts), [`frontend/src/views/assistant/`](../frontend/src/views/assistant) | colocated Vitest files | [Assistant UX philosophy](assistant-ux-philosophy.md) |
 
 ## Current contract inventory
 

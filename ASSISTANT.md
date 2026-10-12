@@ -37,19 +37,18 @@ The one-time Python-to-Rust cutover completed on 2026-08-29. `main` is the produ
 recovery only. The following procedure applies to a new deployment, a schema-changing upgrade, or
 an isolated restore test:
 
-1. Back up `app.db`, legacy `devices.json` when present, authored modes, and the separately held
+1. Back up `app.db`, authored modes, and the separately held
    Assistant key. Keep that restore set isolated from the live container. Music and SFX remain
    under the deployment's filesystem backup policy.
-2. Run `music-cli db doctor` against the copy before migration. Unknown or damaged schema shapes
-   are a stop condition; `music-cli db migrate` creates and verifies its own pre-migration database
+2. Run `music-cli db doctor` against the copy before migration. A database without a migration
+   ledger, or with failed, unknown or edited migrations, is a stop condition; `music-cli db migrate` creates and verifies its own pre-migration database
    backup before applying the ordered SQLx migrations.
 3. If provider credentials are already saved, confirm that the matching Assistant
    credential master key is still available through `ASSISTANT_CREDENTIAL_KEY` or the
    dedicated key-file mount. A database backup and this key are one restore set.
-4. Confirm the deployment still mounts the existing music, SFX, modes, and legacy device paths in
-   their intended locations. Database migration does not rewrite media or mode documents;
-   `devices.json` is imported once without modifying the source and SQLite is authoritative after
-   that. Keep the normal long-term backup for media and authored modes.
+4. Confirm the deployment still mounts the existing music, SFX and modes paths in their intended
+   locations. Database migration does not rewrite media or mode documents. Keep the normal
+   long-term backup for media and authored modes.
 5. Build and deploy only an accepted release revision through the normal CI and infrastructure
    workflow. The canonical `Dockerfile` is the Rust release image; do not copy a development
    database over production.

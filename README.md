@@ -261,7 +261,6 @@ DB-backed tokens, nothing is signed.)
 | `MUSIC_DIR` | | `/data/music` | Root of the scanned music library |
 | `SFX_LIBRARY_DIR` | | `/data/sfx` | Root for soundboard SFX files |
 | `MODES_DIR` | | `/data/modes` | On-disk mode bundles (seeded on first boot) |
-| `DEVICES_FILE` | | `/data/devices.json` | Legacy one-time device-import source; SQLite is authoritative afterward |
 | `DATABASE_URL` | | `sqlite:////data/app.db` | App DB (auth, playlists, indexed tracks) |
 | `STATIC_DIR` | | `/app/static` | Built SPA served at `/` |
 | `ALLOWED_ORIGINS` | | `http://localhost:5173` | Additional browser origins for CORS and WebSockets; include the public origin if a proxy rewrites Host |
@@ -390,15 +389,11 @@ native clients may omit Origin and retain the normal session and action checks.
 See [the authentication decision](docs/ADR-024-session-verifiers-and-websocket-origins.md)
 for migration, proxy and client compatibility details.
 
-Rust owns an ordered SQLx migration ledger and refuses unknown or incompatible database shapes
-before opening them for writes. `music-cli db doctor` is read-only; `music-cli db migrate` creates
-and verifies a pre-migration backup before applying compatible migrations. The track index remains
-regenerable from the filesystem, while authored and human-owned state is preserved. A legacy
-Python database's standard Alembic bookkeeping table and obsolete `known_devices` table are accepted
-only in their exact historical shapes and removed by explicit SQLx migrations after that backup
-succeeds. The separately preserved `devices.json` remains the authoritative one-time device import.
-Equivalent historical uniqueness constraints are preserved when they duplicate the same canonical
-unique index; no uniqueness invariant is relaxed during migration.
+The SQLx migration ledger is the schema authority: a database without a ledger, or with failed,
+unknown, newer or edited migrations, is refused before it is opened for writes. Databases from before
+the Rust server are not supported. `music-cli db doctor` is read-only; `music-cli db migrate` creates
+and verifies a pre-migration backup before applying pending migrations. The track index remains
+regenerable from the filesystem, while authored and human-owned state is preserved.
 
 ## Development
 
