@@ -1000,7 +1000,7 @@ struct ModelBatchStatusResponse {
     result: Option<Value>,
 }
 
-#[utoipa::path(get, path = "/assistant/library-tags/model-batches/{batch_id}", params(("batch_id" = String, Path)), responses((status = 200, body = ModelBatchStatusResponse)), tag = "assistant-tags")]
+#[utoipa::path(get, path = "/assistant/library-tags/model-batches/{batch_id}", params(("batch_id" = String, Path)), responses((status = 200, description = "Successful Response", body = ModelBatchStatusResponse)), tag = "assistant-tags")]
 async fn model_batch_status(
     State(state): State<HttpState>,
     _operator: Operator,
@@ -1024,7 +1024,7 @@ async fn model_batch_status(
     }))
 }
 
-#[utoipa::path(post, path = "/assistant/library-tags/model-batches/{batch_id}/actions", params(("batch_id" = String, Path)), request_body = ModelBatchActionRequest, responses((status = 202, body = BackgroundJobResponse)), tag = "assistant-tags")]
+#[utoipa::path(post, path = "/assistant/library-tags/model-batches/{batch_id}/actions", params(("batch_id" = String, Path)), request_body = ModelBatchActionRequest, responses((status = 202, description = "Successful Response", body = BackgroundJobResponse)), tag = "assistant-tags")]
 async fn model_batch_action(
     State(state): State<HttpState>,
     _operator: Operator,

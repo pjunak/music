@@ -5435,29 +5435,21 @@
             "type": "string"
           },
           "execution_mode": {
-            "default": "standard",
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ModelTaggingExecutionMode"
-              }
-            ]
+            "$ref": "#/components/schemas/ModelTaggingExecutionMode",
+            "default": "standard"
           },
           "force": {
             "default": false,
             "type": "boolean"
           },
           "limits": {
+            "$ref": "#/components/schemas/ModelTaggingLimits",
             "default": {
               "max_requests": 10,
               "max_token_reservation": 1000000,
               "max_tracks": 20,
               "stop_on_empty_batch": true
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ModelTaggingLimits"
-              }
-            ]
+            }
           },
           "scope": {
             "$ref": "#/components/schemas/ModelTaggingScope"
@@ -8933,7 +8925,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -8973,7 +8965,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -10874,7 +10866,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -10904,7 +10896,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           },
           "422": {
             "content": {
@@ -10914,7 +10906,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Validation Error"
           }
         },
         "tags": [
@@ -10956,7 +10948,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -10984,7 +10976,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           },
           "422": {
             "content": {
@@ -10994,7 +10986,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Validation Error"
           }
         },
         "tags": [
@@ -11034,7 +11026,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -11058,7 +11050,7 @@
         ],
         "responses": {
           "204": {
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [
@@ -11089,7 +11081,7 @@
                 }
               }
             },
-            "description": ""
+            "description": "Successful Response"
           }
         },
         "tags": [

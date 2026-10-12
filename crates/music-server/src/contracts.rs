@@ -204,4 +204,35 @@ mod tests {
         assert!(!paths.contains_key("/api/ws"));
         Ok(())
     }
+
+    /// OpenAPI 3.1 requires a response description, and Utoipa omits it
+    /// instead of emitting an empty one when a route declares none.
+    #[test]
+    fn every_documented_response_has_a_description() -> Result<(), Box<dyn Error>> {
+        let document = serde_json::to_value(openapi_document())?;
+        let paths = document["paths"]
+            .as_object()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "paths is not an object"))?;
+        let mut missing = Vec::new();
+        for (path, operations) in paths {
+            let Some(operations) = operations.as_object() else {
+                continue;
+            };
+            for (method, operation) in operations {
+                let Some(responses) = operation["responses"].as_object() else {
+                    continue;
+                };
+                for (status, response) in responses {
+                    if response["description"].as_str().is_none_or(str::is_empty) {
+                        missing.push(format!("{method} {path} {status}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "responses without a description: {missing:?}"
+        );
+        Ok(())
+    }
 }

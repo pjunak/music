@@ -35,7 +35,7 @@ struct CleanupModelStatus {
 }
 
 #[utoipa::path(get, path = "/library/cleanup/model", operation_id = "cleanup_model_status",
-    responses((status = 200, body = CleanupModelStatus)), tag = "library")]
+    responses((status = 200, description = "Successful Response", body = CleanupModelStatus)), tag = "library")]
 async fn status(
     State(state): State<HttpState>,
     _operator: Operator,
@@ -81,7 +81,7 @@ struct CleanupModelStart {
 }
 
 #[utoipa::path(post, path = "/library/cleanup/model/jobs", operation_id = "cleanup_model_start", request_body = CleanupModelStart,
-    responses((status = 202, body = BackgroundJobResponse), (status = 422, body = HttpValidationErrorBody)), tag = "library")]
+    responses((status = 202, description = "Successful Response", body = BackgroundJobResponse), (status = 422, description = "Validation Error", body = HttpValidationErrorBody)), tag = "library")]
 async fn start(
     State(state): State<HttpState>,
     _operator: Operator,

@@ -114,7 +114,7 @@ fn error(error: RejectionError) -> ApiError {
     }
 }
 
-#[utoipa::path(get, path = "/library/cleanup/rejections", params(PageQuery), responses((status = 200, body = Page)), tag = "library-cleanup")]
+#[utoipa::path(get, path = "/library/cleanup/rejections", params(PageQuery), responses((status = 200, description = "Successful Response", body = Page)), tag = "library-cleanup")]
 async fn list(
     State(state): State<HttpState>,
     _operator: Operator,
@@ -140,7 +140,7 @@ async fn list(
     Ok(Json(Page { items, next_before }))
 }
 
-#[utoipa::path(post, path = "/library/cleanup/rejections", request_body = Proposal, responses((status = 200, body = Item), (status = 422, body = HttpValidationErrorBody)), tag = "library-cleanup")]
+#[utoipa::path(post, path = "/library/cleanup/rejections", request_body = Proposal, responses((status = 200, description = "Successful Response", body = Item), (status = 422, description = "Validation Error", body = HttpValidationErrorBody)), tag = "library-cleanup")]
 async fn reject(
     State(state): State<HttpState>,
     _operator: Operator,
@@ -159,7 +159,7 @@ async fn reject(
     }))
 }
 
-#[utoipa::path(post, path = "/library/cleanup/rejections/match", request_body = Vec<Proposal>, responses((status = 200, body = Vec<Option<i64>>)), tag = "library-cleanup")]
+#[utoipa::path(post, path = "/library/cleanup/rejections/match", request_body = Vec<Proposal>, responses((status = 200, description = "Successful Response", body = Vec<Option<i64>>)), tag = "library-cleanup")]
 async fn matching(
     State(state): State<HttpState>,
     _operator: Operator,
@@ -178,7 +178,7 @@ async fn matching(
     ))
 }
 
-#[utoipa::path(post, path = "/library/cleanup/rejections/{id}/restore", params(("id" = i64, Path)), responses((status = 200, body = Proposal)), tag = "library-cleanup")]
+#[utoipa::path(post, path = "/library/cleanup/rejections/{id}/restore", params(("id" = i64, Path)), responses((status = 200, description = "Successful Response", body = Proposal)), tag = "library-cleanup")]
 async fn restore(
     State(state): State<HttpState>,
     _operator: Operator,
@@ -194,7 +194,7 @@ async fn restore(
     ))
 }
 
-#[utoipa::path(delete, path = "/library/cleanup/rejections/{id}", params(("id" = i64, Path)), responses((status = 204)), tag = "library-cleanup")]
+#[utoipa::path(delete, path = "/library/cleanup/rejections/{id}", params(("id" = i64, Path)), responses((status = 204, description = "Successful Response")), tag = "library-cleanup")]
 async fn forget(
     State(state): State<HttpState>,
     _operator: Operator,
