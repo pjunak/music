@@ -30,7 +30,8 @@ flate2 = { version = "1.1.10", default-features = false, features = ["rust_backe
 futures-util = "0.3.34"
 hex = "0.4.3"
 httpdate = "1.0.3"
-lofty = "0.25.2"
+# Exact: 0.25.4 truncates files on tag writes (Serial-ATA/lofty-rs#731).
+lofty = "=0.25.3"
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 rand = "0.10.2"
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
