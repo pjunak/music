@@ -206,7 +206,7 @@ fn artifact_digest(role_id: Option<&str>, artifacts: &[(&str, &str)]) -> String 
             update_artifact(&mut digest, name, contents);
         }
     }
-    format!("{:x}", digest.finalize())
+    hex::encode(digest.finalize())
 }
 
 // Unknown artifacts and roles remain shared. Narrow only explicitly reviewed

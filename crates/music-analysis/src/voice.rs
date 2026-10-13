@@ -701,7 +701,7 @@ impl TractVoiceModel {
             // after verification could execute different bytes under the pinned identity.
             let bytes = read_voice_model_bytes(File::open(path)?)?;
             ensure!(
-                format!("{:x}", Sha256::digest(&bytes)) == VOICE_MODEL_SHA256,
+                hex::encode(Sha256::digest(&bytes)) == VOICE_MODEL_SHA256,
                 "voice model checksum does not match the supported artifact"
             );
             tensorflow.read_frozen_model(&mut bytes.as_slice())?
@@ -921,7 +921,7 @@ fn read_voice_model_bytes(source: impl Read) -> io::Result<Vec<u8>> {
 
 fn sha256_file(path: &Path) -> io::Result<String> {
     let bytes = read_voice_model_bytes(File::open(path)?)?;
-    Ok(format!("{:x}", Sha256::digest(&bytes)))
+    Ok(hex::encode(Sha256::digest(&bytes)))
 }
 
 fn round_five(value: f64) -> f64 {

@@ -81,7 +81,7 @@ pub fn model_tag_cleanup_suggestion_id(
         "{MODEL_TAG_CLEANUP_ENGINE_ID}\0{role_fingerprint}\0{catalog_signature}\0{vocabulary_fingerprint}\0{}\0{}",
         suggestion.source, suggestion.target
     );
-    format!("{:x}", Sha256::digest(payload.as_bytes()))
+    hex::encode(Sha256::digest(payload.as_bytes()))
 }
 
 #[derive(Debug)]

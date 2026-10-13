@@ -1143,7 +1143,7 @@ fn engine_error_result(
 
 fn response_fingerprint(response: &PlaylistSuggestion) -> String {
     let payload = serde_json::to_vec(&playlist_suggestion_payload(response)).unwrap_or_default();
-    format!("{:x}", Sha256::digest(payload))
+    hex::encode(Sha256::digest(payload))
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {

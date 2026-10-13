@@ -239,7 +239,7 @@ impl ProviderHandler {
             let mut cache_key = Sha256::new();
             cache_key.update(request.system_prompt.as_bytes());
             cache_key.update(reference.as_bytes());
-            payload["prompt_cache_key"] = serde_json::json!(format!("{:x}", cache_key.finalize()));
+            payload["prompt_cache_key"] = serde_json::json!(hex::encode(cache_key.finalize()));
             // These controls are documented for this family. Other configured
             // models retain compatible message-boundary caching without new flags.
             if matches!(normalized_model_id, "gpt-5.6" | "gpt-6")

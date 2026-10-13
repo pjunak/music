@@ -84,6 +84,6 @@ pub fn cleanup_enrichment_source_signature(track: &IndexedTrack) -> Result<Strin
         track.mtime_unix_seconds,
     ]);
     serde_json::to_vec(&value)
-        .map(|encoded| format!("{:x}", Sha256::digest(encoded)))
+        .map(|encoded| hex::encode(Sha256::digest(encoded)))
         .map_err(|_| "cleanup enrichment source signature could not be encoded".to_owned())
 }

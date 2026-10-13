@@ -146,7 +146,7 @@ async fn run_model_review(track_path: &str, neighbor_path: &str) -> TestResult {
         cleanup_enrichment_source_signature(&tracks[0]).map_err(std::io::Error::other)?;
     // One track in this folder. The independent fixture hashes that source once.
     use sha2::{Digest, Sha256};
-    let folder_signature = format!("{:x}", Sha256::digest(signature.as_bytes()));
+    let folder_signature = hex::encode(Sha256::digest(signature.as_bytes()));
     sqlx::query("INSERT INTO tracks (path, title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, size_bytes, mtime, added_at, display_title, origin) SELECT 'other/neighbor.mp3', title, artist, album_artist, album, track_no, disc_no, year, genre, length_s, bpm, size_bytes, mtime, added_at, display_title, origin FROM tracks WHERE id = 1").execute(&storage.pool).await?;
     let revision = storage.catalog_evidence_revision().await?;
     let now = std::time::SystemTime::now()

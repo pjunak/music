@@ -334,7 +334,7 @@ impl CleanupEnrichmentJobHandler {
                 .map_err(JobHandlerError::new)?;
             let context_signature = {
                 use sha2::{Digest, Sha256};
-                format!("{:x}", Sha256::digest(signatures.join(":")))
+                hex::encode(Sha256::digest(signatures.join(":")))
             };
             let result = if !parameters.force {
                 self.services

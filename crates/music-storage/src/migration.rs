@@ -377,7 +377,7 @@ pub(crate) fn hash_and_sync(path: &Path) -> Result<(String, u64), StorageError> 
         }
         digest.update(&buffer[..read]);
     }
-    Ok((format!("{:x}", digest.finalize()), bytes))
+    Ok((hex::encode(digest.finalize()), bytes))
 }
 
 fn write_new_synced(path: &Path, content: &[u8]) -> Result<(), StorageError> {

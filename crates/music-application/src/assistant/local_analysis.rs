@@ -460,7 +460,7 @@ pub fn context_source_signature(
         source_facts.push(Value::String(voice_signature.to_owned()));
     }
     serde_json::to_vec(&source_facts)
-        .map(|encoded| format!("{:x}", Sha256::digest(encoded)))
+        .map(|encoded| hex::encode(Sha256::digest(encoded)))
         .map_err(|_| "track context source signature could not be encoded".to_owned())
 }
 

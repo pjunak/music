@@ -1008,7 +1008,7 @@ pub fn catalog_tag_source_signature(
 
 fn source_signature(value: &Value) -> Result<String, String> {
     serde_json::to_vec(value)
-        .map(|encoded| format!("{:x}", Sha256::digest(encoded)))
+        .map(|encoded| hex::encode(Sha256::digest(encoded)))
         .map_err(|_| "track source signature could not be encoded".to_owned())
 }
 

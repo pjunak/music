@@ -227,7 +227,7 @@ pub fn rejection_context(
 }
 
 fn digest(text: &str) -> String {
-    format!("{:x}", Sha256::digest(text))
+    hex::encode(Sha256::digest(text))
 }
 
 #[derive(Debug, Clone)]

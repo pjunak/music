@@ -285,7 +285,7 @@ fn session_token_hash(token: &str) -> String {
     let mut digest = Sha256::new();
     digest.update(b"music-session/v1\0");
     digest.update(token.as_bytes());
-    format!("{:x}", digest.finalize())
+    hex::encode(digest.finalize())
 }
 
 fn required_epoch(

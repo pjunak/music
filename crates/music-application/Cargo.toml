@@ -11,6 +11,7 @@ fuzzing = []
 
 [dependencies]
 base64.workspace = true
+hex.workspace = true
 music-domain = { path = "../music-domain", version = "0.1.0" }
 rand.workspace = true
 schemars.workspace = true

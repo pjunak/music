@@ -249,7 +249,7 @@ pub fn vocabulary_fingerprint(document: &TagVocabularyDocument) -> Result<String
     // keeping fingerprints stable across the migration boundary.
     let canonical = serde_json::to_value(document).map_err(|_| VocabularyError::Serialization)?;
     let encoded = serde_json::to_vec(&canonical).map_err(|_| VocabularyError::Serialization)?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 pub fn default_vocabulary() -> Result<TagVocabularyDocument, VocabularyError> {
@@ -322,7 +322,7 @@ pub fn catalog_signature(usage: &[TagUsage]) -> Result<String, VocabularyError> 
         "usage": usage.iter().map(|item| serde_json::json!([item.tag, item.track_count])).collect::<Vec<_>>(),
     });
     let encoded = serde_json::to_vec(&payload).map_err(|_| VocabularyError::Serialization)?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 pub fn build_cleanup_preview(
@@ -389,7 +389,7 @@ pub fn build_cleanup_preview(
             reason_code.as_str(),
         );
         suggestions.push(CleanupSuggestion {
-            id: format!("{:x}", Sha256::digest(id_payload.as_bytes())),
+            id: hex::encode(Sha256::digest(id_payload.as_bytes())),
             source: (*source).to_owned(),
             target: target.to_owned(),
             reason_code,

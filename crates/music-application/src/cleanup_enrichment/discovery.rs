@@ -260,5 +260,5 @@ pub(super) fn indexed_folder_signature<'a>(
         .into_iter()
         .map(super::cleanup_enrichment_source_signature)
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(format!("{:x}", Sha256::digest(signatures.join(":"))))
+    Ok(hex::encode(Sha256::digest(signatures.join(":"))))
 }

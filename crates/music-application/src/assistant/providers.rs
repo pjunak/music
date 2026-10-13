@@ -390,7 +390,7 @@ impl ProviderConnectionRecord {
             if self.allow_private_network { "1" } else { "0" },
         ]
         .join("\0");
-        format!("{:x}", Sha256::digest(value.as_bytes()))
+        hex::encode(Sha256::digest(value.as_bytes()))
     }
 }
 
@@ -466,7 +466,7 @@ impl ModelRoleRecord {
             ThinkingMode::parse(&self.thinking_mode).as_str(),
         ]
         .join("\0");
-        format!("{:x}", Sha256::digest(value.as_bytes()))
+        hex::encode(Sha256::digest(value.as_bytes()))
     }
 }
 
@@ -1957,7 +1957,7 @@ impl ProviderService {
             ThinkingMode::parse(&role.thinking_mode).as_str(),
         ]
         .join("\0");
-        format!("{:x}", Sha256::digest(value.as_bytes()))
+        hex::encode(Sha256::digest(value.as_bytes()))
     }
 
     async fn decrypt_credential(

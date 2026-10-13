@@ -15,7 +15,7 @@ pub(super) fn append_review_import(
         return;
     };
     let source = imported.source.as_deref().unwrap_or_default().trim();
-    let digest = format!("{:x}", Sha256::digest(json!(imported).to_string()));
+    let digest = hex::encode(Sha256::digest(json!(imported).to_string()));
     let mut operations = Vec::new();
     for (field, value) in &imported.fields {
         let Some(value) = normalized_value(*field, value) else {

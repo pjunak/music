@@ -119,7 +119,7 @@ pub fn model_input_fingerprint(value: &impl Serialize) -> Result<String, JobHand
     let bytes = serde_json::to_vec(value).map_err(|error| {
         JobHandlerError::caused_by("model_run_manifest_encoding_failed", &error)
     })?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    Ok(hex::encode(Sha256::digest(bytes)))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]

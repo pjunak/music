@@ -193,7 +193,7 @@ fn provider_digest(application_digest: &str) -> String {
     for (name, contents) in SERVER_RUNTIME_ARTIFACTS {
         update_runtime_digest(&mut digest, name, contents);
     }
-    format!("{:x}", digest.finalize())
+    hex::encode(digest.finalize())
 }
 
 fn update_runtime_digest(digest: &mut Sha256, name: &str, contents: &str) {
@@ -1891,10 +1891,9 @@ mod tests {
         assert_eq!(digest, provider_runtime_contract_digest());
         assert_ne!(
             digest,
-            format!(
-                "{:x}",
-                sha2::Sha256::digest(b"music-rust-provider-runtime/pending-v1")
-            )
+            hex::encode(sha2::Sha256::digest(
+                b"music-rust-provider-runtime/pending-v1"
+            ))
         );
         let roles = super::provider_role_contract_digests();
         assert_eq!(roles.len(), 5);

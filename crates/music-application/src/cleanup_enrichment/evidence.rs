@@ -155,7 +155,7 @@ impl LocalEvidence {
             super::cleanup_enrichment_source_signature(hypothesis)?,
         ))
         .map_err(|_| "local evidence is invalid".to_owned())?;
-        Ok(format!("{:x}", Sha256::digest(bytes)))
+        Ok(hex::encode(Sha256::digest(bytes)))
     }
 }
 

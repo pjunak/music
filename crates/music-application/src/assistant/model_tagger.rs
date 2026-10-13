@@ -55,7 +55,7 @@ pub fn model_tag_inference_fingerprint(
         role.max_output_tokens,
         super::ThinkingMode::parse(&role.thinking_mode)
     ]);
-    format!("{:x}", Sha256::digest(value.to_string().as_bytes()))
+    hex::encode(Sha256::digest(value.to_string().as_bytes()))
 }
 
 fn tagging_example(slots: &[i64], example_tag: Option<&str>) -> Value {
@@ -101,14 +101,13 @@ pub fn model_tag_source_signature(
     let context_signature = context
         .map(|context| context.source_signature.as_str())
         .unwrap_or("no-track-context");
-    let catalog_signature = format!(
-        "{:x}",
-        Sha256::digest(serde_json::to_vec(&catalog).map_err(|_| "catalog evidence is invalid")?)
-    );
+    let catalog_signature = hex::encode(Sha256::digest(
+        serde_json::to_vec(&catalog).map_err(|_| "catalog evidence is invalid")?,
+    ));
     let payload = format!(
         "{MODEL_TAG_ANALYZER_ID}\0{role_fingerprint}\0{vocabulary_fingerprint}\0{evidence_signature}\0{context_signature}\0{catalog_signature}"
     );
-    Ok(format!("{:x}", Sha256::digest(payload.as_bytes())))
+    Ok(hex::encode(Sha256::digest(payload.as_bytes())))
 }
 
 fn model_tag_evidence_signature(track: &IndexedTrack) -> Result<String, String> {
@@ -121,7 +120,7 @@ fn model_tag_evidence_signature(track: &IndexedTrack) -> Result<String, String> 
         track.metadata.bpm,
     ]);
     serde_json::to_vec(&evidence)
-        .map(|encoded| format!("{:x}", Sha256::digest(encoded)))
+        .map(|encoded| hex::encode(Sha256::digest(encoded)))
         .map_err(|_| "model tag evidence signature could not be encoded".to_owned())
 }
 

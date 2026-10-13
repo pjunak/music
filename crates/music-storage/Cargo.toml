@@ -10,6 +10,7 @@ authors.workspace = true
 aes-gcm.workspace = true
 argon2.workspace = true
 base64.workspace = true
+hex.workspace = true
 music-application = { path = "../music-application", version = "0.1.0" }
 music-domain = { path = "../music-domain", version = "0.1.0" }
 serde.workspace = true

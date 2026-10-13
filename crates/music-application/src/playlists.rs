@@ -413,7 +413,7 @@ fn automatic_source_signature(
     ]);
     let encoded =
         serde_json::to_vec(&payload).map_err(|_| AutomaticRuleError::SignatureSerialization)?;
-    Ok(format!("{:x}", Sha256::digest(encoded)))
+    Ok(hex::encode(Sha256::digest(encoded)))
 }
 
 #[derive(Debug, Clone, PartialEq)]
