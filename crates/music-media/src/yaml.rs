@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn current_python_authored_corpus_round_trips_semantically() -> Result<(), Box<dyn Error>> {
+    fn authored_corpus_round_trips_semantically() -> Result<(), Box<dyn Error>> {
         let fixture: AuthoredFixture = serde_json::from_str(AUTHORED_EXAMPLES)?;
         assert!(!fixture.cases.is_empty());
         for case in fixture.cases {

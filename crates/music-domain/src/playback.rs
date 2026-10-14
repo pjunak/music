@@ -1382,8 +1382,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_modes_shuffle_and_idempotency_match_the_python_contract() -> Result<(), Box<dyn Error>>
-    {
+    fn queue_modes_shuffle_and_idempotency_follow_the_contract() -> Result<(), Box<dyn Error>> {
         let mut state = apply(
             &PlaybackState::default(),
             PlaybackCommand::AmbientPlaySequence {

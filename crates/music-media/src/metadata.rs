@@ -1189,7 +1189,6 @@ mod tests {
         canonical: CanonicalMetadata,
         duration_millis: u128,
         extension: String,
-        legacy_write_error: Option<String>,
         metadata_write_supported: bool,
         preservation_markers: Vec<String>,
         source_base64: String,
@@ -1209,7 +1208,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_python_metadata_corpus_and_stages_verified_updates() -> Result<(), Box<dyn Error>> {
+    fn reads_metadata_corpus_and_stages_verified_updates() -> Result<(), Box<dyn Error>> {
         let fixture: MetadataFixture = serde_json::from_str(METADATA_EXAMPLES)?;
         assert_eq!(
             fixture
@@ -1268,10 +1267,6 @@ mod tests {
             }
 
             if !case.metadata_write_supported {
-                assert_eq!(
-                    case.legacy_write_error.as_deref(),
-                    Some("mutagen.aac.AACError")
-                );
                 assert!(stage_tag_update(&source, &staged, &replacement_patch()?).is_err());
                 assert_eq!(fs::read(&source)?, source_bytes);
                 assert!(!staged.exists());

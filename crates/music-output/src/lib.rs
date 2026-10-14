@@ -4,10 +4,9 @@
 )]
 #![forbid(unsafe_code)]
 
-//! Rust headless output appliance using the shared wire protocol and mpv IPC.
+//! Headless output appliance using the shared wire protocol and mpv IPC.
 //!
-//! This is the replacement for the Python appliance; Baton remains a separate
-//! repository and is not implemented here.
+//! Baton, the Android output, is a separate repository.
 
 pub mod client;
 pub mod config;

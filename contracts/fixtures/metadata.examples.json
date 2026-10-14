@@ -15,7 +15,6 @@
       },
       "duration_millis": 277,
       "extension": ".aac",
-      "legacy_write_error": "mutagen.aac.AACError",
       "metadata_write_supported": false,
       "preservation_markers": [],
       "source_base64": "//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH//FQQAF//AEYIAf/8VBAAX/8ARggB//xUEABf/wBGCAH",
@@ -36,7 +35,6 @@
       },
       "duration_millis": 200,
       "extension": ".aiff",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -60,7 +58,6 @@
       },
       "duration_millis": 0,
       "extension": ".flac",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -84,7 +81,6 @@
       },
       "duration_millis": 273,
       "extension": ".m4a",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -108,7 +104,6 @@
       },
       "duration_millis": 521,
       "extension": ".mp3",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -132,7 +127,6 @@
       },
       "duration_millis": 0,
       "extension": ".ogg",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -156,7 +150,6 @@
       },
       "duration_millis": 250,
       "extension": ".opus",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -180,7 +173,6 @@
       },
       "duration_millis": 200,
       "extension": ".wav",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",
@@ -204,7 +196,6 @@
       },
       "duration_millis": 278,
       "extension": ".wma",
-      "legacy_write_error": null,
       "metadata_write_supported": true,
       "preservation_markers": [
         "MUSIC_REWRITE_SENTINEL",

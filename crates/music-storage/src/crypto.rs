@@ -343,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn decrypts_and_recreates_python_aes_gcm_fixture() -> Result<(), Box<dyn Error>> {
+    fn decrypts_and_recreates_stored_aes_gcm_fixture() -> Result<(), Box<dyn Error>> {
         let fixture = fixture()?.aes_256_gcm;
         let vault = CredentialVault::from_encoded_key(&fixture.key_urlsafe_base64)?;
         assert_eq!(vault.key_id(), fixture.key_id);
@@ -394,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn verifies_python_argon2id_fixture() -> Result<(), Box<dyn Error>> {
+    fn verifies_stored_argon2id_fixture() -> Result<(), Box<dyn Error>> {
         let fixture = fixture()?.argon2id;
         assert!(verify_password(&fixture.phc, &fixture.password)?);
         assert!(!verify_password(&fixture.phc, &fixture.invalid_password)?);

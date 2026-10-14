@@ -518,7 +518,7 @@ mod tests {
     use super::{AppConfig, ConfigError, LogLevel};
 
     #[test]
-    fn defaults_match_the_python_deployment_contract() -> Result<(), Box<dyn Error>> {
+    fn defaults_match_the_deployment_contract() -> Result<(), Box<dyn Error>> {
         let config = AppConfig::from_values(&BTreeMap::new())?;
 
         assert_eq!(config.database_url, "sqlite:///./app.db");

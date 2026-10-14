@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn verifier_accepts_python_hash_and_equalizes_unknown_users()
+    fn verifier_accepts_stored_hash_and_equalizes_unknown_users()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let verifier = Argon2PasswordVerifier;
         let hash = super::DUMMY_PASSWORD_HASH;
