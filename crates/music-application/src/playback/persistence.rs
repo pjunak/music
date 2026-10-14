@@ -5,12 +5,10 @@ use std::future::Future;
 use std::pin::Pin;
 
 use music_domain::{
-    AmbientState, CrossfadeType, InterruptState, LoopMode, LoopingSfx, PlaybackError,
-    PlaybackState, PositionReport, ShuffleMode, TrackId, UnitInterval, materialize_positions,
+    AmbientState, CrossfadeType, LoopMode, PlaybackError, PlaybackState, PositionReport,
+    ShuffleMode, TrackId, UnitInterval, materialize_positions,
 };
 use serde::{Deserialize, Serialize};
-
-const LEGACY_MASTER_UNITY_EPSILON: f64 = 1.0e-9;
 
 pub type StoreFuture<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
@@ -88,117 +86,59 @@ impl From<PlaybackError> for PersistedStateError {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum PersistedLoopMode {
-    #[default]
     Off,
     Follow,
     Queue,
     Track,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum PersistedShuffleMode {
-    #[default]
     Off,
-    #[serde(alias = "weighted")]
     Random,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum PersistedCrossfadeType {
-    #[default]
     Linear,
     EqualPower,
     Cut,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct PersistedAmbientState {
     current_track_id: Option<i64>,
     queue: Vec<i64>,
     history: Vec<i64>,
     position_ms: u64,
-    position_anchored_at: Option<f64>,
     loop_mode: PersistedLoopMode,
     shuffle: PersistedShuffleMode,
     source_playlist_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-struct PersistedInterruptState {
-    current_track_id: i64,
-    queue: Vec<i64>,
-    position_ms: u64,
-    position_anchored_at: Option<f64>,
-    return_to_ambient: bool,
-    fade_in_ms: u32,
-    fade_out_ms: u32,
-    duck_to: Option<f64>,
-}
-
-impl Default for PersistedInterruptState {
-    fn default() -> Self {
-        Self {
-            current_track_id: 0,
-            queue: Vec::new(),
-            position_ms: 0,
-            position_anchored_at: None,
-            return_to_ambient: true,
-            fade_in_ms: 0,
-            fade_out_ms: 0,
-            duck_to: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-struct PersistedLoopingSfx {
-    id: String,
-    name: String,
-    soundboard_id: String,
-    item_path: String,
-    interval_seconds: f64,
-    volume: f64,
-}
-
-impl Default for PersistedLoopingSfx {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            soundboard_id: String::new(),
-            item_path: String::new(),
-            interval_seconds: 1.0,
-            volume: 1.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
 struct PersistedPositionReport {
     device_id: String,
     position_ms: u64,
     reported_at: f64,
 }
 
+/// The durable playback document. Interrupts and looping effects are
+/// timer-backed session state, so they are never written; unknown fields
+/// from older documents are ignored and dropped on the next write.
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
 struct PersistedPlaybackState {
     revision: u64,
     position_epoch: u64,
     is_playing: bool,
-    volume: f64,
     active_mode_id: Option<String>,
     active_output_device_ids: Vec<String>,
-    default_device_volume: Option<f64>,
+    default_device_volume: f64,
     device_volumes: BTreeMap<String, f64>,
     active_soundboard_id: Option<String>,
     active_preset_ids: Vec<String>,
@@ -206,79 +146,22 @@ struct PersistedPlaybackState {
     crossfade_ms: u32,
     crossfade_type: PersistedCrossfadeType,
     ambient: PersistedAmbientState,
-    interrupt: Option<PersistedInterruptState>,
-    looping_sfx: Vec<PersistedLoopingSfx>,
     last_position_report: Option<PersistedPositionReport>,
 }
 
-impl Default for PersistedPlaybackState {
-    fn default() -> Self {
-        Self {
-            revision: 0,
-            position_epoch: 0,
-            is_playing: false,
-            volume: 1.0,
-            active_mode_id: None,
-            active_output_device_ids: Vec::new(),
-            default_device_volume: None,
-            device_volumes: BTreeMap::new(),
-            active_soundboard_id: None,
-            active_preset_ids: Vec::new(),
-            preset_revision: 0,
-            crossfade_ms: 0,
-            crossfade_type: PersistedCrossfadeType::Linear,
-            ambient: PersistedAmbientState::default(),
-            interrupt: None,
-            looping_sfx: Vec::new(),
-            last_position_report: None,
-        }
-    }
-}
-
-/// Decode either the sparse historical Python object or the canonical Rust
-/// object. Session-only state is normalized away before it can become live.
+/// Decode the durable document. Session-only state is normalized away before
+/// it can become live.
 pub fn decode_persisted_state(state_json: &str) -> Result<PlaybackState, PersistedStateError> {
     let persisted: PersistedPlaybackState = serde_json::from_str(state_json)?;
-    let legacy_master = unit_value(persisted.volume, 1.0);
-    let had_absolute_volume = persisted.default_device_volume.is_some();
-    let mut default_volume = unit_value(persisted.default_device_volume.unwrap_or(1.0), 1.0);
-    let mut device_volumes = persisted
-        .device_volumes
-        .into_iter()
-        .map(|(device_id, volume)| {
-            let volume = unit_value(volume, 1.0);
-            (device_id, volume)
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    if had_absolute_volume {
-        if (legacy_master - 1.0).abs() > LEGACY_MASTER_UNITY_EPSILON {
-            default_volume = (default_volume * legacy_master).clamp(0.0, 1.0);
-            for volume in device_volumes.values_mut() {
-                *volume = (*volume * legacy_master).clamp(0.0, 1.0);
-            }
-        }
-    } else {
-        default_volume = legacy_master;
-        for volume in device_volumes.values_mut() {
-            *volume = (*volume * legacy_master).clamp(0.0, 1.0);
-        }
-    }
-
-    for device_id in &persisted.active_output_device_ids {
-        device_volumes
-            .entry(device_id.clone())
-            .or_insert(default_volume);
-    }
-
     let mut state = PlaybackState {
         publication_revision: persisted.revision,
         position_epoch: persisted.position_epoch,
         is_playing: persisted.is_playing,
         active_mode_id: persisted.active_mode_id,
         active_output_device_ids: persisted.active_output_device_ids,
-        default_device_volume: UnitInterval::new(default_volume)?,
-        device_volumes: device_volumes
+        default_device_volume: UnitInterval::new(persisted.default_device_volume)?,
+        device_volumes: persisted
+            .device_volumes
             .into_iter()
             .map(|(device_id, volume)| Ok((device_id, UnitInterval::new(volume)?)))
             .collect::<Result<_, PlaybackError>>()?,
@@ -348,10 +231,9 @@ impl From<&PlaybackState> for PersistedPlaybackState {
             revision: state.publication_revision,
             position_epoch: state.position_epoch,
             is_playing: state.is_playing,
-            volume: 1.0,
             active_mode_id: state.active_mode_id.clone(),
             active_output_device_ids: state.active_output_device_ids.clone(),
-            default_device_volume: Some(state.default_device_volume.get()),
+            default_device_volume: state.default_device_volume.get(),
             device_volumes: state
                 .device_volumes
                 .iter()
@@ -363,8 +245,6 @@ impl From<&PlaybackState> for PersistedPlaybackState {
             crossfade_ms: state.crossfade_ms,
             crossfade_type: state.crossfade_type.into(),
             ambient: (&state.ambient).into(),
-            interrupt: state.interrupt.as_ref().map(Into::into),
-            looping_sfx: state.looping_sfx.iter().map(Into::into).collect(),
             last_position_report: state.last_position_report.as_ref().map(Into::into),
         }
     }
@@ -377,38 +257,9 @@ impl From<&AmbientState> for PersistedAmbientState {
             queue: state.queue.iter().copied().map(TrackId::get).collect(),
             history: state.history.iter().copied().map(TrackId::get).collect(),
             position_ms: state.position_ms,
-            position_anchored_at: None,
             loop_mode: state.loop_mode.into(),
             shuffle: state.shuffle.into(),
             source_playlist_id: state.source_playlist_id,
-        }
-    }
-}
-
-impl From<&InterruptState> for PersistedInterruptState {
-    fn from(state: &InterruptState) -> Self {
-        Self {
-            current_track_id: state.current_track_id.get(),
-            queue: state.queue.iter().copied().map(TrackId::get).collect(),
-            position_ms: state.position_ms,
-            position_anchored_at: None,
-            return_to_ambient: state.return_to_ambient,
-            fade_in_ms: state.fade_in_ms,
-            fade_out_ms: state.fade_out_ms,
-            duck_to: state.duck_to.map(UnitInterval::get),
-        }
-    }
-}
-
-impl From<&LoopingSfx> for PersistedLoopingSfx {
-    fn from(state: &LoopingSfx) -> Self {
-        Self {
-            id: state.id.clone(),
-            name: state.name.clone(),
-            soundboard_id: state.soundboard_id.clone(),
-            item_path: state.item_path.clone(),
-            interval_seconds: state.interval_seconds,
-            volume: state.volume.get(),
         }
     }
 }
@@ -487,14 +338,6 @@ fn valid_track_id(value: i64) -> Option<TrackId> {
     TrackId::new(value).ok()
 }
 
-fn unit_value(value: f64, fallback: f64) -> f64 {
-    if value.is_finite() {
-        value.clamp(0.0, 1.0)
-    } else {
-        fallback
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -503,54 +346,33 @@ mod tests {
         ClockSample, PlaybackCommand, PlaybackState, ReductionContext, TrackId, UnitInterval,
         reduce,
     };
-    use serde_json::Value;
+    use serde_json::{Value, json};
 
     use super::{decode_persisted_state, encode_persisted_state};
 
-    #[test]
-    fn reads_sparse_python_fixture_and_clears_session_membership() -> Result<(), Box<dyn Error>> {
-        let state = decode_persisted_state(
-            r#"{"active_output_device_ids":["living-room"],"is_playing":false,"revision":7}"#,
-        )?;
-
-        assert_eq!(state.publication_revision, 7);
-        assert!(!state.is_playing);
-        assert!(state.active_output_device_ids.is_empty());
-        assert_eq!(state.device_volumes["living-room"], UnitInterval::new(1.0)?);
-        Ok(())
-    }
-
-    #[test]
-    fn folds_legacy_master_and_sparse_trims_into_absolute_levels() -> Result<(), Box<dyn Error>> {
-        let state = decode_persisted_state(
-            r#"{"volume":0.5,"device_volumes":{"a":0.5,"b":1.0},"active_output_device_ids":["c"]}"#,
-        )?;
-
-        assert_eq!(state.default_device_volume, UnitInterval::new(0.5)?);
-        assert_eq!(state.device_volumes["a"], UnitInterval::new(0.25)?);
-        assert_eq!(state.device_volumes["b"], UnitInterval::new(0.5)?);
-        assert_eq!(state.device_volumes["c"], UnitInterval::new(0.5)?);
-        Ok(())
-    }
-
-    #[test]
-    fn canonical_encoding_materializes_position_and_uses_legacy_unity() -> Result<(), Box<dyn Error>>
-    {
-        let playing = reduce(
+    fn playing_track(track_id: i64) -> Result<PlaybackState, Box<dyn Error>> {
+        Ok(reduce(
             &PlaybackState::default(),
-            PlaybackCommand::AmbientPlayTrack(TrackId::new(11)?),
+            PlaybackCommand::AmbientPlayTrack(TrackId::new(track_id)?),
             ReductionContext {
                 clock: ClockSample::new(1_000, 1.0)?,
                 random_queue_index: None,
             },
         )?
-        .next_state;
+        .next_state)
+    }
 
-        let encoded = encode_persisted_state(&playing, 2_500)?;
+    #[test]
+    fn canonical_encoding_materializes_position_and_omits_session_state()
+    -> Result<(), Box<dyn Error>> {
+        let encoded = encode_persisted_state(&playing_track(11)?, 2_500)?;
         let json: Value = serde_json::from_str(&encoded)?;
-        assert_eq!(json["volume"], 1.0);
         assert_eq!(json["ambient"]["position_ms"], 1_500);
-        assert!(json["ambient"]["position_anchored_at"].is_null());
+        assert_eq!(json["default_device_volume"], 1.0);
+        for retired in ["volume", "interrupt", "looping_sfx"] {
+            assert!(json.get(retired).is_none(), "{retired} is still written");
+        }
+        assert!(json["ambient"].get("position_anchored_at").is_none());
 
         let restarted = decode_persisted_state(&encoded)?;
         assert_eq!(restarted.ambient.current_track_id, Some(TrackId::new(11)?));
@@ -561,9 +383,32 @@ mod tests {
     }
 
     #[test]
-    fn historical_weighted_shuffle_migrates_to_random() -> Result<(), Box<dyn Error>> {
-        let state = decode_persisted_state(r#"{"ambient":{"shuffle":"weighted"}}"#)?;
-        assert_eq!(state.ambient.shuffle, music_domain::ShuffleMode::Random);
+    fn documents_with_retired_fields_decode_and_shed_them_on_the_next_write()
+    -> Result<(), Box<dyn Error>> {
+        let mut document: Value =
+            serde_json::from_str(&encode_persisted_state(&playing_track(11)?, 1_000)?)?;
+        document["volume"] = json!(0.5);
+        document["device_volumes"] = json!({ "tv": 0.25 });
+        document["active_output_device_ids"] = json!(["tv"]);
+        document["interrupt"] = json!({ "current_track_id": 12, "queue": [] });
+        document["looping_sfx"] = json!([{ "id": "rain" }]);
+        document["ambient"]["position_anchored_at"] = Value::Null;
+
+        let state = decode_persisted_state(&document.to_string())?;
+        assert_eq!(state.default_device_volume, UnitInterval::new(1.0)?);
+        assert_eq!(state.device_volumes["tv"], UnitInterval::new(0.25)?);
+        assert!(state.active_output_device_ids.is_empty());
+        assert!(state.interrupt.is_none());
+        assert!(state.looping_sfx.is_empty());
+
+        let rewritten: Value = serde_json::from_str(&encode_persisted_state(&state, 1_000)?)?;
+        assert!(rewritten.get("volume").is_none());
+        assert!(rewritten.get("interrupt").is_none());
         Ok(())
+    }
+
+    #[test]
+    fn documents_without_absolute_device_volume_are_rejected() {
+        assert!(decode_persisted_state(r#"{"revision":7,"is_playing":false}"#).is_err());
     }
 }

@@ -22,8 +22,9 @@ is selected using [the validation matrix](VALIDATION.md).
   current state; never replay stale mutations automatically.
 - The frontend validates every WS frame before stores/listeners consume it.
   Preserve machine-readable error codes for session loss and protocol errors.
-- Boot pruning removes dangling tracks/modes/presets, clears live output IDs,
-  and stops persisted loops whose timers cannot survive restart.
+- Boot pruning removes dangling tracks/modes/presets and clears live output IDs.
+  The durable playback document never holds interrupts or looping effects,
+  whose timers cannot survive restart.
 
 ## Authentication
 
