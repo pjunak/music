@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
@@ -42,6 +42,20 @@ await test("output publication waits for verification and image smoke tests on m
   assert.match(output, /name: music-output-linux-x86_64/);
   assert.match(output, /contents: write/);
   assert.match(workflow, /runs-on: ubuntu-24.04/);
+});
+
+await test("every job runs on a pinned runner image", () => {
+  // Floating labels such as ubuntu-latest change the OS underneath CI;
+  // move to a new image deliberately.
+  const directory = new URL("../workflows/", import.meta.url);
+  for (const name of readdirSync(directory).filter((file) => file.endsWith(".yml"))) {
+    const text = readFileSync(new URL(name, directory), "utf8");
+    const runners = [...text.matchAll(/runs-on: (\S+)/g)].map(([, runner]) => runner);
+    assert.ok(runners.length > 0, `${name} declares no runner`);
+    for (const runner of runners) {
+      assert.match(runner, /^ubuntu-\d+\.\d+$/, `${name} uses runner ${runner}`);
+    }
+  }
 });
 
 await test("release context includes the frontend compatibility build inputs", () => {
