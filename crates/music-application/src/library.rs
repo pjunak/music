@@ -300,6 +300,9 @@ pub trait LibraryDiscovery: std::fmt::Debug + Send + Sync {
     fn discover(&self, cancellation: CancellationToken) -> LibraryDiscoveryFuture<'_>;
 }
 
+/// Receives each committed library generation before the coordinator
+/// publishes it in its status. Catalog commands resolve against the published
+/// generation, so playback must already hold it or they are rejected as stale.
 pub trait LibraryCatalogSink: std::fmt::Debug + Send + Sync {
     fn publish(
         &self,
@@ -756,7 +759,6 @@ pub async fn start_library_coordinator(
         .status()
         .await
         .map_err(|source| dependency("reload recovered library status", source))?;
-    actor.status.send_replace(status.clone());
     let tracks = repository
         .playback_catalog()
         .await
@@ -765,6 +767,7 @@ pub async fn start_library_coordinator(
         .publish(status.generation, tracks)
         .await
         .map_err(|source| dependency("publish the durable track catalog", source))?;
+    actor.status.send_replace(status.clone());
 
     let task_cancellation = cancellation.clone();
     let task = tokio::spawn(actor.run(receiver, task_cancellation));
@@ -1012,8 +1015,6 @@ impl LibraryCoordinator {
         )
         .await?;
         if let Some(status) = status {
-            let generation = status.generation;
-            self.status.send_replace(status);
             if publish_catalog {
                 let tracks = self
                     .repository
@@ -1021,10 +1022,11 @@ impl LibraryCoordinator {
                     .await
                     .map_err(|source| dependency("load the mutated track catalog", source))?;
                 self.catalog
-                    .publish(generation, tracks)
+                    .publish(status.generation, tracks)
                     .await
                     .map_err(|source| dependency("publish the mutated track catalog", source))?;
             }
+            self.status.send_replace(status);
         }
         Ok(applied)
     }
@@ -1353,12 +1355,12 @@ impl LibraryCoordinator {
             .playback_catalog()
             .await
             .map_err(|source| dependency("load the mutated track catalog", source))?;
-        let generation = status.generation;
-        self.status.send_replace(status);
         self.catalog
-            .publish(generation, tracks)
+            .publish(status.generation, tracks)
             .await
-            .map_err(|source| dependency("publish the mutated track catalog", source))
+            .map_err(|source| dependency("publish the mutated track catalog", source))?;
+        self.status.send_replace(status);
+        Ok(())
     }
 
     async fn reconcile_once(
@@ -1405,7 +1407,6 @@ impl LibraryCoordinator {
                 summary,
                 track_ids: _,
             } => {
-                self.status.send_replace(status.clone());
                 let tracks =
                     self.repository.playback_catalog().await.map_err(|source| {
                         dependency("load the reconciled track catalog", source)
@@ -1414,6 +1415,7 @@ impl LibraryCoordinator {
                     .publish(status.generation, tracks)
                     .await
                     .map_err(|source| dependency("publish reconciled track catalog", source))?;
+                self.status.send_replace(status);
                 Ok(summary)
             }
             ReconciliationCommit::Conflict { current_generation } => {

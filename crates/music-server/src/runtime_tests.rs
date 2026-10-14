@@ -3727,3 +3727,77 @@ async fn deterministic_assistant_routes_keep_suggestions_review_only_and_cleanup
     runtime.shutdown().await?;
     Ok(())
 }
+
+/// Records the generation the coordinator status already shows each time a
+/// catalog is published, once the handle exists (startup publishes before).
+#[derive(Debug, Default)]
+struct StatusAtPublication {
+    handle: std::sync::Mutex<Option<music_application::library::LibraryCoordinatorHandle>>,
+    observed: std::sync::Mutex<Vec<(u64, u64)>>,
+}
+
+impl music_application::library::LibraryCatalogSink for StatusAtPublication {
+    fn publish(
+        &self,
+        generation: music_domain::LibraryGeneration,
+        _tracks: Vec<music_application::library::LibraryCatalogTrack>,
+    ) -> music_application::library::LibraryFuture<'_, ()> {
+        Box::pin(async move {
+            let handle = self
+                .handle
+                .lock()
+                .map_err(|_| "handle lock poisoned")?
+                .clone();
+            if let Some(handle) = handle {
+                self.observed
+                    .lock()
+                    .map_err(|_| "observation lock poisoned")?
+                    .push((generation.get(), handle.status().generation.get()));
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test]
+async fn library_status_shows_a_generation_only_after_playback_holds_it()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    let directory = tempdir()?;
+    let root = directory.path().join("music");
+    fs::create_dir_all(root.join("Album"))?;
+    fs::write(root.join("Album/01 - First.flac"), b"not real audio")?;
+    let storage = Arc::new(
+        SqliteStorage::open(SqliteStorageOptions::new(directory.path().join("app.db"))).await?,
+    );
+    let library_root = music_media::LibraryRoot::open(&root)?;
+    let sink = Arc::new(StatusAtPublication::default());
+    let spawned = music_application::library::start_library_coordinator(
+        storage,
+        Arc::new(music_media::FilesystemLibraryDiscovery::new(
+            library_root.clone(),
+            music_media::MetadataAdapter::native_only(),
+        )),
+        sink.clone(),
+        Arc::new(music_media::FilesystemLibraryMutations::new(
+            library_root,
+            music_media::MetadataAdapter::native_only(),
+        )),
+    )
+    .await?;
+    let before = spawned.handle.status().generation.get();
+    *sink.handle.lock().map_err(|_| "handle lock poisoned")? = Some(spawned.handle.clone());
+
+    spawned.handle.reconcile().await?;
+
+    let after = spawned.handle.status().generation.get();
+    assert!(after > before, "the scan did not commit a new generation");
+    let observed = sink
+        .observed
+        .lock()
+        .map_err(|_| "observation lock poisoned")?
+        .clone();
+    assert_eq!(observed, vec![(after, before)]);
+    spawned.handle.shutdown();
+    spawned.task.await??;
+    Ok(())
+}
