@@ -1,12 +1,6 @@
 use music_protocol::PlayerState;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum VolumeContract {
-    CanonicalV2,
-    LegacyMasterTimesTrim,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlaybackCommand {
     SetVolume(f64),
@@ -38,7 +32,6 @@ pub struct Reconciler {
     local_on: bool,
     local_volume: f64,
     state: Option<PlayerState>,
-    volume_contract: VolumeContract,
     loaded_url: Option<String>,
     last_epoch: Option<i64>,
     has_state_this_connection: bool,
@@ -60,7 +53,6 @@ impl Reconciler {
             local_on,
             local_volume: clamp01(local_volume),
             state: None,
-            volume_contract: VolumeContract::CanonicalV2,
             loaded_url: None,
             last_epoch: None,
             has_state_this_connection: false,
@@ -71,11 +63,7 @@ impl Reconciler {
         self.has_state_this_connection = false;
     }
 
-    pub fn on_state(
-        &mut self,
-        state: PlayerState,
-        volume_contract: VolumeContract,
-    ) -> ReconcileOutcome {
+    pub fn on_state(&mut self, state: PlayerState) -> ReconcileOutcome {
         if self.has_state_this_connection
             && self
                 .state
@@ -88,7 +76,6 @@ impl Reconciler {
             };
         }
         self.state = Some(state);
-        self.volume_contract = volume_contract;
         self.has_state_this_connection = true;
         ReconcileOutcome {
             accepted: true,
@@ -109,13 +96,11 @@ impl Reconciler {
     #[must_use]
     pub fn output_volume(&self, event_volume: f64) -> f64 {
         let server_volume = self.state.as_ref().map_or(1.0, |state| {
-            let device_volume = state.device_volumes.get(&self.client_id).copied();
-            match self.volume_contract {
-                VolumeContract::CanonicalV2 => device_volume.unwrap_or(state.default_device_volume),
-                VolumeContract::LegacyMasterTimesTrim => {
-                    state.volume * device_volume.unwrap_or(1.0)
-                }
-            }
+            state
+                .device_volumes
+                .get(&self.client_id)
+                .copied()
+                .unwrap_or(state.default_device_volume)
         });
         clamp01(event_volume) * clamp01(server_volume) * self.local_volume
     }
@@ -273,13 +258,13 @@ mod tests {
     #[test]
     fn seeks_only_for_track_changes_and_position_epochs() {
         let mut reconciler = reconciler();
-        let first = reconciler.on_state(state(1, 7, 5_000, 2), VolumeContract::CanonicalV2);
+        let first = reconciler.on_state(state(1, 7, 5_000, 2));
         assert!(first.commands.contains(&PlaybackCommand::Load {
             url: "http://music.test/api/library/tracks/7/stream".to_owned(),
             start_seconds: 5.0,
         }));
 
-        let clock_only = reconciler.on_state(state(2, 7, 9_000, 2), VolumeContract::CanonicalV2);
+        let clock_only = reconciler.on_state(state(2, 7, 9_000, 2));
         assert!(
             !clock_only
                 .commands
@@ -287,29 +272,17 @@ mod tests {
                 .any(|command| matches!(command, PlaybackCommand::SeekAbsolute(_)))
         );
 
-        let seek = reconciler.on_state(state(3, 7, 2_500, 3), VolumeContract::CanonicalV2);
+        let seek = reconciler.on_state(state(3, 7, 2_500, 3));
         assert!(seek.commands.contains(&PlaybackCommand::SeekAbsolute(2.5)));
     }
 
     #[test]
     fn rejects_stale_revisions_only_within_one_connection() {
         let mut reconciler = reconciler();
-        assert!(
-            reconciler
-                .on_state(state(5, 7, 0, 1), VolumeContract::CanonicalV2)
-                .accepted
-        );
-        assert!(
-            !reconciler
-                .on_state(state(4, 8, 0, 2), VolumeContract::CanonicalV2)
-                .accepted
-        );
+        assert!(reconciler.on_state(state(5, 7, 0, 1)).accepted);
+        assert!(!reconciler.on_state(state(4, 8, 0, 2)).accepted);
         reconciler.begin_connection();
-        assert!(
-            reconciler
-                .on_state(state(1, 8, 0, 2), VolumeContract::CanonicalV2)
-                .accepted
-        );
+        assert!(reconciler.on_state(state(1, 8, 0, 2)).accepted);
     }
 
     #[test]
@@ -332,11 +305,11 @@ mod tests {
             fade_out_ms: 0,
             duck_to: None,
         });
-        let off = reconciler.on_state(current.clone(), VolumeContract::CanonicalV2);
+        let off = reconciler.on_state(current.clone());
         assert!(off.commands.contains(&PlaybackCommand::SetPaused(true)));
         current.revision = 2;
         current.active_output_device_ids.push("device".to_owned());
-        let on = reconciler.on_state(current, VolumeContract::CanonicalV2);
+        let on = reconciler.on_state(current);
         assert!(on.commands.contains(&PlaybackCommand::Load {
             url: "http://music.test/api/library/tracks/99/stream".to_owned(),
             start_seconds: 1.25,
@@ -344,18 +317,18 @@ mod tests {
     }
 
     #[test]
-    fn supports_canonical_and_legacy_volume_contracts() {
+    fn uses_its_own_absolute_volume_or_the_default() {
         let mut reconciler = reconciler();
         let mut current = state(1, 7, 0, 1);
         current.default_device_volume = 0.8;
         current.volume = 0.25;
+        reconciler.on_state(current.clone());
+        assert_eq!(reconciler.output_volume(0.5), 0.2);
+        current.revision = 2;
         current
             .device_volumes
             .insert("headless-fixture".to_owned(), 0.4);
-        reconciler.on_state(current.clone(), VolumeContract::CanonicalV2);
+        reconciler.on_state(current);
         assert_eq!(reconciler.output_volume(0.5), 0.1);
-        current.revision = 2;
-        reconciler.on_state(current, VolumeContract::LegacyMasterTimesTrim);
-        assert_eq!(reconciler.output_volume(0.5), 0.025);
     }
 }

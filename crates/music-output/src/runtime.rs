@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use crate::config::OutputConfig;
 use crate::mpv::{MpvError, MpvPlayer};
-use crate::reconcile::{Reconciler, VolumeContract};
+use crate::reconcile::Reconciler;
 
 const MAX_METADATA_BYTES: usize = 256 * 1024;
 const MAX_METADATA_CACHE_ENTRIES: usize = 256;
@@ -82,16 +82,8 @@ impl OutputRuntime {
         self.reconciler.lock().await.begin_connection();
     }
 
-    pub async fn apply_state(
-        &self,
-        state: PlayerState,
-        volume_contract: VolumeContract,
-    ) -> Result<bool, MpvError> {
-        let outcome = self
-            .reconciler
-            .lock()
-            .await
-            .on_state(state, volume_contract);
+    pub async fn apply_state(&self, state: PlayerState) -> Result<bool, MpvError> {
+        let outcome = self.reconciler.lock().await.on_state(state);
         if outcome.accepted {
             self.player.execute(&outcome.commands).await?;
         }

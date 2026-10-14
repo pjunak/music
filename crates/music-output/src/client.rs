@@ -12,7 +12,6 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{Error as WebSocketError, Message};
 
 use crate::mpv::MpvError;
-use crate::reconcile::VolumeContract;
 use crate::runtime::OutputRuntime;
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(3);
@@ -222,6 +221,12 @@ where
         .map_err(retryable_websocket)
 }
 
+fn carries_absolute_volume(raw: &Value) -> bool {
+    raw.get("state")
+        .and_then(Value::as_object)
+        .is_none_or(|state| state.contains_key("default_device_volume"))
+}
+
 async fn handle_message(runtime: &OutputRuntime, encoded: &[u8]) -> Result<(), ConnectionError> {
     if encoded.len() > MAX_WEBSOCKET_MESSAGE_BYTES {
         return Err(ConnectionError::Retryable(
@@ -235,16 +240,13 @@ async fn handle_message(runtime: &OutputRuntime, encoded: &[u8]) -> Result<(), C
             return Ok(());
         }
     };
-    let volume_contract =
-        raw.get("state")
-            .and_then(Value::as_object)
-            .map_or(VolumeContract::CanonicalV2, |state| {
-                if state.contains_key("default_device_volume") {
-                    VolumeContract::CanonicalV2
-                } else {
-                    VolumeContract::LegacyMasterTimesTrim
-                }
-            });
+    if !carries_absolute_volume(&raw) {
+        // Changes published before the server handles this client's
+        // protocol 2 registration use the version 1 volume projection; the
+        // state sent once registration completes supersedes them.
+        tracing::debug!("ignored a state frame without absolute device volumes");
+        return Ok(());
+    }
     let message: ServerMessage = match serde_json::from_value(raw) {
         Ok(message) => message,
         Err(error) => {
@@ -255,7 +257,7 @@ async fn handle_message(runtime: &OutputRuntime, encoded: &[u8]) -> Result<(), C
     match message {
         ServerMessage::StateSnapshot { state, .. } | ServerMessage::StateChanged { state } => {
             let _ = runtime
-                .apply_state(state, volume_contract)
+                .apply_state(state)
                 .await
                 .map_err(ConnectionError::Audio)?;
         }
@@ -341,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_legacy_volume_by_wire_field_presence() -> Result<(), Box<dyn std::error::Error>> {
+    fn only_absolute_volume_state_frames_are_applied() -> Result<(), Box<dyn std::error::Error>> {
         let state = music_protocol::PlayerState {
             ambient: AmbientState {
                 current_track_id: Some(1),
@@ -350,17 +352,18 @@ mod tests {
             ..music_protocol::PlayerState::default()
         };
         let mut value = serde_json::to_value(ServerMessage::StateChanged { state })?;
+        assert!(carries_absolute_volume(&value));
         value
             .get_mut("state")
             .and_then(Value::as_object_mut)
             .ok_or("missing state")?
             .remove("default_device_volume");
-        let object = value
-            .get("state")
-            .and_then(Value::as_object)
-            .ok_or("missing state")?;
-        assert!(!object.contains_key("default_device_volume"));
-        assert!(serde_json::from_value::<ServerMessage>(value).is_ok());
+        assert!(!carries_absolute_volume(&value));
+        let error = serde_json::to_value(ServerMessage::Error {
+            detail: "rejected".to_owned(),
+            code: None,
+        })?;
+        assert!(carries_absolute_volume(&error));
         Ok(())
     }
 }

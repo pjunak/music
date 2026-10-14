@@ -83,7 +83,10 @@ Console and should keep its own local on/off.
    { "type": "register", "name": "Living-room speaker", "client_id": "headless-7f3c…", "protocol_version": 2 }
    ```
    `protocol_version: 2` selects canonical absolute per-device volumes. Omit it
-   only when implementing the legacy master × trim contract.
+   only when implementing the legacy master × trim contract. Until the server
+   has handled `register`, `state_changed` uses the version 1 projection without
+   `default_device_volume`; a version 2 client skips those frames, because the
+   state sent once registration completes supersedes them.
    Registration is enough to make the device available in the Console's **Outputs** picker;
    any connected device can be activated for the current session. Saving it in Settings →
    Devices is optional. The saved **output by default** flag auto-activates that stable
