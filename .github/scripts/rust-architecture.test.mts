@@ -164,6 +164,23 @@ await test("unbounded channels and new detached task sites fail", () => {
   ]);
 });
 
+await test("gated transactions must take the write lock up front", () => {
+  const gated = (begin: string) => [
+    "let _admission = self.write_gate.lock().await;",
+    `let mut transaction = self${begin}.await?;`,
+  ].join("\n");
+  assert.deepEqual(sourceConcurrencyViolations([{
+    path: "crates/music-storage/src/new_writes.rs",
+    content: gated(".pool\n                .begin()"),
+  }]), [
+    "crates/music-storage/src/new_writes.rs: a transaction under the write gate must use begin_with(BEGIN_WRITE)",
+  ]);
+  assert.deepEqual(sourceConcurrencyViolations([
+    { path: "crates/music-storage/src/new_writes.rs", content: gated(".pool.begin_with(BEGIN_WRITE)") },
+    { path: "crates/music-storage/src/snapshot.rs", content: "let mut tx = self.pool.begin().await?;" },
+  ]), []);
+});
+
 await test("extracted test modules are not production code", () => {
   assert.equal(isTestSourcePath("crates/music-server/src/websocket_tests.rs"), true);
   assert.equal(isTestSourcePath("crates/music-storage/src/jobs_fault_tests/model_batches.rs"), true);

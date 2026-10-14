@@ -15,6 +15,7 @@ use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
 use music_application::cleanup_sources::cleanup_source_credential_subject;
 
+use crate::sqlite::BEGIN_WRITE;
 use crate::{CredentialVault, EncryptedCredential, SqliteStorage, StorageError};
 
 const CONNECTION_SELECT: &str = "SELECT id, name, adapter_id, base_url, encrypted_api_key, \
@@ -213,7 +214,7 @@ impl SqliteStorage {
         }
 
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         let active: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM background_jobs \
              WHERE (kind LIKE 'assistant.model%' OR kind = 'library.cleanup-enrichment') \
@@ -329,7 +330,11 @@ impl ModelEvaluationRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ModelEvaluationWriteOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(role) = load_role_tx(&mut transaction, &evaluation.role_id)
                 .await
                 .map_err(box_storage)?
@@ -430,7 +435,11 @@ impl ProviderRepository for SqliteStorage {
     fn reset_provider_credentials(&self) -> AssistantFuture<'_, ProviderCredentialResetOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let active: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM background_jobs \
                  WHERE (kind LIKE 'assistant.model%' OR kind = 'library.cleanup-enrichment') \
@@ -535,7 +544,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderConnectionPreparation> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(connection) = load_connection_tx(&mut transaction, connection_id)
                 .await
                 .map_err(box_storage)?
@@ -564,7 +577,11 @@ impl ProviderRepository for SqliteStorage {
             let capabilities =
                 encode_string_list(&verification.capability_ids).map_err(box_storage)?;
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(current) = load_connection_tx(&mut transaction, &verification.connection_id)
                 .await
                 .map_err(box_storage)?
@@ -628,7 +645,11 @@ impl ProviderRepository for SqliteStorage {
             let capabilities =
                 encode_string_list(&connection.verified_capability_ids).map_err(box_storage)?;
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             if duplicate_name(&mut transaction, &connection.name, None)
                 .await
                 .map_err(box_storage)?
@@ -677,7 +698,11 @@ impl ProviderRepository for SqliteStorage {
             let capabilities =
                 encode_string_list(&connection.verified_capability_ids).map_err(box_storage)?;
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(current) = load_connection_tx(&mut transaction, &connection.id)
                 .await
                 .map_err(box_storage)?
@@ -744,7 +769,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderMutationOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM assistant_provider_connections WHERE id = ?)",
             )
@@ -790,7 +819,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderMutationOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM assistant_provider_connections WHERE id = ?)",
             )
@@ -848,7 +881,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderRolePreparation> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(role) = load_role_tx(&mut transaction, role_id)
                 .await
                 .map_err(box_storage)?
@@ -883,7 +920,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderConformanceWriteOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(role) = load_role_tx(&mut transaction, &conformance.role_id)
                 .await
                 .map_err(box_storage)?
@@ -955,7 +996,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderMutationOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(connection) = load_connection_tx(&mut transaction, &role.connection_id)
                 .await
                 .map_err(box_storage)?
@@ -1068,7 +1113,11 @@ impl ProviderRepository for SqliteStorage {
     ) -> AssistantFuture<'a, ProviderMutationOutcome> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM assistant_model_roles WHERE role_id = ?)",
             )

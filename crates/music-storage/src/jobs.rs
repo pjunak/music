@@ -9,6 +9,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 use uuid::Uuid;
 
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 const JOB_SELECT: &str = "SELECT id, kind, status, parameters_json, result_json, error, \
@@ -24,7 +25,11 @@ impl JobRepository for SqliteStorage {
     fn create<'a>(&'a self, job: &'a NewJob) -> JobFuture<'a, JobRecord> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             insert_job(&mut transaction, job)
                 .await
                 .map_err(box_storage)?;
@@ -40,7 +45,11 @@ impl JobRepository for SqliteStorage {
     fn create_unique_active<'a>(&'a self, job: &'a NewJob) -> JobFuture<'a, (JobRecord, bool)> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let query = format!(
                 "{JOB_SELECT} WHERE kind = ? AND status IN ('queued', 'running', 'cancel_requested') \
                  ORDER BY created_at DESC, rowid DESC LIMIT 1"
@@ -109,7 +118,11 @@ impl JobRepository for SqliteStorage {
     fn request_cancellation<'a>(&'a self, id: &'a str) -> JobFuture<'a, Option<(JobRecord, bool)>> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(before) = read_job(&mut transaction, id).await.map_err(box_storage)? else {
                 transaction.commit().await.map_err(box_storage)?;
                 return Ok(None);
@@ -159,7 +172,11 @@ impl JobRepository for SqliteStorage {
     fn claim_next<'a>(&'a self, lane: JobLane) -> JobFuture<'a, Option<JobClaim>> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             // Creation timestamps resolve to seconds. UUIDs are random, so use
             // the table's insertion order to break ties within that second.
             let id = sqlx::query_scalar::<_, String>(
@@ -278,7 +295,11 @@ impl JobRepository for SqliteStorage {
     ) -> JobFuture<'a, JobLeaseState> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let state = lease_state(&mut *transaction, &claim.job.id, &claim.execution_id)
                 .await
                 .map_err(box_storage)?;
@@ -300,7 +321,11 @@ impl JobRepository for SqliteStorage {
     ) -> JobFuture<'a, usize> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let rows = sqlx::query(
                 "SELECT id, kind, status, lane, schema_version, restartable \
                  FROM background_jobs WHERE status IN ('running', 'cancel_requested')",

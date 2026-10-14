@@ -3,6 +3,7 @@ use music_application::cleanup_sources::{CleanupSourceFuture, CleanupSourceRepos
 use sqlx::Row;
 
 use crate::SqliteStorage;
+use crate::sqlite::BEGIN_WRITE;
 
 impl CleanupSourceRepository for SqliteStorage {
     fn cleanup_source_enabled(&self, source_id: &str) -> CleanupSourceFuture<'_, Option<bool>> {
@@ -27,7 +28,7 @@ impl CleanupSourceRepository for SqliteStorage {
         let source_id = source_id.to_owned();
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await?;
+            let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
             sqlx::query(
                 "INSERT INTO cleanup_source_policies (source_id, enabled, updated_at) \
                  VALUES (?, ?, CURRENT_TIMESTAMP) \
@@ -75,7 +76,7 @@ impl CleanupSourceRepository for SqliteStorage {
     ) -> CleanupSourceFuture<'a, ()> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await?;
+            let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
             sqlx::query(
                 "INSERT INTO cleanup_source_credentials \
                  (source_id, encrypted_api_key, api_key_nonce, api_key_hint) \
@@ -101,7 +102,7 @@ impl CleanupSourceRepository for SqliteStorage {
         let source_id = source_id.to_owned();
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await?;
+            let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
             let deleted = sqlx::query("DELETE FROM cleanup_source_credentials WHERE source_id = ?")
                 .bind(&source_id)
                 .execute(&mut *transaction)

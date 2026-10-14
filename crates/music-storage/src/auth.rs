@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError, verify_password};
 
 const DUMMY_PASSWORD_HASH: &str = "$argon2id$v=19$m=65536,t=3,p=4$cmV3cml0ZS1maXh0dXJlLXNhbHQ$tgdYDN8ijOk+7HZgF2oUm50+O8nOMKGggRmynxNu4ko";
@@ -59,7 +60,7 @@ impl SqliteStorage {
         revoke_sessions: bool,
     ) -> Result<Option<u64>, StorageError> {
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         let user_id = sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE username = ?")
             .bind(username)
             .fetch_optional(&mut *transaction)

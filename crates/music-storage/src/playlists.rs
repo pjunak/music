@@ -11,6 +11,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row, Sqlite, Transaction};
 
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 const PLAYLIST_COLUMNS: &str = "id, name, mode_id, category, automatic_rule_json, \
@@ -25,7 +26,7 @@ impl PlaylistRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self
                 .pool
-                .begin()
+                .begin_with(BEGIN_WRITE)
                 .await
                 .map_err(StorageError::from)
                 .map_err(box_storage)?;
@@ -106,7 +107,7 @@ impl PlaylistRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self
                 .pool
-                .begin()
+                .begin_with(BEGIN_WRITE)
                 .await
                 .map_err(StorageError::from)
                 .map_err(box_storage)?;
@@ -187,7 +188,7 @@ impl PlaylistRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self
                 .pool
-                .begin()
+                .begin_with(BEGIN_WRITE)
                 .await
                 .map_err(StorageError::from)
                 .map_err(box_storage)?;
@@ -239,7 +240,7 @@ impl PlaylistRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self
                 .pool
-                .begin()
+                .begin_with(BEGIN_WRITE)
                 .await
                 .map_err(StorageError::from)
                 .map_err(box_storage)?;
@@ -382,7 +383,7 @@ impl PlaylistRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self
                 .pool
-                .begin()
+                .begin_with(BEGIN_WRITE)
                 .await
                 .map_err(StorageError::from)
                 .map_err(box_storage)?;
@@ -485,7 +486,7 @@ impl PlaylistRepository for SqliteStorage {
             let _admission = self.write_gate.lock().await;
             let mut transaction = self
                 .pool
-                .begin()
+                .begin_with(BEGIN_WRITE)
                 .await
                 .map_err(StorageError::from)
                 .map_err(box_storage)?;
@@ -523,7 +524,7 @@ async fn mutate_items(
     let _admission = storage.write_gate.lock().await;
     let mut transaction = storage
         .pool
-        .begin()
+        .begin_with(BEGIN_WRITE)
         .await
         .map_err(StorageError::from)
         .map_err(box_storage)?;

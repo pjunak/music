@@ -8,6 +8,7 @@ use music_application::devices::{
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 const MAX_TRANSFER_FILE_BYTES: u64 = 4 * 1024 * 1024;
@@ -105,7 +106,7 @@ impl SqliteStorage {
         let path = path.to_path_buf();
         let devices = tokio::task::spawn_blocking(move || read_transfer_file(&path)).await??;
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM remembered_devices")
             .fetch_one(&mut *transaction)
             .await?;
@@ -181,7 +182,11 @@ impl RememberedDeviceRepository for SqliteStorage {
     ) -> DeviceFuture<'a, RememberedDevice> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             sqlx::query(
                 "INSERT INTO remembered_devices \
                  (client_id, name, is_output, added_at, updated_at) \

@@ -9,6 +9,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Row, Sqlite, Transaction};
 
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 impl LocalAnalysisRepository for SqliteStorage {
@@ -104,7 +105,11 @@ impl LocalAnalysisRepository for SqliteStorage {
                 )));
             }
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             if analyzer_id == CATALOG_TAG_ANALYZER_ID {
                 let enabled = sqlx::query_scalar::<_, bool>(
                     "SELECT enabled FROM cleanup_source_policies WHERE source_id = 'lastfm'",
@@ -221,7 +226,11 @@ impl LocalAnalysisRepository for SqliteStorage {
                 )));
             }
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let mut stored = 0_usize;
             for document in profiles {
                 let profile = &document.profile;
@@ -361,7 +370,11 @@ impl LocalAnalysisRepository for SqliteStorage {
                 )));
             }
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(track) = load_track(&mut transaction, document.track_id).await? else {
                 transaction.commit().await.map_err(box_storage)?;
                 return Ok(false);
@@ -441,7 +454,11 @@ impl LocalAnalysisRepository for SqliteStorage {
                 )));
             }
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let Some(track) = load_track(&mut transaction, failure.track_id).await? else {
                 transaction.commit().await.map_err(box_storage)?;
                 return Ok(false);

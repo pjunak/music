@@ -1,4 +1,5 @@
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 use music_application::cleanup::CleanupFuture;
 use music_application::cleanup::rejections::{
@@ -69,7 +70,7 @@ impl CleanupRejectionRepository for SqliteStorage {
     ) -> CleanupFuture<'a, Option<CleanupRejection>> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut tx = self.pool.begin().await?;
+            let mut tx = self.pool.begin_with(BEGIN_WRITE).await?;
             if proposal.validate().is_err()
                 || rejection_context(proposal, &snapshot(&mut tx).await?).as_deref()
                     != Some(context)
@@ -112,7 +113,7 @@ impl CleanupRejectionRepository for SqliteStorage {
     fn restore_rejection(&self, id: i64) -> CleanupFuture<'_, Option<CleanupRejection>> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut tx = self.pool.begin().await?;
+            let mut tx = self.pool.begin_with(BEGIN_WRITE).await?;
             let Some(row) = sqlx::query("SELECT * FROM cleanup_rejections WHERE id = ?")
                 .bind(id)
                 .fetch_optional(&mut *tx)

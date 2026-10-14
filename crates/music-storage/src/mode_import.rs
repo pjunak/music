@@ -10,6 +10,7 @@ use music_application::recovery::{
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 const IMPORT_OPERATION: &str = "import_mode_resources";
@@ -81,7 +82,7 @@ async fn apply_import(
     validate_plan(&plan)?;
 
     let _admission = storage.write_gate.lock().await;
-    let mut transaction = storage.pool.begin().await?;
+    let mut transaction = storage.pool.begin_with(BEGIN_WRITE).await?;
     let mut names = BTreeSet::new();
     let mut track_ids = BTreeSet::new();
     for playlist in &plan.playlists {
@@ -205,7 +206,7 @@ async fn rollback_import(
     }
 
     let _admission = storage.write_gate.lock().await;
-    let mut transaction = storage.pool.begin().await?;
+    let mut transaction = storage.pool.begin_with(BEGIN_WRITE).await?;
     for (playlist_id, playlist) in created_ids.iter().zip(&plan.playlists).rev() {
         let deleted =
             sqlx::query("DELETE FROM playlists WHERE id = ? AND mode_id = ? AND name = ?")

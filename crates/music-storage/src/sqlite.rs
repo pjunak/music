@@ -12,6 +12,13 @@ const DEFAULT_MAX_CONNECTIONS: u32 = 3;
 const MAX_CONNECTIONS: u32 = 4;
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Opens every transaction that runs under the write gate. Such
+/// transactions read before they write, and a deferred transaction holding
+/// a read snapshot cannot wait out a concurrent single-statement write:
+/// SQLite rejects its upgrade with `SQLITE_BUSY` instead of applying the
+/// busy timeout. Taking the write lock up front makes it wait instead.
+pub(crate) const BEGIN_WRITE: &str = "BEGIN IMMEDIATE";
+
 #[derive(Debug, Clone)]
 pub struct SqliteStorageOptions {
     database_path: PathBuf,

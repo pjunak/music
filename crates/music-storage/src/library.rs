@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row, Sqlite};
 
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 pub(crate) const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track_no, disc_no, \
@@ -667,7 +668,11 @@ impl CleanupMutationRepository for SqliteStorage {
                 )));
             }
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(StorageError::from)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(StorageError::from)?;
             let plan = read_applying_mutation_journal(
                 &mut transaction,
                 journal_id,
@@ -919,7 +924,7 @@ impl SqliteStorage {
             ));
         }
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         validate_library_mutation_journal(
             &mut transaction,
             journal_id,
@@ -993,7 +998,7 @@ impl SqliteStorage {
         path: &LibraryPath,
     ) -> Result<LibraryIndexMutationCommit, StorageError> {
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         validate_library_mutation_journal(
             &mut transaction,
             journal_id,
@@ -1072,7 +1077,7 @@ impl SqliteStorage {
         }
 
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         validate_library_mutation_journal(
             &mut transaction,
             journal_id,
@@ -1200,7 +1205,7 @@ impl SqliteStorage {
         }
 
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         validate_library_mutation_journal(
             &mut transaction,
             journal_id,
@@ -1303,7 +1308,7 @@ impl SqliteStorage {
         context: MutationJournalContext<'_>,
     ) -> Result<(LibraryIndexMutationCommit, Option<i64>), StorageError> {
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         validate_library_mutation_journal(
             &mut transaction,
             journal_id,
@@ -1387,7 +1392,7 @@ impl SqliteStorage {
         path: &LibraryPath,
     ) -> Result<LibraryIndexMutationCommit, StorageError> {
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         validate_library_delete_journal(&mut transaction, journal_id, path).await?;
 
         let prefix = escape_like(&format!("{}/", path.as_str()));
@@ -1414,7 +1419,7 @@ impl SqliteStorage {
 
     async fn begin_library_reconciliation(&self) -> Result<LibraryStatus, StorageError> {
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         let result = sqlx::query(
             "UPDATE library_state SET status = 'reconciling', \
              scan_started_at = CURRENT_TIMESTAMP, last_error_code = NULL, \
@@ -1464,7 +1469,7 @@ impl SqliteStorage {
         })?;
 
         let _admission = self.write_gate.lock().await;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
         let state = sqlx::query("SELECT generation, status FROM library_state WHERE id = 1")
             .fetch_one(&mut *transaction)
             .await?;

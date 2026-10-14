@@ -6,6 +6,7 @@ use music_domain::TrackId;
 use sqlx::{AssertSqlSafe, Row};
 
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 impl CleanupEnrichmentRepository for SqliteStorage {
@@ -68,7 +69,11 @@ impl CleanupEnrichmentRepository for SqliteStorage {
                 .map_err(StorageError::AssistantSerialization)
                 .map_err(box_storage)?;
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             if crate::catalog_evidence::revision(&mut transaction)
                 .await
                 .map_err(box_storage)?

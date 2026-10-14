@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 use sqlx::{AssertSqlSafe, QueryBuilder, Row, Sqlite, Transaction};
 
 use crate::library::{TRACK_COLUMNS, indexed_track_from_row};
+use crate::sqlite::BEGIN_WRITE;
 use crate::{SqliteStorage, StorageError};
 
 mod review;
@@ -166,7 +167,11 @@ impl AssistantRepository for SqliteStorage {
                 ))
             })?;
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let changed = sqlx::query(
                 "UPDATE assistant_tag_vocabularies SET document_json = ?, revision = ?, \
                  updated_at = CURRENT_TIMESTAMP WHERE \"key\" = ? AND revision = ?",
@@ -200,7 +205,11 @@ impl AssistantRepository for SqliteStorage {
             let requested = track_ids.iter().copied().collect::<BTreeSet<_>>();
             let requested_raw = requested.iter().map(|id| id.get()).collect::<Vec<_>>();
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let existing = existing_track_ids(&mut transaction, &requested_raw).await?;
             let mut current = load_manual_tags(&mut transaction, &existing).await?;
             let add = add.iter().cloned().collect::<BTreeSet<_>>();
@@ -271,7 +280,11 @@ impl AssistantRepository for SqliteStorage {
     ) -> AssistantFuture<'a, Option<RenameTagOutcome>> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let affected: i64 =
                 sqlx::query_scalar("SELECT COUNT(*) FROM track_user_tags WHERE tag = ?")
                     .bind(source)
@@ -325,7 +338,11 @@ impl AssistantRepository for SqliteStorage {
     ) -> AssistantFuture<'a, CleanupMutation> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let usage = load_tag_usage(&mut transaction).await?;
             let Some(vocabulary_record) = load_vocabulary_tx(&mut transaction).await? else {
                 transaction.commit().await.map_err(box_storage)?;
@@ -446,7 +463,11 @@ impl AssistantRepository for SqliteStorage {
     ) -> AssistantFuture<'a, AnalysisReviewBatch> {
         Box::pin(async move {
             let _admission = self.write_gate.lock().await;
-            let mut transaction = self.pool.begin().await.map_err(box_storage)?;
+            let mut transaction = self
+                .pool
+                .begin_with(BEGIN_WRITE)
+                .await
+                .map_err(box_storage)?;
             let outcome =
                 review::review_in_transaction(&mut transaction, targets, decision, model_guard)
                     .await?;

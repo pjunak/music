@@ -326,7 +326,10 @@ expiry or revocation.
 SQLite stays in WAL mode with foreign keys enabled and a bounded busy timeout. Use a small SQLx
 pool for concurrent reads. `music-storage` owns one asynchronous write-admission gate because WAL
 still has one writer; every write transaction remains short and the gate is never held across
-filesystem, network, provider, or model work. Cross-resource mutations go through typed library or
+filesystem, network, provider, or model work. Single-statement writes such as job progress may
+run outside the gate, so gated transactions open with `BEGIN IMMEDIATE` (`BEGIN_WRITE`): a deferred
+transaction that has already read cannot wait out such a write and fails with `SQLITE_BUSY`. The
+architecture check enforces this. Cross-resource mutations go through typed library or
 mode coordinators rather than unrelated locks.
 
 Before opening the database for server writes, the process takes an exclusive standard-library

@@ -252,6 +252,12 @@ export function sourceConcurrencyViolations(files: readonly SourceFile[]): strin
       );
     }
 
+    // A deferred transaction that reads before writing fails instead of
+    // waiting when a concurrent statement writes first; see BEGIN_WRITE.
+    if (occurrenceCount(source, /write_gate\.lock\(\)\.await;[^}]{0,300}?\.begin\(\)/gu) > 0) {
+      violations.push(`${path}: a transaction under the write gate must use begin_with(BEGIN_WRITE)`);
+    }
+
     const blockingSpawns = occurrenceCount(source, /\btokio::task::spawn_blocking\s*\(/gu);
     const approvedBlockingSpawns = APPROVED_SPAWN_BLOCKING_COUNTS.get(path) ?? 0;
     if (blockingSpawns !== approvedBlockingSpawns) {
