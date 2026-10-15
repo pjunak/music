@@ -161,7 +161,7 @@ mod tests {
         assert!(paths.contains_key("/api/auth/logout"));
         assert!(paths.contains_key("/api/auth/me"));
         assert!(paths.contains_key("/api/auth/sessions"));
-        assert!(paths.contains_key("/api/auth/sessions/{token_prefix}"));
+        assert!(paths.contains_key("/api/auth/sessions/{session_id}"));
         assert!(paths.contains_key("/api/devices"));
         assert!(paths.contains_key("/api/devices/{client_id}"));
         assert!(paths.contains_key("/api/library/search"));

@@ -241,8 +241,6 @@ impl From<UserInfo> for UserInfoResponse {
 #[derive(Debug, Serialize, ToSchema)]
 struct ActiveSessionResponse {
     session_id: String,
-    /// Deprecated name for the same opaque management ID; never a bearer-token prefix.
-    token_prefix: String,
     #[schema(format = DateTime)]
     created_at: String,
     #[schema(format = DateTime)]
@@ -257,7 +255,6 @@ impl TryFrom<ActiveSession> for ActiveSessionResponse {
 
     fn try_from(session: ActiveSession) -> Result<Self, Self::Error> {
         Ok(Self {
-            token_prefix: session.session_id.clone(),
             session_id: session.session_id,
             created_at: format_rfc3339(session.created_at)?,
             expires_at: format_rfc3339(session.expires_at)?,
@@ -393,8 +390,8 @@ async fn list_sessions(
 
 #[utoipa::path(
     delete,
-    path = "/auth/sessions/{token_prefix}",
-    params(("token_prefix" = String, Path, description = "Exact opaque session ID (legacy parameter name)")),
+    path = "/auth/sessions/{session_id}",
+    params(("session_id" = String, Path, description = "Exact opaque session ID")),
     responses(
         (status = 204, description = "Successful Response"),
         (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
@@ -675,7 +672,7 @@ mod tests {
         assert_eq!(sessions.as_array().map(Vec::len), Some(1));
         assert_eq!(sessions[0]["is_current"], true);
         assert_eq!(sessions[0]["session_id"].as_str().map(str::len), Some(32));
-        assert_eq!(sessions[0]["token_prefix"], sessions[0]["session_id"]);
+        assert!(sessions[0].get("token_prefix").is_none());
 
         let session_id = sessions[0]["session_id"]
             .as_str()

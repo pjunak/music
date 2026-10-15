@@ -45,8 +45,7 @@ is selected using [the validation matrix](VALIDATION.md).
 - Store only domain-separated session hashes and independent random management
   IDs. Never authenticate a hash or management ID or reintroduce plaintext-token
   fallback. Schema 11 deliberately revokes legacy sessions after a verified backup.
-  The legacy `token_prefix` response field aliases the complete management ID;
-  revocation requires that exact ID. Preserve configured cookies and logout scope.
+  Revocation requires the exact `session_id`. Preserve configured cookies and logout scope.
 - Check browser WebSocket Origin before every upgrade, including unavailable
   playback. Accept the Host origin using the public scheme declared by
   `SESSION_COOKIE_SECURE`, or an explicit `ALLOWED_ORIGINS` entry. Reject malformed

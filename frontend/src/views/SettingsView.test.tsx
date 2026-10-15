@@ -44,8 +44,8 @@ describe("SettingsView", () => {
     const currentId = "a".repeat(32);
     const otherId = "b".repeat(32);
     vi.mocked(authApi.listSessions).mockResolvedValue([
-      { session_id: currentId, token_prefix: currentId, created_at: "2026-09-05T12:00:00Z", expires_at: "2026-10-05T12:00:00Z", last_seen: "2026-09-05T12:00:00Z", is_current: true },
-      { session_id: otherId, token_prefix: otherId, created_at: "2026-09-05T11:00:00Z", expires_at: "2026-10-05T11:00:00Z", last_seen: "2026-09-05T11:00:00Z", is_current: false },
+      { session_id: currentId, created_at: "2026-09-05T12:00:00Z", expires_at: "2026-10-05T12:00:00Z", last_seen: "2026-09-05T12:00:00Z", is_current: true },
+      { session_id: otherId, created_at: "2026-09-05T11:00:00Z", expires_at: "2026-10-05T11:00:00Z", last_seen: "2026-09-05T11:00:00Z", is_current: false },
     ]);
     vi.mocked(confirmDialog).mockResolvedValue(true);
     vi.mocked(authApi.revokeSession).mockResolvedValue(undefined);

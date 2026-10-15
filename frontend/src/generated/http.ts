@@ -11,8 +11,6 @@ export type ActiveSessionResponse = {
   is_current: boolean;
   last_seen: string;
   session_id: string;
-  /** Deprecated name for the same opaque management ID; never a bearer-token prefix. */
-  token_prefix: string;
 };
 
 export type AddCategoryRequest = {

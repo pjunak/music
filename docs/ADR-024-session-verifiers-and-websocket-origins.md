@@ -29,6 +29,10 @@ and `/api/auth/sessions/{token_prefix}` retains its legacy parameter name. This
 lets existing clients pass the returned value without preserving secret-derived
 identity. New UI code uses `session_id`; neither field authenticates.
 
+Update 2026-10-15: the `token_prefix` alias and parameter name were removed.
+Session lists carry only `session_id`, and revocation is
+`DELETE /api/auth/sessions/{session_id}`.
+
 Schema 11 deliberately replaces the exact recognized legacy session table and
 invalidates its logins. Bootstrap preserves its normal verified pre-migration
 backup before making this change. Simply hashing still-valid legacy sessions

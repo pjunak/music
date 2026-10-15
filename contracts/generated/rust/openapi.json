@@ -38,15 +38,10 @@
           },
           "session_id": {
             "type": "string"
-          },
-          "token_prefix": {
-            "description": "Deprecated name for the same opaque management ID; never a bearer-token prefix.",
-            "type": "string"
           }
         },
         "required": [
           "session_id",
-          "token_prefix",
           "created_at",
           "expires_at",
           "last_seen",
@@ -10060,14 +10055,14 @@
         ]
       }
     },
-    "/api/auth/sessions/{token_prefix}": {
+    "/api/auth/sessions/{session_id}": {
       "delete": {
         "operationId": "revoke_session",
         "parameters": [
           {
-            "description": "Exact opaque session ID (legacy parameter name)",
+            "description": "Exact opaque session ID",
             "in": "path",
-            "name": "token_prefix",
+            "name": "session_id",
             "required": true,
             "schema": {
               "type": "string"
