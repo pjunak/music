@@ -11,6 +11,10 @@ updates:
       # metadata tests fail: https://github.com/Serial-ATA/lofty-rs/issues/731
       - dependency-name: "lofty"
         versions: ["0.25.4"]
+      # Stay on the release axum's WebSocket support uses, so the build has one
+      # tungstenite; move it together with axum.
+      - dependency-name: "tokio-tungstenite"
+        update-types: ["version-update:semver-minor"]
     groups:
       utoipa:
         patterns:
