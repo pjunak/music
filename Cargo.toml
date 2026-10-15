@@ -32,7 +32,7 @@ hex = "0.4.3"
 httpdate = "1.0.3"
 # Exact: 0.25.4 truncates files on tag writes (Serial-ATA/lofty-rs#731).
 lofty = "=0.25.3"
-proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 rand = "0.10.2"
 schemars = { version = "1.2.2", default-features = false, features = ["derive", "std"] }
 jsonschema = { version = "0.58.6", default-features = false }
@@ -50,7 +50,7 @@ tempfile = "3.23"
 tar = "0.4.46"
 tokio = { version = "1.53", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-native-roots"] }
-tokio-util = { version = "0.7.19", features = ["rt"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
 tract-tensorflow = "0.23.8"
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["catch-panic", "cors", "fs", "limit"] }
