@@ -167,7 +167,9 @@ is selected using [the validation matrix](VALIDATION.md).
   [`docs/JOB_DIAGNOSTICS.md`](JOB_DIAGNOSTICS.md) before changing lane fairness.
 - SQLx owns the ordered migration ledger and is the schema authority. Applied migrations are
   immutable (checksums are verified); every change is a new migration, applied after a verified
-  pre-migration backup. Databases from before the Rust server are not supported.
+  pre-migration backup. A successful migration keeps the three newest pre-migration backups and
+  removes older ones; a failed removal is logged, never fatal. Databases from before the Rust
+  server are not supported.
 - Runtime persistence is `app.db`, media directories, mode data, and the separately held Assistant
   key. Seed modes copy only when the target is empty.
 - Never drop an error's cause silently. Where a failure becomes a short public error

@@ -106,6 +106,8 @@ pub(crate) const MIGRATIONS: &[(i64, &str, &str)] = &[
 const BACKUP_KIND: &str = "pre-migration";
 const BACKUP_FORMAT_VERSION: u8 = 1;
 const BACKUP_NAME_ATTEMPTS: u16 = 100;
+/// Each backup is a full copy of the database, so only the newest few stay.
+const KEPT_MIGRATION_BACKUPS: usize = 3;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct MigrationBackup {
@@ -120,7 +122,16 @@ pub struct MigrationOutcome {
     pub schema_before: SchemaReport,
     pub schema_after: SchemaReport,
     pub backup: Option<MigrationBackup>,
+    pub backup_retention: BackupRetention,
     pub migration_applied: bool,
+}
+
+/// Older pre-migration backups removed after a successful migration, and
+/// any that could not be removed. A failed removal never blocks startup.
+#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize)]
+pub struct BackupRetention {
+    pub removed: Vec<PathBuf>,
+    pub failed: Vec<(PathBuf, String)>,
 }
 
 #[derive(Debug, Serialize)]
@@ -180,6 +191,11 @@ pub(crate) async fn bootstrap(
                 migration_applied: schema_before.migration_required,
                 schema_before,
                 schema_after,
+                backup_retention: if backup.is_some() {
+                    prune_migration_backups(options.database_path())
+                } else {
+                    BackupRetention::default()
+                },
                 backup,
             },
         )),
@@ -333,6 +349,55 @@ fn reserve_backup_paths(database_path: &Path) -> Result<BackupPaths, StorageErro
     })
 }
 
+/// Keeps the newest pre-migration backups beside the database (including the
+/// one this migration just made) and removes older ones with their manifests.
+fn prune_migration_backups(database_path: &Path) -> BackupRetention {
+    let mut retention = BackupRetention::default();
+    let Some(file_name) = database_path.file_name().and_then(|name| name.to_str()) else {
+        return retention;
+    };
+    let prefix = format!("{file_name}.pre-");
+    let directory = match database_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            retention
+                .failed
+                .push((directory.to_path_buf(), error.to_string()));
+            return retention;
+        }
+    };
+    let mut backups = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".bak"))
+        })
+        .filter_map(|entry| {
+            let modified = entry.metadata().and_then(|metadata| metadata.modified());
+            modified.ok().map(|modified| (modified, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    backups.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    for (_, backup) in backups.into_iter().skip(KEPT_MIGRATION_BACKUPS) {
+        let mut manifest = backup.clone().into_os_string();
+        manifest.push(".json");
+        for path in [backup, PathBuf::from(manifest)] {
+            match fs::remove_file(&path) {
+                Ok(()) => retention.removed.push(path),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => retention.failed.push((path, error.to_string())),
+            }
+        }
+    }
+    retention
+}
+
 fn path_exists(path: &Path) -> Result<bool, StorageError> {
     path.try_exists().map_err(|source| StorageError::Io {
         operation: "inspect migration backup target",
@@ -414,7 +479,59 @@ fn file_name_text(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MIGRATIONS, migrator};
+    use super::{MIGRATIONS, migrator, prune_migration_backups};
+
+    #[test]
+    fn retention_keeps_the_newest_backups_and_their_manifests()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use std::time::{Duration, SystemTime};
+
+        let directory = tempfile::tempdir()?;
+        let database = directory.path().join("app.db");
+        let base = SystemTime::now() - Duration::from_secs(3_600);
+        let names = [
+            "app.db.pre-rust-1.bak",
+            "app.db.pre-v16-2-1-0.bak",
+            "app.db.pre-v17-3-1-0.bak",
+            "app.db.pre-v17-4-1-0.bak",
+            "app.db.pre-v18-5-1-0.bak",
+        ];
+        for (age, name) in names.iter().enumerate() {
+            let path = directory.path().join(name);
+            std::fs::write(&path, b"backup")?;
+            std::fs::write(directory.path().join(format!("{name}.json")), b"{}")?;
+            std::fs::File::options()
+                .write(true)
+                .open(&path)?
+                .set_modified(base + Duration::from_secs(age as u64 * 60))?;
+        }
+        let unrelated = [
+            "app.db",
+            "app.db-wal",
+            "app.db.pre-v18-6-1-0.bak.tmp",
+            "other.db.pre-v1-1-1-0.bak",
+        ];
+        for name in unrelated {
+            std::fs::write(directory.path().join(name), b"keep")?;
+        }
+
+        let retention = prune_migration_backups(&database);
+
+        assert!(retention.failed.is_empty(), "{:?}", retention.failed);
+        assert_eq!(retention.removed.len(), 4);
+        for removed in &names[..2] {
+            assert!(!directory.path().join(removed).exists());
+            assert!(!directory.path().join(format!("{removed}.json")).exists());
+        }
+        for kept in &names[2..] {
+            assert!(directory.path().join(kept).exists());
+            assert!(directory.path().join(format!("{kept}.json")).exists());
+        }
+        for name in unrelated {
+            assert!(directory.path().join(name).exists(), "{name}");
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn rich_metadata_migrates_years_and_backs_up_the_old_schema()

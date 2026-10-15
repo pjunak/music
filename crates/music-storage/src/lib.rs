@@ -43,7 +43,7 @@ pub use devices::{DeviceExportOutcome, DeviceImportOutcome};
 pub use error::StorageError;
 pub use instance_lock::InstanceLock;
 pub use job_timing::read_job_timing_report;
-pub use migration::{MigrationBackup, MigrationOutcome};
+pub use migration::{BackupRetention, MigrationBackup, MigrationOutcome};
 pub use providers::{ProviderCredentialAudit, ProviderCredentialRotationOutcome};
 pub use schema::{
     CURRENT_SCHEMA_VERSION, SchemaCompatibility, SchemaIssue, SchemaReport, inspect_database,

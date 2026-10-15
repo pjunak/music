@@ -140,6 +140,13 @@ impl AppRuntime {
             health.set_component(Component::Database, ComponentStatus::Failed);
             return Err(error.into());
         }
+        let retention = &storage.migration_outcome().backup_retention;
+        if !retention.removed.is_empty() {
+            tracing::info!(removed = ?retention.removed, "removed older pre-migration backups");
+        }
+        for (path, error) in &retention.failed {
+            tracing::warn!(path = %path.display(), error, "could not remove an older pre-migration backup");
+        }
         health.set_component(Component::InstanceLock, ComponentStatus::Ready);
         health.set_component(Component::Database, ComponentStatus::Ready);
         health.set_component(Component::DatabaseSchema, ComponentStatus::Ready);

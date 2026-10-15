@@ -392,7 +392,9 @@ for migration, proxy and client compatibility details.
 The SQLx migration ledger is the schema authority: a database without a ledger, or with failed,
 unknown, newer or edited migrations, is refused before it is opened for writes. Databases from before
 the Rust server are not supported. `music-cli db doctor` is read-only; `music-cli db migrate` creates
-and verifies a pre-migration backup before applying pending migrations. The track index remains
+and verifies a pre-migration backup before applying pending migrations. After a successful
+migration only the three newest of these backups (`app.db.pre-*.bak` with their `.json`
+manifests) stay beside the database. The track index remains
 regenerable from the filesystem, while authored and human-owned state is preserved.
 
 ## Development
