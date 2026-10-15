@@ -249,7 +249,6 @@ pub(super) struct TagCleanupApplyResponse {
 #[utoipa::path(
     get,
     path = "/assistant/library-tags/catalog",
-    operation_id = "tag_catalog_api_assistant_library_tags_catalog_get",
     responses((status = 200, description = "Successful Response", body = ManualTagCatalogResponse)),
     tag = "assistant-tags"
 )]
@@ -285,7 +284,6 @@ pub(super) async fn tag_catalog(
 #[utoipa::path(
     get,
     path = "/assistant/library-tags/vocabulary",
-    operation_id = "get_tag_vocabulary_api_assistant_library_tags_vocabulary_get",
     responses((status = 200, description = "Successful Response", body = TagVocabularyResponse)),
     tag = "assistant-tags"
 )]
@@ -303,7 +301,6 @@ pub(super) async fn get_tag_vocabulary(
 #[utoipa::path(
     put,
     path = "/assistant/library-tags/vocabulary",
-    operation_id = "update_tag_vocabulary_api_assistant_library_tags_vocabulary_put",
     request_body = TagVocabularyUpdateRequest,
     responses(
         (status = 200, description = "Successful Response", body = TagVocabularyResponse),
@@ -331,7 +328,6 @@ pub(super) async fn update_tag_vocabulary(
 #[utoipa::path(
     get,
     path = "/assistant/library-tags/catalog/cleanup-preview",
-    operation_id = "preview_library_tag_cleanup_api_assistant_library_tags_catalog_cleanup_preview_get",
     responses((status = 200, description = "Successful Response", body = TagCleanupPreviewResponse)),
     tag = "assistant-tags"
 )]
@@ -367,7 +363,6 @@ pub(super) async fn preview_tag_cleanup(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/catalog/cleanup-apply",
-    operation_id = "apply_library_tag_cleanup_api_assistant_library_tags_catalog_cleanup_apply_post",
     request_body = TagCleanupApplyRequest,
     responses(
         (status = 200, description = "Successful Response", body = TagCleanupApplyResponse),
@@ -405,7 +400,6 @@ pub(super) async fn apply_tag_cleanup(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/catalog/rename",
-    operation_id = "rename_library_tag_api_assistant_library_tags_catalog_rename_post",
     request_body = ManualTagRenameRequest,
     responses(
         (status = 200, description = "Successful Response", body = ManualTagRenameResponse),
@@ -429,7 +423,6 @@ pub(super) async fn rename_tag(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/bulk",
-    operation_id = "update_library_tags_bulk_api_assistant_library_tags_bulk_post",
     request_body = BulkManualTagPatchRequest,
     responses(
         (status = 200, description = "Successful Response", body = BulkManualTagResultResponse),
@@ -475,7 +468,6 @@ pub(super) async fn patch_tags_bulk(
 #[utoipa::path(
     patch,
     path = "/assistant/library-tags/{track_id}",
-    operation_id = "update_library_tags_api_assistant_library_tags__track_id__patch",
     params(("track_id" = i128, Path)),
     request_body = ManualTagPatchRequest,
     responses(

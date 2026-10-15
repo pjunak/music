@@ -585,7 +585,6 @@ impl From<CleanupAnalysis> for AnalyzeResponse {
 #[utoipa::path(
     post,
     path = "/library/cleanup/analyze",
-    operation_id = "analyze_api_library_cleanup_analyze_post",
     summary = "Analyze",
     request_body = AnalyzeRequest,
     responses(
@@ -627,7 +626,6 @@ async fn analyze(
 #[utoipa::path(
     post,
     path = "/library/cleanup/enrichment-jobs",
-    operation_id = "start_cleanup_enrichment_api_library_cleanup_enrichment_jobs_post",
     request_body = CleanupEnrichmentRequest,
     responses(
         (status = 202, description = "Cleanup enrichment job accepted", body = BackgroundJobResponse),
@@ -687,7 +685,6 @@ fn enrichment_scope_payload(scope: &CleanupScopeRequest) -> Value {
 #[utoipa::path(
     get,
     path = "/library/cleanup/sources",
-    operation_id = "list_cleanup_sources_api_library_cleanup_sources_get",
     summary = "List Cleanup Sources",
     responses(
         (status = 200, description = "Successful Response", body = Vec<CleanupSourceResponse>)
@@ -709,7 +706,6 @@ async fn list_sources(
 #[utoipa::path(
     put,
     path = "/library/cleanup/sources/{source_id}",
-    operation_id = "update_cleanup_source_api_library_cleanup_sources_source_id_put",
     summary = "Update Cleanup Source",
     params(("source_id" = String, Path, description = "Cleanup source id")),
     request_body = CleanupSourceUpdateRequest,
@@ -739,7 +735,6 @@ async fn update_source(
 #[utoipa::path(
     put,
     path = "/library/cleanup/sources/{source_id}/credential",
-    operation_id = "save_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_put",
     params(("source_id" = String, Path, description = "Cleanup source id")),
     request_body = CleanupSourceCredentialUpdateRequest,
     responses(
@@ -769,7 +764,6 @@ async fn save_source_credential(
 #[utoipa::path(
     delete,
     path = "/library/cleanup/sources/{source_id}/credential",
-    operation_id = "delete_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_delete",
     params(("source_id" = String, Path, description = "Cleanup source id")),
     responses(
         (status = 200, description = "Saved credential removed", body = CleanupSourceResponse),
@@ -794,7 +788,6 @@ async fn delete_source_credential(
 #[utoipa::path(
     post,
     path = "/library/cleanup/verify",
-    operation_id = "verify_names_api_library_cleanup_verify_post",
     summary = "Verify Names",
     request_body = VerifyRequest,
     responses(
@@ -836,7 +829,6 @@ async fn verify_names(
 #[utoipa::path(
     post,
     path = "/library/cleanup/apply",
-    operation_id = "apply_cleanup_api_library_cleanup_apply_post",
     summary = "Apply Cleanup",
     request_body = CleanupApplyRequest,
     responses(
@@ -871,7 +863,6 @@ async fn apply_cleanup(
 #[utoipa::path(
     get,
     path = "/library/cleanup/batches",
-    operation_id = "list_batches_api_library_cleanup_batches_get",
     summary = "List Batches",
     responses(
         (status = 200, description = "Successful Response", body = Vec<CleanupBatchSummaryResponse>)
@@ -898,7 +889,6 @@ async fn list_batches(
 #[utoipa::path(
     get,
     path = "/library/cleanup/batches/{batch_id}",
-    operation_id = "get_batch_api_library_cleanup_batches__batch_id__get",
     summary = "Get Batch",
     params(("batch_id" = i128, Path)),
     responses(
@@ -925,7 +915,6 @@ async fn get_batch(
 #[utoipa::path(
     post,
     path = "/library/cleanup/batches/{batch_id}/revert",
-    operation_id = "revert_batch_api_library_cleanup_batches__batch_id__revert_post",
     summary = "Revert Batch",
     params(("batch_id" = i128, Path)),
     responses(
@@ -951,7 +940,6 @@ async fn revert_batch(
 #[utoipa::path(
     post,
     path = "/library/cleanup/revert",
-    operation_id = "revert_from_journal_api_library_cleanup_revert_post",
     summary = "Revert From Journal",
     description = "Revert from an uploaded journal (the downloaded batch JSON). Exists\nfor the disaster path — app.db was wiped/rebuilt so the server-side\nbatch row is gone, but journal items carry paths and survive re-minted\ntrack ids.",
     request_body = CleanupRevertJournalRequest,

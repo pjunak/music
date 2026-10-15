@@ -254,14 +254,6 @@ export type BatchSummary = {
   scope_label: string;
 };
 
-export type Body_upload_api_library_upload_post = {
-  files: string[];
-};
-
-export type Body_upload_api_sfx_upload_post = {
-  files: string[];
-};
-
 export type BulkActionSkip = {
   reason: string;
   track_id: number;
@@ -818,6 +810,10 @@ export type LibraryTagTrack = {
   path: string;
   title: string;
   track_id: number;
+};
+
+export type LibraryUploadBody = {
+  files: string[];
 };
 
 export type LivenessContract = Record<string, string>;
@@ -1437,6 +1433,10 @@ export type SfxMoveRequest = {
 export type SfxTreeResponse = {
   files: SfxFileOut[];
   path: string;
+};
+
+export type SfxUploadBody = {
+  files: string[];
 };
 
 export type SfxUploadResult = {

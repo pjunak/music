@@ -131,7 +131,6 @@ pub(super) struct StoredModelTagCleanupSuggestion {
 #[utoipa::path(
     get,
     path = "/assistant/library-tags/catalog/model-cleanup-status",
-    operation_id = "model_library_tag_cleanup_status_api_assistant_library_tags_catalog_model_cleanup_status_get",
     responses((status = 200, description = "Successful Response", body = ModelTagCleanupAvailabilityResponse)),
     tag = "assistant-tags"
 )]
@@ -180,7 +179,6 @@ pub(super) async fn model_tag_cleanup_status(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/catalog/model-cleanup-jobs",
-    operation_id = "start_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_jobs_post",
     request_body = ModelTagCleanupStartRequest,
     responses(
         (status = 202, description = "Successful Response", body = BackgroundJobResponse),
@@ -244,7 +242,6 @@ pub(super) async fn start_model_tag_cleanup(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/catalog/model-cleanup-apply",
-    operation_id = "apply_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_apply_post",
     request_body = ModelTagCleanupApplyRequest,
     responses(
         (status = 200, description = "Successful Response", body = TagCleanupApplyResponse),

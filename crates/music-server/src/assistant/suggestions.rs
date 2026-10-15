@@ -228,7 +228,6 @@ pub(super) struct PlaylistSuggestionResponse {
 #[utoipa::path(
     post,
     path = "/assistant/playlists/suggest",
-    operation_id = "suggest_playlist_api_assistant_playlists_suggest_post",
     request_body = PlaylistSuggestionRequestWire,
     responses(
         (status = 200, description = "Successful Response", body = PlaylistSuggestionResponse),
@@ -253,7 +252,6 @@ pub(super) async fn suggest_playlist(
 #[utoipa::path(
     get,
     path = "/assistant/playlists/model-status",
-    operation_id = "model_playlist_status_api_assistant_playlists_model_status_get",
     responses((status = 200, description = "Successful Response", body = ModelPlaylistAvailabilityResponse)),
     tag = "assistant"
 )]
@@ -277,7 +275,6 @@ pub(super) async fn model_playlist_status(
 #[utoipa::path(
     post,
     path = "/assistant/playlists/model-suggestions/jobs",
-    operation_id = "start_model_playlist_suggestion_api_assistant_playlists_model_suggestions_jobs_post",
     request_body = ModelPlaylistSuggestionStartRequest,
     responses(
         (status = 202, description = "Successful Response", body = BackgroundJobResponse),
@@ -328,7 +325,6 @@ pub(super) async fn start_model_playlist_suggestion(
 #[utoipa::path(
     get,
     path = "/assistant/eq/model-status",
-    operation_id = "model_eq_status_api_assistant_eq_model_status_get",
     responses((status = 200, description = "Successful Response", body = ModelEqAvailabilityResponse)),
     tag = "assistant"
 )]
@@ -352,7 +348,6 @@ pub(super) async fn model_eq_status(
 #[utoipa::path(
     post,
     path = "/assistant/eq/drafts/jobs",
-    operation_id = "start_model_eq_draft_api_assistant_eq_drafts_jobs_post",
     request_body = ModelEqDraftStartRequest,
     responses(
         (status = 202, description = "Successful Response", body = BackgroundJobResponse),

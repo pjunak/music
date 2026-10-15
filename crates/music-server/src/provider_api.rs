@@ -891,7 +891,6 @@ pub(crate) fn provider_router() -> OpenApiRouter<HttpState> {
 #[utoipa::path(
     get,
     path = "/assistant/providers/status",
-    operation_id = "get_framework_status_api_assistant_providers_status_get",
     responses((status = 200, description = "Successful Response", body = ProviderFrameworkStatusResponse)),
     tag = "assistant"
 )]
@@ -906,7 +905,6 @@ async fn framework_status(
 #[utoipa::path(
     post,
     path = "/assistant/providers/credential-storage/initialize",
-    operation_id = "initialize_provider_storage_api_assistant_providers_credential_storage_initialize_post",
     responses((status = 201, description = "Successful Response", body = ProviderFrameworkStatusResponse)),
     tag = "assistant"
 )]
@@ -921,7 +919,6 @@ async fn initialize_credential_storage(
 #[utoipa::path(
     post,
     path = "/assistant/providers/credential-storage/reset",
-    operation_id = "reset_provider_storage_api_assistant_providers_credential_storage_reset_post",
     request_body = ProviderCredentialStorageResetRequest,
     responses(
         (status = 200, description = "Successful Response", body = ProviderCredentialStorageResetResponse),
@@ -978,7 +975,6 @@ async fn reset_credential_storage(
 #[utoipa::path(
     get,
     path = "/assistant/providers/connections",
-    operation_id = "get_connections_api_assistant_providers_connections_get",
     responses((status = 200, description = "Successful Response", body = [ProviderConnectionResponse])),
     tag = "assistant"
 )]
@@ -1002,7 +998,6 @@ async fn list_connections(
 #[utoipa::path(
     post,
     path = "/assistant/providers/connections",
-    operation_id = "add_connection_api_assistant_providers_connections_post",
     request_body = ProviderConnectionCreateRequest,
     responses(
         (status = 201, description = "Successful Response", body = ProviderConnectionResponse),
@@ -1027,7 +1022,6 @@ async fn create_connection(
 #[utoipa::path(
     put,
     path = "/assistant/providers/connections/{connection_id}",
-    operation_id = "edit_connection_api_assistant_providers_connections__connection_id__put",
     params(("connection_id" = String, Path, description = "Connection Id")),
     request_body = ProviderConnectionUpdateRequest,
     responses(
@@ -1055,7 +1049,6 @@ async fn update_connection(
 #[utoipa::path(
     delete,
     path = "/assistant/providers/connections/{connection_id}",
-    operation_id = "remove_connection_api_assistant_providers_connections__connection_id__delete",
     params(("connection_id" = String, Path, description = "Connection Id")),
     responses(
         (status = 204, description = "Successful Response"),
@@ -1080,7 +1073,6 @@ async fn delete_connection(
 #[utoipa::path(
     delete,
     path = "/assistant/providers/connections/{connection_id}/credential",
-    operation_id = "remove_connection_credential_api_assistant_providers_connections__connection_id__credential_delete",
     params(("connection_id" = String, Path, description = "Connection Id")),
     responses(
         (status = 200, description = "Successful Response", body = ProviderConnectionResponse),
@@ -1105,7 +1097,6 @@ async fn delete_connection_credential(
 #[utoipa::path(
     post,
     path = "/assistant/providers/connections/{connection_id}/verify",
-    operation_id = "verify_connection_api_assistant_providers_connections__connection_id__verify_post",
     params(("connection_id" = String, Path, description = "Connection Id")),
     responses(
         (status = 200, description = "Successful Response", body = ProviderVerificationResponse),
@@ -1137,7 +1128,6 @@ async fn verify_connection(
 #[utoipa::path(
     get,
     path = "/assistant/providers/roles",
-    operation_id = "get_roles_api_assistant_providers_roles_get",
     responses((status = 200, description = "Successful Response", body = [ModelRoleResponse])),
     tag = "assistant"
 )]
@@ -1161,7 +1151,6 @@ async fn list_roles(
 #[utoipa::path(
     get,
     path = "/assistant/providers/roles/{role_id}/evaluations",
-    operation_id = "get_role_evaluations_api_assistant_providers_roles__role_id__evaluations_get",
     params(("role_id" = String, Path, description = "Role Id")),
     responses(
         (status = 200, description = "Successful Response", body = [ModelQualityEvaluationResponse]),
@@ -1191,7 +1180,6 @@ async fn list_role_evaluations(
 #[utoipa::path(
     post,
     path = "/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs",
-    operation_id = "start_role_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__jobs_post",
     params(
         ("role_id" = String, Path, description = "Role Id"),
         ("evaluation_id" = String, Path, description = "Evaluation Id")
@@ -1236,7 +1224,6 @@ async fn start_role_evaluation(
 #[utoipa::path(
     post,
     path = "/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs",
-    operation_id = "start_failed_scenario_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__failed_scenarios_jobs_post",
     params(
         ("role_id" = String, Path, description = "Role Id"),
         ("evaluation_id" = String, Path, description = "Evaluation Id")
@@ -1407,7 +1394,6 @@ fn retest_baseline_unavailable() -> ApiError {
 #[utoipa::path(
     post,
     path = "/assistant/providers/roles/{role_id}/test",
-    operation_id = "test_role_model_api_assistant_providers_roles__role_id__test_post",
     params(("role_id" = String, Path, description = "Role Id")),
     responses(
         (status = 200, description = "Successful Response", body = ModelConformanceResponse),
@@ -1463,7 +1449,6 @@ async fn test_role_model(
 #[utoipa::path(
     put,
     path = "/assistant/providers/roles/{role_id}",
-    operation_id = "set_role_api_assistant_providers_roles__role_id__put",
     params(("role_id" = String, Path, description = "Role Id")),
     request_body = ModelRoleUpdateRequest,
     responses(
@@ -1501,7 +1486,6 @@ async fn update_role(
 #[utoipa::path(
     delete,
     path = "/assistant/providers/roles/{role_id}",
-    operation_id = "remove_role_api_assistant_providers_roles__role_id__delete",
     params(("role_id" = String, Path, description = "Role Id")),
     responses(
         (status = 204, description = "Successful Response"),

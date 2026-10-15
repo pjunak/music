@@ -1248,36 +1248,6 @@
         ],
         "type": "object"
       },
-      "Body_upload_api_library_upload_post": {
-        "properties": {
-          "files": {
-            "items": {
-              "contentMediaType": "application/octet-stream",
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "files"
-        ],
-        "type": "object"
-      },
-      "Body_upload_api_sfx_upload_post": {
-        "properties": {
-          "files": {
-            "items": {
-              "contentMediaType": "application/octet-stream",
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "files"
-        ],
-        "type": "object"
-      },
       "BulkActionSkip": {
         "properties": {
           "reason": {
@@ -3916,6 +3886,21 @@
           "analysis_tags",
           "analysis_suggestions",
           "model_analysis"
+        ],
+        "type": "object"
+      },
+      "LibraryUploadBody": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
         ],
         "type": "object"
       },
@@ -6963,6 +6948,21 @@
         ],
         "type": "object"
       },
+      "SfxUploadBody": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      },
       "SfxUploadResult": {
         "properties": {
           "destination": {
@@ -8276,7 +8276,7 @@
     },
     "/api/assistant/eq/drafts/jobs": {
       "post": {
-        "operationId": "start_model_eq_draft_api_assistant_eq_drafts_jobs_post",
+        "operationId": "start_model_eq_draft",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8316,7 +8316,7 @@
     },
     "/api/assistant/eq/model-status": {
       "get": {
-        "operationId": "model_eq_status_api_assistant_eq_model_status_get",
+        "operationId": "model_eq_status",
         "responses": {
           "200": {
             "content": {
@@ -8336,7 +8336,7 @@
     },
     "/api/assistant/library-context/jobs": {
       "post": {
-        "operationId": "start_library_context_analysis_api_assistant_library_context_jobs_post",
+        "operationId": "start_library_context_analysis",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8376,7 +8376,7 @@
     },
     "/api/assistant/library-context/summary": {
       "get": {
-        "operationId": "library_context_summary_api_assistant_library_context_summary_get",
+        "operationId": "library_context_summary",
         "responses": {
           "200": {
             "content": {
@@ -8396,7 +8396,7 @@
     },
     "/api/assistant/library-context/tracks/{track_id}": {
       "get": {
-        "operationId": "library_track_context_api_assistant_library_context_tracks__track_id__get",
+        "operationId": "library_track_context",
         "parameters": [
           {
             "description": "Track Id",
@@ -8437,7 +8437,7 @@
     },
     "/api/assistant/library-tags": {
       "get": {
-        "operationId": "list_library_tags_api_assistant_library_tags_get",
+        "operationId": "list_library_tags",
         "parameters": [
           {
             "in": "query",
@@ -8596,7 +8596,7 @@
     },
     "/api/assistant/library-tags/analysis-tags/reviews/bulk": {
       "post": {
-        "operationId": "update_analysis_tag_reviews_bulk_api_assistant_library_tags_analysis_tags_reviews_bulk_post",
+        "operationId": "review_analysis_tags_bulk",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8636,7 +8636,7 @@
     },
     "/api/assistant/library-tags/bulk": {
       "post": {
-        "operationId": "update_library_tags_bulk_api_assistant_library_tags_bulk_post",
+        "operationId": "patch_tags_bulk",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8676,7 +8676,7 @@
     },
     "/api/assistant/library-tags/catalog": {
       "get": {
-        "operationId": "tag_catalog_api_assistant_library_tags_catalog_get",
+        "operationId": "tag_catalog",
         "responses": {
           "200": {
             "content": {
@@ -8696,7 +8696,7 @@
     },
     "/api/assistant/library-tags/catalog/cleanup-apply": {
       "post": {
-        "operationId": "apply_library_tag_cleanup_api_assistant_library_tags_catalog_cleanup_apply_post",
+        "operationId": "apply_tag_cleanup",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8736,7 +8736,7 @@
     },
     "/api/assistant/library-tags/catalog/cleanup-preview": {
       "get": {
-        "operationId": "preview_library_tag_cleanup_api_assistant_library_tags_catalog_cleanup_preview_get",
+        "operationId": "preview_tag_cleanup",
         "responses": {
           "200": {
             "content": {
@@ -8756,7 +8756,7 @@
     },
     "/api/assistant/library-tags/catalog/model-cleanup-apply": {
       "post": {
-        "operationId": "apply_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_apply_post",
+        "operationId": "apply_model_tag_cleanup",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8796,7 +8796,7 @@
     },
     "/api/assistant/library-tags/catalog/model-cleanup-jobs": {
       "post": {
-        "operationId": "start_model_library_tag_cleanup_api_assistant_library_tags_catalog_model_cleanup_jobs_post",
+        "operationId": "start_model_tag_cleanup",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8836,7 +8836,7 @@
     },
     "/api/assistant/library-tags/catalog/model-cleanup-status": {
       "get": {
-        "operationId": "model_library_tag_cleanup_status_api_assistant_library_tags_catalog_model_cleanup_status_get",
+        "operationId": "model_tag_cleanup_status",
         "responses": {
           "200": {
             "content": {
@@ -8856,7 +8856,7 @@
     },
     "/api/assistant/library-tags/catalog/rename": {
       "post": {
-        "operationId": "rename_library_tag_api_assistant_library_tags_catalog_rename_post",
+        "operationId": "rename_tag",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8966,7 +8966,7 @@
     },
     "/api/assistant/library-tags/model-jobs": {
       "post": {
-        "operationId": "start_model_music_tagging_api_assistant_library_tags_model_jobs_post",
+        "operationId": "start_model_tagging",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9006,7 +9006,7 @@
     },
     "/api/assistant/library-tags/model-plan": {
       "post": {
-        "operationId": "plan_model_music_tagging_api_assistant_library_tags_model_plan_post",
+        "operationId": "plan_model_tagging",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9046,7 +9046,7 @@
     },
     "/api/assistant/library-tags/model-status": {
       "get": {
-        "operationId": "model_music_tagging_status_api_assistant_library_tags_model_status_get",
+        "operationId": "model_tagging_status",
         "responses": {
           "200": {
             "content": {
@@ -9066,7 +9066,7 @@
     },
     "/api/assistant/library-tags/query": {
       "post": {
-        "operationId": "query_model_library_tags_api_assistant_library_tags_query_post",
+        "operationId": "query_model_library_tags",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9106,7 +9106,7 @@
     },
     "/api/assistant/library-tags/vocabulary": {
       "get": {
-        "operationId": "get_tag_vocabulary_api_assistant_library_tags_vocabulary_get",
+        "operationId": "get_tag_vocabulary",
         "responses": {
           "200": {
             "content": {
@@ -9124,7 +9124,7 @@
         ]
       },
       "put": {
-        "operationId": "update_tag_vocabulary_api_assistant_library_tags_vocabulary_put",
+        "operationId": "update_tag_vocabulary",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9164,7 +9164,7 @@
     },
     "/api/assistant/library-tags/{track_id}": {
       "patch": {
-        "operationId": "update_library_tags_api_assistant_library_tags__track_id__patch",
+        "operationId": "patch_track_tags",
         "parameters": [
           {
             "in": "path",
@@ -9214,7 +9214,7 @@
     },
     "/api/assistant/library-tags/{track_id}/analysis-tags/review": {
       "put": {
-        "operationId": "update_analysis_tag_review_api_assistant_library_tags__track_id__analysis_tags_review_put",
+        "operationId": "review_analysis_tag",
         "parameters": [
           {
             "in": "path",
@@ -9264,7 +9264,7 @@
     },
     "/api/assistant/playlists/model-status": {
       "get": {
-        "operationId": "model_playlist_status_api_assistant_playlists_model_status_get",
+        "operationId": "model_playlist_status",
         "responses": {
           "200": {
             "content": {
@@ -9284,7 +9284,7 @@
     },
     "/api/assistant/playlists/model-suggestions/jobs": {
       "post": {
-        "operationId": "start_model_playlist_suggestion_api_assistant_playlists_model_suggestions_jobs_post",
+        "operationId": "start_model_playlist_suggestion",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9324,7 +9324,7 @@
     },
     "/api/assistant/playlists/suggest": {
       "post": {
-        "operationId": "suggest_playlist_api_assistant_playlists_suggest_post",
+        "operationId": "suggest_playlist",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9364,7 +9364,7 @@
     },
     "/api/assistant/providers/connections": {
       "get": {
-        "operationId": "get_connections_api_assistant_providers_connections_get",
+        "operationId": "list_connections",
         "responses": {
           "200": {
             "content": {
@@ -9385,7 +9385,7 @@
         ]
       },
       "post": {
-        "operationId": "add_connection_api_assistant_providers_connections_post",
+        "operationId": "create_connection",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9425,7 +9425,7 @@
     },
     "/api/assistant/providers/connections/{connection_id}": {
       "delete": {
-        "operationId": "remove_connection_api_assistant_providers_connections__connection_id__delete",
+        "operationId": "delete_connection",
         "parameters": [
           {
             "description": "Connection Id",
@@ -9457,7 +9457,7 @@
         ]
       },
       "put": {
-        "operationId": "edit_connection_api_assistant_providers_connections__connection_id__put",
+        "operationId": "update_connection",
         "parameters": [
           {
             "description": "Connection Id",
@@ -9508,7 +9508,7 @@
     },
     "/api/assistant/providers/connections/{connection_id}/credential": {
       "delete": {
-        "operationId": "remove_connection_credential_api_assistant_providers_connections__connection_id__credential_delete",
+        "operationId": "delete_connection_credential",
         "parameters": [
           {
             "description": "Connection Id",
@@ -9549,7 +9549,7 @@
     },
     "/api/assistant/providers/connections/{connection_id}/verify": {
       "post": {
-        "operationId": "verify_connection_api_assistant_providers_connections__connection_id__verify_post",
+        "operationId": "verify_connection",
         "parameters": [
           {
             "description": "Connection Id",
@@ -9590,7 +9590,7 @@
     },
     "/api/assistant/providers/credential-storage/initialize": {
       "post": {
-        "operationId": "initialize_provider_storage_api_assistant_providers_credential_storage_initialize_post",
+        "operationId": "initialize_credential_storage",
         "responses": {
           "201": {
             "content": {
@@ -9610,7 +9610,7 @@
     },
     "/api/assistant/providers/credential-storage/reset": {
       "post": {
-        "operationId": "reset_provider_storage_api_assistant_providers_credential_storage_reset_post",
+        "operationId": "reset_credential_storage",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9650,7 +9650,7 @@
     },
     "/api/assistant/providers/roles": {
       "get": {
-        "operationId": "get_roles_api_assistant_providers_roles_get",
+        "operationId": "list_roles",
         "responses": {
           "200": {
             "content": {
@@ -9673,7 +9673,7 @@
     },
     "/api/assistant/providers/roles/{role_id}": {
       "delete": {
-        "operationId": "remove_role_api_assistant_providers_roles__role_id__delete",
+        "operationId": "delete_role",
         "parameters": [
           {
             "description": "Role Id",
@@ -9705,7 +9705,7 @@
         ]
       },
       "put": {
-        "operationId": "set_role_api_assistant_providers_roles__role_id__put",
+        "operationId": "update_role",
         "parameters": [
           {
             "description": "Role Id",
@@ -9756,7 +9756,7 @@
     },
     "/api/assistant/providers/roles/{role_id}/evaluations": {
       "get": {
-        "operationId": "get_role_evaluations_api_assistant_providers_roles__role_id__evaluations_get",
+        "operationId": "list_role_evaluations",
         "parameters": [
           {
             "description": "Role Id",
@@ -9800,7 +9800,7 @@
     },
     "/api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/failed-scenarios/jobs": {
       "post": {
-        "operationId": "start_failed_scenario_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__failed_scenarios_jobs_post",
+        "operationId": "start_failed_scenario_evaluation",
         "parameters": [
           {
             "description": "Role Id",
@@ -9850,7 +9850,7 @@
     },
     "/api/assistant/providers/roles/{role_id}/evaluations/{evaluation_id}/jobs": {
       "post": {
-        "operationId": "start_role_evaluation_api_assistant_providers_roles__role_id__evaluations__evaluation_id__jobs_post",
+        "operationId": "start_role_evaluation",
         "parameters": [
           {
             "description": "Role Id",
@@ -9900,7 +9900,7 @@
     },
     "/api/assistant/providers/roles/{role_id}/test": {
       "post": {
-        "operationId": "test_role_model_api_assistant_providers_roles__role_id__test_post",
+        "operationId": "test_role_model",
         "parameters": [
           {
             "description": "Role Id",
@@ -9941,7 +9941,7 @@
     },
     "/api/assistant/providers/status": {
       "get": {
-        "operationId": "get_framework_status_api_assistant_providers_status_get",
+        "operationId": "framework_status",
         "responses": {
           "200": {
             "content": {
@@ -10414,7 +10414,7 @@
     },
     "/api/jobs": {
       "get": {
-        "operationId": "list_jobs_api_jobs_get",
+        "operationId": "list_jobs",
         "parameters": [
           {
             "in": "query",
@@ -10499,7 +10499,7 @@
     },
     "/api/jobs/{job_id}": {
       "get": {
-        "operationId": "get_job_api_jobs__job_id__get",
+        "operationId": "get_job",
         "parameters": [
           {
             "in": "path",
@@ -10539,7 +10539,7 @@
     },
     "/api/jobs/{job_id}/cancel": {
       "post": {
-        "operationId": "cancel_job_api_jobs__job_id__cancel_post",
+        "operationId": "cancel_job",
         "parameters": [
           {
             "in": "path",
@@ -10579,7 +10579,7 @@
     },
     "/api/jobs/{job_id}/retry": {
       "post": {
-        "operationId": "retry_job_api_jobs__job_id__retry_post",
+        "operationId": "retry_job",
         "parameters": [
           {
             "in": "path",
@@ -10619,7 +10619,7 @@
     },
     "/api/library/cleanup/analyze": {
       "post": {
-        "operationId": "analyze_api_library_cleanup_analyze_post",
+        "operationId": "analyze",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10660,7 +10660,7 @@
     },
     "/api/library/cleanup/apply": {
       "post": {
-        "operationId": "apply_cleanup_api_library_cleanup_apply_post",
+        "operationId": "apply_cleanup",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10701,7 +10701,7 @@
     },
     "/api/library/cleanup/batches": {
       "get": {
-        "operationId": "list_batches_api_library_cleanup_batches_get",
+        "operationId": "list_batches",
         "responses": {
           "200": {
             "content": {
@@ -10725,7 +10725,7 @@
     },
     "/api/library/cleanup/batches/{batch_id}": {
       "get": {
-        "operationId": "get_batch_api_library_cleanup_batches__batch_id__get",
+        "operationId": "get_batch",
         "parameters": [
           {
             "in": "path",
@@ -10766,7 +10766,7 @@
     },
     "/api/library/cleanup/batches/{batch_id}/revert": {
       "post": {
-        "operationId": "revert_batch_api_library_cleanup_batches__batch_id__revert_post",
+        "operationId": "revert_batch",
         "parameters": [
           {
             "in": "path",
@@ -10807,7 +10807,7 @@
     },
     "/api/library/cleanup/enrichment-jobs": {
       "post": {
-        "operationId": "start_cleanup_enrichment_api_library_cleanup_enrichment_jobs_post",
+        "operationId": "start_enrichment",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11083,7 +11083,7 @@
     "/api/library/cleanup/revert": {
       "post": {
         "description": "Revert from an uploaded journal (the downloaded batch JSON). Exists\nfor the disaster path — app.db was wiped/rebuilt so the server-side\nbatch row is gone, but journal items carry paths and survive re-minted\ntrack ids.",
-        "operationId": "revert_from_journal_api_library_cleanup_revert_post",
+        "operationId": "revert_from_journal",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11124,7 +11124,7 @@
     },
     "/api/library/cleanup/sources": {
       "get": {
-        "operationId": "list_cleanup_sources_api_library_cleanup_sources_get",
+        "operationId": "list_sources",
         "responses": {
           "200": {
             "content": {
@@ -11148,7 +11148,7 @@
     },
     "/api/library/cleanup/sources/{source_id}": {
       "put": {
-        "operationId": "update_cleanup_source_api_library_cleanup_sources_source_id_put",
+        "operationId": "update_source",
         "parameters": [
           {
             "description": "Cleanup source id",
@@ -11203,7 +11203,7 @@
     },
     "/api/library/cleanup/sources/{source_id}/credential": {
       "delete": {
-        "operationId": "delete_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_delete",
+        "operationId": "delete_source_credential",
         "parameters": [
           {
             "description": "Cleanup source id",
@@ -11235,7 +11235,7 @@
         ]
       },
       "put": {
-        "operationId": "save_cleanup_source_credential_api_library_cleanup_sources_source_id_credential_put",
+        "operationId": "save_source_credential",
         "parameters": [
           {
             "description": "Cleanup source id",
@@ -11292,7 +11292,7 @@
     },
     "/api/library/cleanup/verify": {
       "post": {
-        "operationId": "verify_names_api_library_cleanup_verify_post",
+        "operationId": "verify_names",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12083,7 +12083,7 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_upload_api_library_upload_post"
+                "$ref": "#/components/schemas/LibraryUploadBody"
               }
             }
           },
@@ -13361,7 +13361,7 @@
     },
     "/api/playlists": {
       "get": {
-        "operationId": "list_playlists_api_playlists_get",
+        "operationId": "list_playlists",
         "parameters": [
           {
             "in": "query",
@@ -13424,7 +13424,7 @@
         ]
       },
       "post": {
-        "operationId": "create_playlist_api_playlists_post",
+        "operationId": "create_playlist",
         "requestBody": {
           "content": {
             "application/json": {
@@ -13464,7 +13464,7 @@
     },
     "/api/playlists/{playlist_id}": {
       "delete": {
-        "operationId": "delete_playlist_api_playlists__playlist_id__delete",
+        "operationId": "delete_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13495,7 +13495,7 @@
         ]
       },
       "get": {
-        "operationId": "get_playlist_api_playlists__playlist_id__get",
+        "operationId": "get_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13533,7 +13533,7 @@
         ]
       },
       "patch": {
-        "operationId": "update_playlist_api_playlists__playlist_id__patch",
+        "operationId": "update_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13583,7 +13583,7 @@
     },
     "/api/playlists/{playlist_id}/automatic": {
       "delete": {
-        "operationId": "disable_automatic_playlist_api_playlists__playlist_id__automatic_delete",
+        "operationId": "disable_automatic_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13621,7 +13621,7 @@
         ]
       },
       "put": {
-        "operationId": "configure_automatic_playlist_api_playlists__playlist_id__automatic_put",
+        "operationId": "configure_automatic_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13671,7 +13671,7 @@
     },
     "/api/playlists/{playlist_id}/automatic/preview": {
       "post": {
-        "operationId": "preview_automatic_playlist_api_playlists__playlist_id__automatic_preview_post",
+        "operationId": "preview_automatic_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13721,7 +13721,7 @@
     },
     "/api/playlists/{playlist_id}/automatic/refresh": {
       "post": {
-        "operationId": "refresh_automatic_playlist_api_playlists__playlist_id__automatic_refresh_post",
+        "operationId": "refresh_automatic_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13762,7 +13762,7 @@
     "/api/playlists/{playlist_id}/export": {
       "get": {
         "description": "Download the playlist as M3U (default; for VLC, foobar2000, etc.) or\nJSON (structured, includes track metadata for re-import). M3U paths are\nrelative to MUSIC_DIR — drop the file at MUSIC_DIR's root to import.",
-        "operationId": "export_playlist_api_playlists__playlist_id__export_get",
+        "operationId": "export_playlist",
         "parameters": [
           {
             "in": "path",
@@ -13815,7 +13815,7 @@
     },
     "/api/playlists/{playlist_id}/tracks": {
       "get": {
-        "operationId": "get_tracks_api_playlists__playlist_id__tracks_get",
+        "operationId": "get_tracks",
         "parameters": [
           {
             "in": "path",
@@ -13856,7 +13856,7 @@
         ]
       },
       "post": {
-        "operationId": "add_track_api_playlists__playlist_id__tracks_post",
+        "operationId": "add_track",
         "parameters": [
           {
             "in": "path",
@@ -13906,7 +13906,7 @@
     },
     "/api/playlists/{playlist_id}/tracks/{position}": {
       "delete": {
-        "operationId": "remove_track_api_playlists__playlist_id__tracks__position__delete",
+        "operationId": "remove_track",
         "parameters": [
           {
             "in": "path",
@@ -13945,7 +13945,7 @@
         ]
       },
       "patch": {
-        "operationId": "move_track_api_playlists__playlist_id__tracks__position__patch",
+        "operationId": "move_playlist_track",
         "parameters": [
           {
             "in": "path",
@@ -14024,7 +14024,7 @@
     "/api/sfx/file": {
       "get": {
         "description": "1. Path must normalise without traversal segments.\n2. Path must resolve inside SFX_LIBRARY_DIR.\n3. Path must be referenced by at least one loaded mode's soundboards.",
-        "operationId": "get_sfx_file_api_sfx_file_get",
+        "operationId": "get_sfx_file",
         "parameters": [
           {
             "description": "Path relative to SFX_LIBRARY_DIR.",
@@ -14064,7 +14064,7 @@
     },
     "/api/sfx/files": {
       "delete": {
-        "operationId": "delete_file_api_sfx_files_delete",
+        "operationId": "delete_file",
         "parameters": [
           {
             "description": "Path relative to SFX_LIBRARY_DIR.",
@@ -14096,7 +14096,7 @@
         ]
       },
       "get": {
-        "operationId": "list_all_files_api_sfx_files_get",
+        "operationId": "list_all_files",
         "responses": {
           "200": {
             "content": {
@@ -14120,7 +14120,7 @@
     },
     "/api/sfx/folders": {
       "delete": {
-        "operationId": "delete_folder_api_sfx_folders_delete",
+        "operationId": "delete_sfx_folder",
         "parameters": [
           {
             "description": "Folder path relative to SFX_LIBRARY_DIR.",
@@ -14168,7 +14168,7 @@
         ]
       },
       "get": {
-        "operationId": "list_all_folders_api_sfx_folders_get",
+        "operationId": "list_all_folders",
         "responses": {
           "200": {
             "content": {
@@ -14187,7 +14187,7 @@
         ]
       },
       "post": {
-        "operationId": "create_folder_api_sfx_folders_post",
+        "operationId": "create_sfx_folder",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14227,7 +14227,7 @@
     },
     "/api/sfx/folders/rename": {
       "post": {
-        "operationId": "rename_folder_api_sfx_folders_rename_post",
+        "operationId": "rename_sfx_folder",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14267,7 +14267,7 @@
     },
     "/api/sfx/move": {
       "post": {
-        "operationId": "move_file_api_sfx_move_post",
+        "operationId": "move_file",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14307,7 +14307,7 @@
     },
     "/api/sfx/tree": {
       "get": {
-        "operationId": "list_tree_api_sfx_tree_get",
+        "operationId": "list_tree",
         "parameters": [
           {
             "description": "Folder path relative to SFX_LIBRARY_DIR.",
@@ -14350,7 +14350,7 @@
     },
     "/api/sfx/upload": {
       "post": {
-        "operationId": "upload_api_sfx_upload_post",
+        "operationId": "upload_sfx",
         "parameters": [
           {
             "description": "Destination folder under SFX_LIBRARY_DIR.",
@@ -14381,7 +14381,7 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_upload_api_sfx_upload_post"
+                "$ref": "#/components/schemas/SfxUploadBody"
               }
             }
           },
@@ -14416,7 +14416,7 @@
     },
     "/api/sfx/upload/check": {
       "post": {
-        "operationId": "upload_check_api_sfx_upload_check_post",
+        "operationId": "upload_sfx_check",
         "requestBody": {
           "content": {
             "application/json": {

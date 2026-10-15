@@ -205,6 +205,27 @@ mod tests {
         Ok(())
     }
 
+    /// Operation IDs default to the handler's function name, so two modules
+    /// with a same-named handler would collide silently.
+    #[test]
+    fn operation_ids_are_unique() -> Result<(), Box<dyn Error>> {
+        let document = serde_json::to_value(openapi_document())?;
+        let paths = document["paths"]
+            .as_object()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "paths is not an object"))?;
+        let mut seen = std::collections::BTreeSet::new();
+        for operation in paths.values().filter_map(serde_json::Value::as_object) {
+            for id in operation
+                .values()
+                .filter_map(|operation| operation["operationId"].as_str())
+            {
+                assert!(seen.insert(id.to_owned()), "duplicate operationId {id}");
+            }
+        }
+        assert!(seen.len() > 100);
+        Ok(())
+    }
+
     /// OpenAPI 3.1 requires a response description, and Utoipa omits it
     /// instead of emitting an empty one when a route declares none.
     #[test]

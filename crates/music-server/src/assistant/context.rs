@@ -135,7 +135,6 @@ pub(super) struct TrackContextDetailResponse {
 #[utoipa::path(
     post,
     path = "/assistant/library-context/jobs",
-    operation_id = "start_library_context_analysis_api_assistant_library_context_jobs_post",
     request_body = LibraryContextStartRequest,
     responses(
         (status = 202, description = "Successful Response", body = BackgroundJobResponse),
@@ -174,7 +173,6 @@ pub(super) async fn start_library_context_analysis(
 #[utoipa::path(
     get,
     path = "/assistant/library-context/summary",
-    operation_id = "library_context_summary_api_assistant_library_context_summary_get",
     responses((status = 200, description = "Successful Response", body = LibraryContextSummaryResponse)),
     tag = "assistant"
 )]
@@ -192,7 +190,6 @@ pub(super) async fn library_context_summary(
 #[utoipa::path(
     get,
     path = "/assistant/library-context/tracks/{track_id}",
-    operation_id = "library_track_context_api_assistant_library_context_tracks__track_id__get",
     params(("track_id" = i128, Path, description = "Track Id")),
     responses(
         (status = 200, description = "Successful Response", body = TrackContextDetailResponse),

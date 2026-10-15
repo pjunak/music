@@ -298,7 +298,7 @@ pub(crate) fn playlist_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(get_tracks))
         .routes(routes!(add_track))
         .routes(routes!(remove_track))
-        .routes(routes!(move_track))
+        .routes(routes!(move_playlist_track))
         .routes(routes!(preview_automatic_playlist))
         .routes(routes!(configure_automatic_playlist))
         .routes(routes!(refresh_automatic_playlist))
@@ -309,7 +309,6 @@ pub(crate) fn playlist_router() -> OpenApiRouter<HttpState> {
 #[utoipa::path(
     post,
     path = "/playlists",
-    operation_id = "create_playlist_api_playlists_post",
     request_body = PlaylistCreateRequest,
     responses(
         (status = 201, description = "Successful Response", body = PlaylistMetaResponse),
@@ -341,7 +340,6 @@ async fn create_playlist(
 #[utoipa::path(
     get,
     path = "/playlists",
-    operation_id = "list_playlists_api_playlists_get",
     params(PlaylistListQuery),
     responses(
         (status = 200, description = "Successful Response", body = [PlaylistMetaResponse]),
@@ -372,7 +370,6 @@ async fn list_playlists(
 #[utoipa::path(
     get,
     path = "/playlists/{playlist_id}",
-    operation_id = "get_playlist_api_playlists__playlist_id__get",
     params(("playlist_id" = i128, Path)),
     responses(
         (status = 200, description = "Successful Response", body = PlaylistMetaResponse),
@@ -396,7 +393,6 @@ async fn get_playlist(
 #[utoipa::path(
     patch,
     path = "/playlists/{playlist_id}",
-    operation_id = "update_playlist_api_playlists__playlist_id__patch",
     params(("playlist_id" = i128, Path)),
     request_body = PlaylistUpdateRequest,
     responses(
@@ -444,7 +440,6 @@ async fn update_playlist(
 #[utoipa::path(
     delete,
     path = "/playlists/{playlist_id}",
-    operation_id = "delete_playlist_api_playlists__playlist_id__delete",
     params(("playlist_id" = i128, Path)),
     responses(
         (status = 204, description = "Successful Response"),
@@ -468,7 +463,6 @@ async fn delete_playlist(
 #[utoipa::path(
     get,
     path = "/playlists/{playlist_id}/tracks",
-    operation_id = "get_tracks_api_playlists__playlist_id__tracks_get",
     params(("playlist_id" = i128, Path)),
     responses(
         (status = 200, description = "Successful Response", body = [TrackInPlaylistResponse]),
@@ -494,7 +488,6 @@ async fn get_tracks(
 #[utoipa::path(
     post,
     path = "/playlists/{playlist_id}/tracks",
-    operation_id = "add_track_api_playlists__playlist_id__tracks_post",
     params(("playlist_id" = i128, Path)),
     request_body = TrackAddRequest,
     responses(
@@ -529,7 +522,6 @@ async fn add_track(
 #[utoipa::path(
     delete,
     path = "/playlists/{playlist_id}/tracks/{position}",
-    operation_id = "remove_track_api_playlists__playlist_id__tracks__position__delete",
     params(("playlist_id" = i128, Path), ("position" = i128, Path)),
     responses(
         (status = 204, description = "Successful Response"),
@@ -555,7 +547,6 @@ async fn remove_track(
 #[utoipa::path(
     patch,
     path = "/playlists/{playlist_id}/tracks/{position}",
-    operation_id = "move_track_api_playlists__playlist_id__tracks__position__patch",
     params(("playlist_id" = i128, Path), ("position" = i128, Path)),
     request_body = PlaylistTrackMoveRequest,
     responses(
@@ -564,7 +555,7 @@ async fn remove_track(
     ),
     tag = "playlists"
 )]
-async fn move_track(
+async fn move_playlist_track(
     State(state): State<HttpState>,
     _operator: Operator,
     path: Result<Path<(i64, i64)>, PathRejection>,
@@ -585,7 +576,6 @@ async fn move_track(
 #[utoipa::path(
     post,
     path = "/playlists/{playlist_id}/automatic/preview",
-    operation_id = "preview_automatic_playlist_api_playlists__playlist_id__automatic_preview_post",
     params(("playlist_id" = i128, Path)),
     request_body = AutomaticPlaylistPreviewRequest,
     responses(
@@ -612,7 +602,6 @@ async fn preview_automatic_playlist(
 #[utoipa::path(
     put,
     path = "/playlists/{playlist_id}/automatic",
-    operation_id = "configure_automatic_playlist_api_playlists__playlist_id__automatic_put",
     params(("playlist_id" = i128, Path)),
     request_body = AutomaticPlaylistConfigureRequest,
     responses(
@@ -646,7 +635,6 @@ async fn configure_automatic_playlist(
 #[utoipa::path(
     post,
     path = "/playlists/{playlist_id}/automatic/refresh",
-    operation_id = "refresh_automatic_playlist_api_playlists__playlist_id__automatic_refresh_post",
     params(("playlist_id" = i128, Path)),
     responses(
         (status = 200, description = "Successful Response", body = AutomaticPlaylistApplyResponse),
@@ -670,7 +658,6 @@ async fn refresh_automatic_playlist(
 #[utoipa::path(
     delete,
     path = "/playlists/{playlist_id}/automatic",
-    operation_id = "disable_automatic_playlist_api_playlists__playlist_id__automatic_delete",
     params(("playlist_id" = i128, Path)),
     responses(
         (status = 200, description = "Successful Response", body = PlaylistMetaResponse),
@@ -694,7 +681,6 @@ async fn disable_automatic_playlist(
 #[utoipa::path(
     get,
     path = "/playlists/{playlist_id}/export",
-    operation_id = "export_playlist_api_playlists__playlist_id__export_get",
     description = "Download the playlist as M3U (default; for VLC, foobar2000, etc.) or\nJSON (structured, includes track metadata for re-import). M3U paths are\nrelative to MUSIC_DIR — drop the file at MUSIC_DIR's root to import.",
     params(("playlist_id" = i128, Path), ExportQuery),
     responses(

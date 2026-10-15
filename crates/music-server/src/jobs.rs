@@ -113,7 +113,6 @@ pub(crate) fn jobs_router() -> OpenApiRouter<HttpState> {
 #[utoipa::path(
     get,
     path = "/jobs",
-    operation_id = "list_jobs_api_jobs_get",
     params(JobListQuery),
     responses(
         (status = 200, description = "Successful Response", body = [BackgroundJobResponse]),
@@ -149,7 +148,6 @@ async fn list_jobs(
 #[utoipa::path(
     get,
     path = "/jobs/{job_id}",
-    operation_id = "get_job_api_jobs__job_id__get",
     params(("job_id" = String, Path)),
     responses(
         (status = 200, description = "Successful Response", body = BackgroundJobResponse),
@@ -174,7 +172,6 @@ async fn get_job(
 #[utoipa::path(
     post,
     path = "/jobs/{job_id}/cancel",
-    operation_id = "cancel_job_api_jobs__job_id__cancel_post",
     params(("job_id" = String, Path)),
     responses(
         (status = 200, description = "Successful Response", body = BackgroundJobResponse),
@@ -198,7 +195,6 @@ async fn cancel_job(
 #[utoipa::path(
     post,
     path = "/jobs/{job_id}/retry",
-    operation_id = "retry_job_api_jobs__job_id__retry_post",
     params(("job_id" = String, Path)),
     responses(
         (status = 200, description = "Successful Response", body = BackgroundJobResponse),

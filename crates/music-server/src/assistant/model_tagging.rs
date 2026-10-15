@@ -273,7 +273,6 @@ pub(super) struct ModelTaggingAvailabilityResponse {
 #[utoipa::path(
     get,
     path = "/assistant/library-tags/model-status",
-    operation_id = "model_music_tagging_status_api_assistant_library_tags_model_status_get",
     responses((status = 200, description = "Successful Response", body = ModelTaggingAvailabilityResponse)),
     tag = "assistant-tags"
 )]
@@ -297,7 +296,6 @@ pub(super) async fn model_tagging_status(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/model-plan",
-    operation_id = "plan_model_music_tagging_api_assistant_library_tags_model_plan_post",
     request_body = ModelTaggingPlanRequest,
     responses(
         (status = 200, description = "Successful Response", body = ModelTaggingAvailabilityResponse),
@@ -328,7 +326,6 @@ pub(super) async fn plan_model_tagging(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/model-jobs",
-    operation_id = "start_model_music_tagging_api_assistant_library_tags_model_jobs_post",
     request_body = ModelTaggingStartRequest,
     responses(
         (status = 202, description = "Successful Response", body = BackgroundJobResponse),
@@ -680,7 +677,6 @@ pub(super) fn model_tagging_disclosure(
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/query",
-    operation_id = "query_model_library_tags_api_assistant_library_tags_query_post",
     request_body = ModelTaggingReviewQueryRequest,
     responses(
         (status = 200, description = "Successful Response", body = LibraryTagPageResponse),

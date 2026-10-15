@@ -296,8 +296,9 @@ fn default_upload_destination() -> String {
     "Uploads".to_owned()
 }
 
+// Documents the multipart request body for OpenAPI; never constructed.
 #[derive(Debug, ToSchema)]
-#[schema(as = Body_upload_api_library_upload_post)]
+#[schema(as = LibraryUploadBody)]
 #[allow(dead_code)]
 struct LibraryUploadMultipartBody {
     #[schema(schema_with = multipart_upload_files_schema)]

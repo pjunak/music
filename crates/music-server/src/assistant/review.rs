@@ -249,7 +249,6 @@ pub(super) struct BulkAnalysisTagReviewResponse {
 #[utoipa::path(
     post,
     path = "/assistant/library-tags/analysis-tags/reviews/bulk",
-    operation_id = "update_analysis_tag_reviews_bulk_api_assistant_library_tags_analysis_tags_reviews_bulk_post",
     request_body = BulkAnalysisTagReviewRequest,
     responses(
         (status = 200, description = "Successful Response", body = BulkAnalysisTagReviewResponse),
@@ -309,7 +308,6 @@ pub(super) async fn review_analysis_tags_bulk(
 #[utoipa::path(
     get,
     path = "/assistant/library-tags",
-    operation_id = "list_library_tags_api_assistant_library_tags_get",
     params(LibraryTagListQuery),
     responses(
         (status = 200, description = "Successful Response", body = LibraryTagPageResponse),
@@ -373,7 +371,6 @@ pub(super) async fn list_library_tags(
 #[utoipa::path(
     put,
     path = "/assistant/library-tags/{track_id}/analysis-tags/review",
-    operation_id = "update_analysis_tag_review_api_assistant_library_tags__track_id__analysis_tags_review_put",
     params(("track_id" = i128, Path)),
     request_body = AnalysisTagReviewRequest,
     responses(

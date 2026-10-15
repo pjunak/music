@@ -47,20 +47,20 @@ pub(crate) struct RuntimeSfx {
 
 pub(crate) fn sfx_router() -> OpenApiRouter<HttpState> {
     let upload = OpenApiRouter::default()
-        .routes(routes!(upload))
+        .routes(routes!(upload_sfx))
         .layer(DefaultBodyLimit::disable());
     OpenApiRouter::default()
         .routes(routes!(get_sfx_file))
         .routes(routes!(list_all_files))
         .routes(routes!(delete_file))
         .routes(routes!(list_all_folders))
-        .routes(routes!(create_folder))
-        .routes(routes!(delete_folder))
-        .routes(routes!(rename_folder))
+        .routes(routes!(create_sfx_folder))
+        .routes(routes!(delete_sfx_folder))
+        .routes(routes!(rename_sfx_folder))
         .routes(routes!(move_file))
         .routes(routes!(list_tree))
         .merge(upload)
-        .routes(routes!(upload_check))
+        .routes(routes!(upload_sfx_check))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -228,8 +228,9 @@ fn upload_conflict_schema() -> RefOr<Schema> {
         .into()
 }
 
+// Documents the multipart request body for OpenAPI; never constructed.
 #[derive(Debug, ToSchema)]
-#[schema(as = Body_upload_api_sfx_upload_post)]
+#[schema(as = SfxUploadBody)]
 #[allow(dead_code)]
 struct SfxUploadMultipartBody {
     #[schema(schema_with = multipart_upload_files_schema)]
@@ -249,7 +250,6 @@ fn multipart_upload_files_schema() -> RefOr<Schema> {
 #[utoipa::path(
     get,
     path = "/sfx/file",
-    operation_id = "get_sfx_file_api_sfx_file_get",
     params(FileQuery),
     responses(
         (status = 200, description = "Successful Response", body = serde_json::Value),
@@ -314,7 +314,6 @@ async fn get_sfx_file(
 #[utoipa::path(
     get,
     path = "/sfx/files",
-    operation_id = "list_all_files_api_sfx_files_get",
     responses((status = 200, description = "Successful Response", body = [SfxFileResponse])),
     tag = "sfx"
 )]
@@ -336,7 +335,6 @@ async fn list_all_files(
 #[utoipa::path(
     delete,
     path = "/sfx/files",
-    operation_id = "delete_file_api_sfx_files_delete",
     params(FileQuery),
     responses(
         (status = 204, description = "Successful Response"),
@@ -370,7 +368,6 @@ async fn delete_file(
 #[utoipa::path(
     get,
     path = "/sfx/folders",
-    operation_id = "list_all_folders_api_sfx_folders_get",
     responses((status = 200, description = "Successful Response", body = SfxFoldersResponse)),
     tag = "sfx"
 )]
@@ -393,7 +390,6 @@ async fn list_all_folders(
 #[utoipa::path(
     post,
     path = "/sfx/folders",
-    operation_id = "create_folder_api_sfx_folders_post",
     request_body = FolderCreateRequest,
     responses(
         (status = 201, description = "Successful Response", body = SfxFolderResponse),
@@ -401,7 +397,7 @@ async fn list_all_folders(
     ),
     tag = "sfx"
 )]
-async fn create_folder(
+async fn create_sfx_folder(
     State(state): State<HttpState>,
     _operator: Operator,
     payload: Result<Json<FolderCreateRequest>, JsonRejection>,
@@ -438,7 +434,6 @@ async fn create_folder(
 #[utoipa::path(
     delete,
     path = "/sfx/folders",
-    operation_id = "delete_folder_api_sfx_folders_delete",
     params(DeleteFolderQuery),
     responses(
         (status = 200, description = "Successful Response", body = FolderDeleteResponse),
@@ -446,7 +441,7 @@ async fn create_folder(
     ),
     tag = "sfx"
 )]
-async fn delete_folder(
+async fn delete_sfx_folder(
     State(state): State<HttpState>,
     _operator: Operator,
     query: Result<Query<DeleteFolderQuery>, QueryRejection>,
@@ -472,7 +467,6 @@ async fn delete_folder(
 #[utoipa::path(
     post,
     path = "/sfx/folders/rename",
-    operation_id = "rename_folder_api_sfx_folders_rename_post",
     request_body = FolderRenameRequest,
     responses(
         (status = 200, description = "Successful Response", body = SfxFolderResponse),
@@ -480,7 +474,7 @@ async fn delete_folder(
     ),
     tag = "sfx"
 )]
-async fn rename_folder(
+async fn rename_sfx_folder(
     State(state): State<HttpState>,
     _operator: Operator,
     payload: Result<Json<FolderRenameRequest>, JsonRejection>,
@@ -510,7 +504,6 @@ async fn rename_folder(
 #[utoipa::path(
     post,
     path = "/sfx/move",
-    operation_id = "move_file_api_sfx_move_post",
     request_body = SfxMoveRequest,
     responses(
         (status = 200, description = "Successful Response", body = SfxFileResponse),
@@ -554,7 +547,6 @@ async fn move_file(
 #[utoipa::path(
     get,
     path = "/sfx/tree",
-    operation_id = "list_tree_api_sfx_tree_get",
     params(TreeQuery),
     responses(
         (status = 200, description = "Successful Response", body = SfxTreeResponse),
@@ -587,7 +579,6 @@ async fn list_tree(
 #[utoipa::path(
     post,
     path = "/sfx/upload",
-    operation_id = "upload_api_sfx_upload_post",
     params(UploadQuery),
     request_body(content = SfxUploadMultipartBody, content_type = "multipart/form-data"),
     responses(
@@ -596,7 +587,7 @@ async fn list_tree(
     ),
     tag = "sfx"
 )]
-async fn upload(
+async fn upload_sfx(
     State(state): State<HttpState>,
     _operator: Operator,
     query: Result<Query<UploadQuery>, QueryRejection>,
@@ -690,7 +681,6 @@ async fn upload(
 #[utoipa::path(
     post,
     path = "/sfx/upload/check",
-    operation_id = "upload_check_api_sfx_upload_check_post",
     request_body = UploadCheckRequest,
     responses(
         (status = 200, description = "Successful Response", body = UploadCheckResponse),
@@ -700,7 +690,7 @@ async fn upload(
 )]
 /// Report which proposed (dest, name) targets already exist under the SFX
 /// root, so the client can ask about duplicates before sending bytes.
-async fn upload_check(
+async fn upload_sfx_check(
     State(state): State<HttpState>,
     _operator: Operator,
     payload: Result<Json<UploadCheckRequest>, JsonRejection>,
