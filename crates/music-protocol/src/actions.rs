@@ -44,13 +44,8 @@ pub enum ClientAction {
         name: BoundedText<1, 128>,
         #[ts(type = "string")]
         client_id: BoundedText<1, 64>,
-        #[serde(default)]
         #[ts(type = "number")]
         protocol_version: ProtocolVersion,
-    },
-    SetVolume {
-        #[ts(type = "number")]
-        volume: UnitInterval,
     },
     Pause,
     Resume,
@@ -212,7 +207,6 @@ impl ClientAction {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::Register { .. } => "register",
-            Self::SetVolume { .. } => "set_volume",
             Self::Pause => "pause",
             Self::Resume => "resume",
             Self::SetActiveMode { .. } => "set_active_mode",

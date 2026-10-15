@@ -200,7 +200,8 @@ macro_rules! bounded_integer {
 }
 
 bounded_integer!(NonNegativeI64, 0, i64::MAX, 0);
-bounded_integer!(ProtocolVersion, 1, i64::MAX, 1);
+// The server speaks only protocol 2: absolute per-device volumes.
+bounded_integer!(ProtocolVersion, 2, 2, 2);
 bounded_integer!(CrossfadeMillis, 0, 30_000, 0);
 bounded_integer!(FadeMillis, 0, 10_000, 0);
 

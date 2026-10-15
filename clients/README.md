@@ -82,11 +82,8 @@ Console and should keep its own local on/off.
    ```json
    { "type": "register", "name": "Living-room speaker", "client_id": "headless-7f3c…", "protocol_version": 2 }
    ```
-   `protocol_version: 2` selects canonical absolute per-device volumes. Omit it
-   only when implementing the legacy master × trim contract. Until the server
-   has handled `register`, `state_changed` uses the version 1 projection without
-   `default_device_volume`; a version 2 client skips those frames, because the
-   state sent once registration completes supersedes them.
+   `protocol_version` is required and must be `2` (absolute per-device volumes);
+   the server rejects any other value as an invalid action.
    Registration is enough to make the device available in the Console's **Outputs** picker;
    any connected device can be activated for the current session. Saving it in Settings →
    Devices is optional. The saved **output by default** flag auto-activates that stable
@@ -248,10 +245,7 @@ that's the browser *engine* feature; this is the simple output.)
     if (!state) return;
     const id = activeTrack(state);
     const playing = state.interrupt ? true : state.is_playing;
-    const stored = state.device_volumes?.[clientId];
-    const serverVolume = state.default_device_volume === undefined
-      ? state.volume * (stored ?? 1)
-      : (stored ?? state.default_device_volume);
+    const serverVolume = state.device_volumes[clientId] ?? state.default_device_volume;
     el.volume = Math.max(0, Math.min(1, serverVolume * localVolume));
     if (!on || id === null || !playing) { el.pause(); return; }
     if (id !== loadedId) { el.src = streamUrl(id); loadedId = id; }

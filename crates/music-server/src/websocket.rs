@@ -27,9 +27,8 @@ use tokio_util::sync::CancellationToken;
 use crate::auth::{CurrentSession, RuntimeAuth, optional_session};
 use crate::devices::RuntimeDevices;
 use crate::http::HttpState;
-use crate::playback_projection::{canonical_state, guest_state, legacy_state};
+use crate::playback_projection::{canonical_state, guest_state};
 
-const ABSOLUTE_VOLUME_PROTOCOL_VERSION: i64 = 2;
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 64 * 1024;
 const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -43,7 +42,6 @@ const SESSION_RECHECK_INTERVAL: Duration = Duration::from_millis(50);
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct SessionProjection {
     client_id: Option<String>,
-    protocol_version: i64,
     authenticated: bool,
 }
 
@@ -159,7 +157,6 @@ async fn unavailable_session(mut socket: WebSocket) {
             detail: "The playback service is unavailable.".to_owned(),
             code: None,
         },
-        true,
     )
     .await;
     let _ = tokio::time::timeout(CLOSE_TIMEOUT, socket.close()).await;
@@ -328,9 +325,7 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
     let connection_id = *connection_id;
     match action {
         ClientAction::Register {
-            name,
-            client_id,
-            protocol_version,
+            name, client_id, ..
         } => {
             let client_id = client_id.into_inner();
             let name = name.into_inner();
@@ -348,7 +343,6 @@ async fn handle_action(action: ClientAction, context: &mut ReaderContext) {
             };
             let session = SessionProjection {
                 client_id: Some(client_id.clone()),
-                protocol_version: protocol_version.get(),
                 authenticated: authorization.authenticated(),
             };
             let registration = ClientRegistration {
@@ -480,9 +474,6 @@ enum PlaybackRequest {
 fn playback_request(action: ClientAction) -> Result<PlaybackRequest, &'static str> {
     use PlaybackRequest::{Catalog, Direct};
     Ok(match action {
-        ClientAction::SetVolume { volume } => Direct(PlaybackCommand::SetGroupVolume(
-            domain_volume(volume.get())?,
-        )),
         ClientAction::Pause => Direct(PlaybackCommand::SetPlaying(false)),
         ClientAction::Resume => Direct(PlaybackCommand::SetPlaying(true)),
         ClientAction::SetDeviceVolume { device_id, volume } => {
@@ -780,7 +771,7 @@ async fn writer_loop(
     cancellation: CancellationToken,
 ) -> Result<(), ()> {
     let initial_projection = { projection.borrow().clone() };
-    send_projected_state(&mut sink, &initial, &initial_projection, true, true).await?;
+    send_projected_state(&mut sink, &initial, &initial_projection, true).await?;
     loop {
         tokio::select! {
             biased;
@@ -789,11 +780,7 @@ async fn writer_loop(
                 let Some(command) = command else { break; };
                 match command {
                     WriterCommand::Error { detail, code } => {
-                        send_server_message(
-                            &mut sink,
-                            &ServerMessage::Error { detail, code },
-                            true,
-                        ).await?;
+                        send_server_message(&mut sink, &ServerMessage::Error { detail, code }).await?;
                     }
                     WriterCommand::Pong(bytes) => send_raw(&mut sink, Message::Pong(bytes)).await?,
                 }
@@ -802,19 +789,13 @@ async fn writer_loop(
                 if result.is_err() { break; }
                 let publication = publications.borrow_and_update().clone();
                 let session = { projection.borrow().clone() };
-                send_projected_state(
-                    &mut sink,
-                    &publication,
-                    &session,
-                    false,
-                    false,
-                ).await?;
+                send_projected_state(&mut sink, &publication, &session, false).await?;
             }
             result = projection.changed() => {
                 if result.is_err() { break; }
                 let session = projection.borrow_and_update().clone();
                 let publication = { publications.borrow().clone() };
-                send_projected_state(&mut sink, &publication, &session, false, false).await?;
+                send_projected_state(&mut sink, &publication, &session, false).await?;
             }
             event = events.recv() => {
                 match event {
@@ -826,7 +807,6 @@ async fn writer_loop(
                                 item_path,
                                 volume: volume.get(),
                             },
-                            true,
                         ).await?;
                     }
                     Ok(DomainEvent::LoopStarted(_) | DomainEvent::LoopStopped { .. }) => {}
@@ -848,19 +828,12 @@ async fn send_projected_state(
     publication: &PlaybackPublication,
     session: &SessionProjection,
     snapshot: bool,
-    assume_absolute: bool,
 ) -> Result<(), ()> {
     let canonical = canonical_state(publication).map_err(|_| ())?;
-    let absolute = assume_absolute || session.protocol_version >= ABSOLUTE_VOLUME_PROTOCOL_VERSION;
-    let projected = if absolute {
+    let projected = if session.authenticated {
         canonical
     } else {
-        legacy_state(canonical)
-    };
-    let projected = if session.authenticated {
-        projected
-    } else {
-        guest_state(projected, session.client_id.as_deref())
+        guest_state(canonical, session.client_id.as_deref())
     };
     let message = if snapshot {
         ServerMessage::StateSnapshot {
@@ -870,26 +843,14 @@ async fn send_projected_state(
     } else {
         ServerMessage::StateChanged { state: projected }
     };
-    send_server_message(sink, &message, absolute).await
+    send_server_message(sink, &message).await
 }
 
-async fn send_server_message<S>(
-    sink: &mut S,
-    message: &ServerMessage,
-    absolute_volume: bool,
-) -> Result<(), ()>
+async fn send_server_message<S>(sink: &mut S, message: &ServerMessage) -> Result<(), ()>
 where
     S: futures_util::Sink<Message> + Unpin,
 {
-    let mut value = serde_json::to_value(message).map_err(|_| ())?;
-    if !absolute_volume
-        && let Some(state) = value
-            .get_mut("state")
-            .and_then(serde_json::Value::as_object_mut)
-    {
-        state.remove("default_device_volume");
-    }
-    let payload = serde_json::to_string(&value).map_err(|_| ())?;
+    let payload = serde_json::to_string(message).map_err(|_| ())?;
     send_raw(sink, Message::Text(payload.into())).await
 }
 

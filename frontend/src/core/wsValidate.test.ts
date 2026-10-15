@@ -12,7 +12,7 @@ const VALID_PLAYER_STATE = {
   connected_devices: [],
   active_output_device_ids: [],
   is_playing: false,
-  volume: 0.8,
+  default_device_volume: 0.8,
   revision: 0,
 };
 

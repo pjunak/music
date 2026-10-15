@@ -314,8 +314,8 @@ expiry or revocation.
 - Unexpected failures retain a safe `detail`, stable code, and correlation ID. Internal exception
   chains, SQL, provider bodies, secrets, and absolute paths are log-only; raw exception responses
   are an intentional compatibility improvement requiring owner acceptance.
-- WebSocket protocol v1 legacy volume projection and v2 absolute per-device volume remain until a
-  separately coordinated protocol decision changes them.
+- The WebSocket protocol has one version: `register` must declare `protocol_version: 2`, and
+  state carries absolute per-device volumes only.
 - Runtime validation remains in the old-TV compatibility client. Generated static types do not
   replace checks at an untrusted WebSocket boundary.
 

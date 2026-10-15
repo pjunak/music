@@ -459,17 +459,14 @@ export class PlaybackEngine {
   applyState(state: PlayerState, isMyOutput: boolean): void {
     const wasMyOutput = this.isMyOutput;
     this.isMyOutput = isMyOutput;
-    this.crossfadeMs = state.crossfade_ms ?? 0;
+    this.crossfadeMs = state.crossfade_ms;
     const t = state.crossfade_type;
     if (t === "linear" || t === "equal_power" || t === "cut") this.crossfadeType = t;
 
-    // The marker is absent on old servers, where device_volumes are trims.
-    // This keeps rolling upgrades safe while new servers provide one absolute
-    // server-owned level per device. SFX read lastVolume and scale with it too.
+    // One absolute server-owned level per device; SFX read lastVolume and
+    // scale with it too.
     const effective = clamp01(
-      state.default_device_volume === undefined
-        ? state.volume * (state.device_volumes?.[this.clientId] ?? 1)
-        : (state.device_volumes?.[this.clientId] ?? state.default_device_volume),
+      state.device_volumes[this.clientId] ?? state.default_device_volume,
     );
     if (effective !== this.lastVolume) {
       this.lastVolume = effective;
@@ -496,9 +493,7 @@ export class PlaybackEngine {
     const newIsPlaying = state.is_playing;
     const prevAmbientId = this.lastAmbientId;
     const prevInterruptId = this.lastInterruptId;
-    // Optional only for a cached pre-epoch bundle mid-deploy; a missing field
-    // reads as a constant 0 → no epoch seeks, exactly the safe fallback.
-    const epoch = state.position_epoch ?? 0;
+    const epoch = state.position_epoch;
     const prevEpoch = this.lastEpoch;
     this.lastEpoch = epoch;
 

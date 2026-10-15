@@ -88,8 +88,7 @@
           "looping_sfx": [],
           "position_epoch": 0,
           "preset_revision": 0,
-          "revision": 0,
-          "volume": 1.0
+          "revision": 0
         },
         "type": "state_snapshot",
         "your_device_id": ""
@@ -169,8 +168,7 @@
           ],
           "position_epoch": 4,
           "preset_revision": 3,
-          "revision": 17,
-          "volume": 1.0
+          "revision": 17
         },
         "type": "state_changed"
       },

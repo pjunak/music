@@ -5663,10 +5663,6 @@
           "revision": {
             "default": 0,
             "type": "integer"
-          },
-          "volume": {
-            "default": 1.0,
-            "type": "number"
           }
         },
         "type": "object"

@@ -1177,7 +1177,6 @@ export type PlayerState = {
   position_epoch?: number;
   preset_revision?: number;
   revision?: number;
-  volume?: number;
 };
 
 export type PlaylistCandidate = {

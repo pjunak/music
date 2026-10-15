@@ -864,15 +864,11 @@
       // One canonical server-owned output level per stable device id. Polling
       // includes the id in its request so the guest projection can return only
       // this device's value.
-      var hasAbsoluteVolumes = typeof state.default_device_volume === "number";
-      var deviceVolume = 1;
+      var outputVolume = typeof state.default_device_volume === "number"
+        ? state.default_device_volume : 1;
       if (state.device_volumes && typeof state.device_volumes[myDeviceId] === "number") {
-        deviceVolume = state.device_volumes[myDeviceId];
+        outputVolume = state.device_volumes[myDeviceId];
       }
-      var outputVolume = hasAbsoluteVolumes
-        ? ((state.device_volumes && typeof state.device_volumes[myDeviceId] === "number")
-            ? deviceVolume : state.default_device_volume as number)
-        : ((typeof state.volume === "number" ? state.volume : 1) * deviceVolume);
       // Crossfade only applies to ambient→ambient track changes; interrupt
       // transitions are hard cuts (an alert shouldn't fade in late).
       var laneSwitched = (itr !== null) !== wasInterrupt;

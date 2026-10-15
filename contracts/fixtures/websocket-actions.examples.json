@@ -30,7 +30,6 @@
     "set_active_soundboard",
     "set_crossfade",
     "set_device_volume",
-    "set_volume",
     "start_loop",
     "stop_loop"
   ],
@@ -66,19 +65,29 @@
       }
     },
     {
+      "id": "register-without-protocol",
+      "input": {
+        "client_id": "valid",
+        "name": "Valid",
+        "type": "register"
+      }
+    },
+    {
+      "id": "register-protocol-1",
+      "input": {
+        "client_id": "valid",
+        "name": "Valid",
+        "protocol_version": 1,
+        "type": "register"
+      }
+    },
+    {
       "id": "register-zero-protocol",
       "input": {
         "client_id": "valid",
         "name": "Valid",
         "protocol_version": 0,
         "type": "register"
-      }
-    },
-    {
-      "id": "volume-below-zero",
-      "input": {
-        "type": "set_volume",
-        "volume": -0.01
       }
     },
     {
@@ -185,20 +194,6 @@
   "valid": [
     {
       "canonical": {
-        "client_id": "ref-output",
-        "name": "Reference output",
-        "protocol_version": 1,
-        "type": "register"
-      },
-      "id": "register-default-protocol",
-      "input": {
-        "client_id": "ref-output",
-        "name": "Reference output",
-        "type": "register"
-      }
-    },
-    {
-      "canonical": {
         "client_id": "ref-controller",
         "name": "Reference controller",
         "protocol_version": 2,
@@ -210,17 +205,6 @@
         "name": "Reference controller",
         "protocol_version": 2,
         "type": "register"
-      }
-    },
-    {
-      "canonical": {
-        "type": "set_volume",
-        "volume": 0.0
-      },
-      "id": "set-volume-zero",
-      "input": {
-        "type": "set_volume",
-        "volume": 0.0
       }
     },
     {

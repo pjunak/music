@@ -94,9 +94,8 @@ is selected using [the validation matrix](VALIDATION.md).
   - `device_volumes` stores canonical absolute software levels by `client_id`.
 - Any connected device may be activated. Designation only auto-activates a
   device when it connects and must not gate manual activation.
-- Per-device volume is the current protocol. The deprecated master `volume`
-  remains a compatibility projection for legacy clients; do not restore a
-  master-volume UI or let presets override device volume.
+- Per-device volume is the only volume model; there is no master volume. Do
+  not let presets override device volume.
 - Output clients apply their own level to all audio, including SFX. The server
   validates position reports against active membership.
 - Disconnect cleanup must not silence another tab using the same stable client

@@ -321,7 +321,6 @@ mod tests {
         let mut reconciler = reconciler();
         let mut current = state(1, 7, 0, 1);
         current.default_device_volume = 0.8;
-        current.volume = 0.25;
         reconciler.on_state(current.clone());
         assert_eq!(reconciler.output_volume(0.5), 0.2);
         current.revision = 2;

@@ -46,28 +46,9 @@ type FrontendClientAction<Action extends CanonicalClientAction> =
 
 export type WsAction = FrontendClientAction<CanonicalClientAction>;
 
-/**
- * These fields remain optional for one-deploy cached-client compatibility.
- * A current Rust server always emits them.
- */
-export type AmbientState =
-  Omit<CanonicalAmbientState, "position_anchored_at"> & {
-    position_anchored_at?: number | null;
-  };
-
-export type InterruptState =
-  Omit<CanonicalInterruptState, "position_anchored_at"> & {
-    position_anchored_at?: number | null;
-  };
-
-export type PlayerState =
-  Omit<CanonicalPlayerState, "position_epoch" | "default_device_volume" | "preset_revision" | "ambient" | "interrupt"> & {
-    position_epoch?: number;
-    default_device_volume?: number;
-    preset_revision?: number;
-    ambient: AmbientState;
-    interrupt: InterruptState | null;
-  };
+export type AmbientState = CanonicalAmbientState;
+export type InterruptState = CanonicalInterruptState;
+export type PlayerState = CanonicalPlayerState;
 
 type FrontendServerMessage<Message extends CanonicalServerMessage> =
   Message extends { type: "state_snapshot" }

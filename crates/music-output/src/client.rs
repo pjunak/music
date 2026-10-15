@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use music_protocol::{BoundedText, ClientAction, NonNegativeI64, ProtocolVersion, ServerMessage};
-use serde_json::Value;
 use tokio::sync::watch;
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -221,33 +220,13 @@ where
         .map_err(retryable_websocket)
 }
 
-fn carries_absolute_volume(raw: &Value) -> bool {
-    raw.get("state")
-        .and_then(Value::as_object)
-        .is_none_or(|state| state.contains_key("default_device_volume"))
-}
-
 async fn handle_message(runtime: &OutputRuntime, encoded: &[u8]) -> Result<(), ConnectionError> {
     if encoded.len() > MAX_WEBSOCKET_MESSAGE_BYTES {
         return Err(ConnectionError::Retryable(
             "WebSocket message exceeded the size limit".to_owned(),
         ));
     }
-    let raw: Value = match serde_json::from_slice(encoded) {
-        Ok(raw) => raw,
-        Err(error) => {
-            tracing::warn!(error = %error, "ignored invalid WebSocket JSON");
-            return Ok(());
-        }
-    };
-    if !carries_absolute_volume(&raw) {
-        // Changes published before the server handles this client's
-        // protocol 2 registration use the version 1 volume projection; the
-        // state sent once registration completes supersedes them.
-        tracing::debug!("ignored a state frame without absolute device volumes");
-        return Ok(());
-    }
-    let message: ServerMessage = match serde_json::from_value(raw) {
+    let message: ServerMessage = match serde_json::from_slice(encoded) {
         Ok(message) => message,
         Err(error) => {
             tracing::warn!(error = %error, "ignored invalid server message");
@@ -284,7 +263,6 @@ fn retryable_websocket(error: WebSocketError) -> ConnectionError {
 
 #[cfg(test)]
 mod tests {
-    use music_protocol::AmbientState;
 
     use super::*;
 
@@ -339,31 +317,6 @@ mod tests {
         .err()
         .ok_or("expected the connection failure")?;
         assert_eq!(error.to_string(), "registration failed");
-        Ok(())
-    }
-
-    #[test]
-    fn only_absolute_volume_state_frames_are_applied() -> Result<(), Box<dyn std::error::Error>> {
-        let state = music_protocol::PlayerState {
-            ambient: AmbientState {
-                current_track_id: Some(1),
-                ..AmbientState::default()
-            },
-            ..music_protocol::PlayerState::default()
-        };
-        let mut value = serde_json::to_value(ServerMessage::StateChanged { state })?;
-        assert!(carries_absolute_volume(&value));
-        value
-            .get_mut("state")
-            .and_then(Value::as_object_mut)
-            .ok_or("missing state")?
-            .remove("default_device_volume");
-        assert!(!carries_absolute_volume(&value));
-        let error = serde_json::to_value(ServerMessage::Error {
-            detail: "rejected".to_owned(),
-            code: None,
-        })?;
-        assert!(carries_absolute_volume(&error));
         Ok(())
     }
 }

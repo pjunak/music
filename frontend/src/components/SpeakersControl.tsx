@@ -84,8 +84,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const [multiple, setMultiple] = useState(() => activeIds.length > 1);
   const deviceVolumes =
     usePlayerStore((s) => s.state?.device_volumes) ?? EMPTY_VOLUMES;
-  const defaultDeviceVolume = usePlayerStore((s) => s.state?.default_device_volume);
-  const legacyMasterVolume = usePlayerStore((s) => s.state?.volume ?? 1);
+  const defaultDeviceVolume = usePlayerStore((s) => s.state?.default_device_volume ?? 1);
   const connected = usePlayerStore((s) => s.wsStatus === "connected");
   const deviceName = useUiStore((s) => s.deviceName);
 
@@ -123,10 +122,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
       : devices.find((device) => device.device_id === singleOutputId) ?? null;
 
   function volumeFor(id: string): number {
-    const stored = deviceVolumes[id];
-    return defaultDeviceVolume === undefined
-      ? legacyMasterVolume * (stored ?? 1)
-      : (stored ?? defaultDeviceVolume);
+    return deviceVolumes[id] ?? defaultDeviceVolume;
   }
 
   /** Commit output membership and immediately reconcile this browser's audio
@@ -184,40 +180,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
 
   function setVol(id: string, v: number) {
     if (!connected) return;
-    if (
-      defaultDeviceVolume === undefined &&
-      v > legacyMasterVolume
-    ) {
-      const knownIds = new Set([
-        id,
-        ...Object.keys(deviceVolumes),
-        ...devices.map((device) => device.device_id),
-      ]);
-      const previousLevels = new Map(
-        [...knownIds].map((deviceId) => [deviceId, volumeFor(deviceId)]),
-      );
-      wsClient.send({ type: "set_volume", volume: v });
-      for (const deviceId of knownIds) {
-        wsClient.send({
-          type: "set_device_volume",
-          device_id: deviceId,
-          volume:
-            deviceId === id
-              ? 1
-              : Math.min(1, (previousLevels.get(deviceId) ?? 0) / v),
-        });
-      }
-      return;
-    }
-    const wireVolume =
-      defaultDeviceVolume === undefined
-        ? legacyMasterVolume > 0
-          ? Math.min(1, v / legacyMasterVolume)
-          : v === 0
-            ? 0
-            : 1
-        : v;
-    wsClient.send({ type: "set_device_volume", device_id: id, volume: wireVolume });
+    wsClient.send({ type: "set_device_volume", device_id: id, volume: v });
   }
 
   return (

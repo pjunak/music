@@ -97,8 +97,6 @@ pub struct PlayerState {
     pub position_epoch: i64,
     #[schema(schema_with = boolean_default_false_schema)]
     pub is_playing: bool,
-    #[schema(schema_with = number_default_one_schema)]
-    pub volume: f64,
     #[schema(schema_with = nullable_string_schema)]
     pub active_mode_id: Option<String>,
     #[schema(schema_with = string_array_schema)]
@@ -135,7 +133,6 @@ impl Default for PlayerState {
             revision: 0,
             position_epoch: 0,
             is_playing: false,
-            volume: 1.0,
             active_mode_id: None,
             active_output_device_ids: Vec::new(),
             default_device_volume: 1.0,

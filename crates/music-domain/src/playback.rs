@@ -3,7 +3,6 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 const MAX_POSITION_MS: u64 = i64::MAX as u64;
-const FLOAT_EPSILON: f64 = 1.0e-9;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TrackId(i64);
@@ -274,7 +273,6 @@ pub struct InterruptFade {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlaybackCommand {
-    SetGroupVolume(UnitInterval),
     SetPlaying(bool),
     SetActiveMode(Option<String>),
     SetActiveOutputs(Vec<String>),
@@ -423,7 +421,6 @@ pub fn reduce(
     let mut publish_state = true;
     let mut persistence = PersistenceIntent::Immediate;
     let changed = match command {
-        PlaybackCommand::SetGroupVolume(volume) => set_group_volume(&mut next, volume),
         PlaybackCommand::SetPlaying(playing) => {
             set_playing(&mut next, playing, context.clock.monotonic_ms)
         }
@@ -659,36 +656,6 @@ fn increment_position_epoch(state: &mut PlaybackState) -> Result<(), PlaybackErr
         .checked_add(1)
         .ok_or(PlaybackError::PositionEpochOverflow)?;
     Ok(())
-}
-
-fn set_group_volume(state: &mut PlaybackState, target: UnitInterval) -> bool {
-    let previous = state
-        .device_volumes
-        .values()
-        .fold(state.default_device_volume.get(), |largest, volume| {
-            largest.max(volume.get())
-        });
-    if (previous - target.get()).abs() < FLOAT_EPSILON {
-        return false;
-    }
-    state.device_volumes = if previous > FLOAT_EPSILON {
-        state
-            .device_volumes
-            .iter()
-            .map(|(device_id, level)| {
-                let scaled = (level.get() * target.get() / previous).clamp(0.0, 1.0);
-                (device_id.clone(), UnitInterval(scaled))
-            })
-            .collect()
-    } else {
-        state
-            .device_volumes
-            .keys()
-            .map(|device_id| (device_id.clone(), target))
-            .collect()
-    };
-    state.default_device_volume = target;
-    true
 }
 
 fn set_playing(state: &mut PlaybackState, playing: bool, now_ms: u64) -> bool {
@@ -1184,7 +1151,6 @@ fn bounded_position_add(position_ms: u64, elapsed_ms: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::error::Error;
 
     use proptest::prelude::*;
@@ -1492,25 +1458,9 @@ mod tests {
     }
 
     #[test]
-    fn volume_migration_model_and_presets_are_single_source_of_truth() -> Result<(), Box<dyn Error>>
-    {
-        let half = UnitInterval::new(0.5)?;
-        let quarter = UnitInterval::new(0.25)?;
-        let mut state = PlaybackState {
-            default_device_volume: half,
-            device_volumes: BTreeMap::from([
-                ("loud".to_owned(), UnitInterval::new(1.0)?),
-                ("quiet".to_owned(), half),
-            ]),
-            ..PlaybackState::default()
-        };
-        state = apply(&state, PlaybackCommand::SetGroupVolume(half), 0)?;
-        assert_eq!(state.default_device_volume, half);
-        assert_eq!(state.device_volumes["loud"], half);
-        assert_eq!(state.device_volumes["quiet"], quarter);
-
-        state = apply(
-            &state,
+    fn presets_and_crossfade_are_single_source_of_truth() -> Result<(), Box<dyn Error>> {
+        let mut state = apply(
+            &PlaybackState::default(),
             PlaybackCommand::SetActivePresets {
                 preset_ids: vec!["warm".to_owned(), "warm".to_owned(), "room".to_owned()],
                 crossfade_ms: Some(750),

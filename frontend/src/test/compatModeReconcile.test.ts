@@ -197,23 +197,6 @@ describe("compat-mode.js epoch reconciliation", () => {
     expect(el.volume).toBe(0.4);
   });
 
-  it("uses legacy master times trim when the absolute-volume marker is absent", () => {
-    const { ws, clientId, audioEls } = bootCompatPlayer();
-    ws.push({
-      type: "state_snapshot",
-      state: makeState(
-        0,
-        {
-          volume: 0.2,
-          default_device_volume: undefined,
-          device_volumes: { [clientId]: 0.5 },
-        },
-        clientId,
-      ),
-    });
-    expect(activeEl(audioEls).volume).toBe(0.1);
-  });
-
   it("seeks when the epoch bumps, via the pending-seek path", () => {
     const { ws, clientId, audioEls } = bootCompatPlayer();
     ws.push({ type: "state_snapshot", your_device_id: "", state: makeState(3, {}, clientId) });

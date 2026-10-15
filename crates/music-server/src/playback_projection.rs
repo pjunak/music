@@ -26,7 +26,6 @@ pub fn canonical_state(
         revision: wire_integer(state.publication_revision)?,
         position_epoch: wire_integer(state.position_epoch)?,
         is_playing: state.is_playing,
-        volume: 1.0,
         active_mode_id: state.active_mode_id.clone(),
         active_output_device_ids: state.active_output_device_ids.clone(),
         default_device_volume: state.default_device_volume.get(),
@@ -145,27 +144,6 @@ pub fn guest_state(
     state
 }
 
-#[must_use]
-pub fn legacy_state(mut state: protocol::PlayerState) -> protocol::PlayerState {
-    let master = state
-        .device_volumes
-        .values()
-        .fold(state.default_device_volume, |largest, level| {
-            largest.max(*level)
-        });
-    state.volume = master;
-    if master > 1.0e-9 {
-        for level in state.device_volumes.values_mut() {
-            *level /= master;
-        }
-    } else {
-        for level in state.device_volumes.values_mut() {
-            *level = 1.0;
-        }
-    }
-    state
-}
-
 fn wire_integer(value: u64) -> Result<i64, ProjectionError> {
     i64::try_from(value).map_err(|_| ProjectionError::NumericRange)
 }
@@ -202,7 +180,7 @@ mod tests {
     use music_application::playback::{ConnectedClient, PlaybackPublication};
     use music_domain::{ClockSample, PlaybackState, UnitInterval};
 
-    use super::{canonical_state, guest_state, legacy_state};
+    use super::{canonical_state, guest_state};
 
     #[test]
     fn guest_projection_reveals_only_its_own_output_capability() -> Result<(), Box<dyn Error>> {
@@ -239,21 +217,5 @@ mod tests {
         assert_eq!(state.device_volumes["mine"], 0.5);
         assert!(state.connected_devices.is_empty());
         Ok(())
-    }
-
-    #[test]
-    fn legacy_projection_preserves_absolute_ratios() {
-        let state = music_protocol::PlayerState {
-            default_device_volume: 0.4,
-            device_volumes: [("a".to_owned(), 0.8), ("b".to_owned(), 0.2)]
-                .into_iter()
-                .collect(),
-            ..music_protocol::PlayerState::default()
-        };
-
-        let legacy = legacy_state(state);
-        assert_eq!(legacy.volume, 0.8);
-        assert_eq!(legacy.device_volumes["a"], 1.0);
-        assert_eq!(legacy.device_volumes["b"], 0.25);
     }
 }

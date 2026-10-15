@@ -42,7 +42,6 @@ function playerState(presetRevision: number): PlayerState {
     revision: presetRevision + 1,
     position_epoch: 0,
     is_playing: true,
-    volume: 1,
     active_mode_id: "dnd",
     active_output_device_ids: [],
     default_device_volume: 1,

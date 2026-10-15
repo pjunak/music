@@ -39,10 +39,7 @@ export function DiagnosticsView() {
   const activeOutputs = usePlayerArray((s) => s.state?.active_output_device_ids);
   const deviceVolumeFromState = usePlayerStore((s) => {
     if (s.state === null || s.myDeviceId === null) return null;
-    const stored = s.state.device_volumes[s.myDeviceId];
-    return s.state.default_device_volume === undefined
-      ? s.state.volume * (stored ?? 1)
-      : (stored ?? s.state.default_device_volume);
+    return s.state.device_volumes[s.myDeviceId] ?? s.state.default_device_volume;
   });
   const connectedDevices = usePlayerArray((s) => s.state?.connected_devices);
   const authStatus = useAuthStore((s) => s.status);

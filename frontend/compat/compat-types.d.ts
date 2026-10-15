@@ -24,7 +24,6 @@ interface CompatPlayerState {
   revision?: number;
   position_epoch?: number;
   is_playing?: boolean;
-  volume?: number;
   default_device_volume?: number;
   active_output_device_ids?: string[];
   device_volumes?: Record<string, number>;

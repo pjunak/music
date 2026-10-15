@@ -151,7 +151,7 @@ export function AudioEngine() {
       isMine = isThisDevicePlaying();
       const modeId = s.state.active_mode_id;
       const ids = s.state.active_preset_ids;
-      const presetRevision = s.state.preset_revision ?? 0;
+      const presetRevision = s.state.preset_revision;
       const sig = `${isMine ? "1" : "0"}|${modeId ?? ""}|${ids.join(",")}|${presetRevision}`;
       if (sig === lastSig) return;
       const forceRefresh = lastSig !== "" && presetRevision !== lastPresetRevision;
