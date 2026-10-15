@@ -1,5 +1,5 @@
 import { cleanupApi } from "@/core/api";
-import type { CleanupAnalyzeResult, CleanupEnrichmentResult, CleanupOp, CleanupReviewProposal, CleanupFolderSuggestion, CleanupEnrichmentPlan } from "@/core/api";
+import type { CleanupAnalyzeResult, CleanupCatalogTagSuggestion, CleanupEnrichmentResult, CleanupOp, CleanupReviewProposal, CleanupFolderSuggestion, CleanupEnrichmentPlan } from "@/core/api";
 
 export function catalogReviewContext(plan: CleanupEnrichmentPlan): string {
   return JSON.stringify([plan.local_evidence_signature, plan.folder_context_signature, plan.evidence_revision]);
@@ -116,4 +116,62 @@ export function replaceEdition(result: CleanupAnalyzeResult, catalogs: CleanupEn
     return { ...plan, ops };
   });
   return { result: { ...result, plans }, removed };
+}
+
+/** Display label for one proposed change (the review row's kind column). */
+export function opLabel(op: CleanupOp): string {
+  if (op.kind === "rename") return "File";
+  switch (op.field) {
+    case "title":
+      return "Title";
+    case "artist":
+      return "Artist";
+    case "album_artist":
+      return "Album artist";
+    case "album":
+      return "Album";
+    case "track_no":
+      return "Track #";
+    case "disc_no":
+      return "Disc #";
+    case "year":
+      return "Year";
+    case "release_date":
+      return "Release date";
+    case "original_release_date":
+      return "Original release date";
+    case "composer":
+      return "Composer";
+    default:
+      return op.field ?? "Tag";
+  }
+}
+
+/** Stable display order for the by-field tick chips. */
+export const LABEL_ORDER = [
+  "Folder",
+  "File",
+  "Title",
+  "Artist",
+  "Album artist",
+  "Album",
+  "Track #",
+  "Disc #",
+  "Year",
+  "Release date",
+  "Original release date",
+  "Composer",
+];
+
+export function folderOf(path: string): string {
+  const i = path.lastIndexOf("/");
+  return i === -1 ? "" : path.slice(0, i);
+}
+
+export function basename(path: string): string {
+  return path.split("/").pop() || path;
+}
+
+export function catalogTagKey(suggestion: CleanupCatalogTagSuggestion): string {
+  return `${suggestion.track_id}:${suggestion.analyzer_id}:${suggestion.source_signature}:${suggestion.tag}`;
 }
