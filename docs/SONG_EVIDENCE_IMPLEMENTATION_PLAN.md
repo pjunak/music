@@ -1091,7 +1091,7 @@ and [Choice](https://docs.typesafe.ai/primitives/choice) contracts reviewed this
 
 **Owners:** [tagging jobs](../crates/music-application/src/assistant/model_jobs/tagging.rs),
 [atomic review](../crates/music-storage/src/assistant/review.rs),
-[Assistant HTTP DTOs](../crates/music-server/src/assistant/mod.rs),
+[Assistant HTTP DTOs](../crates/music-server/src/assistant/),
 [review UI](../frontend/src/views/assistant/AnalysisTagReview.tsx).
 
 Keep the normal interaction: analyze selected music, review useful suggestions, accept
