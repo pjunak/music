@@ -76,10 +76,17 @@ export function selectIsMyOutput(s: PlayerStore): boolean {
   return s.state.active_output_device_ids.includes(s.myDeviceId);
 }
 
-/** Selector helper: dead-reckoned current ambient position in ms.
+/** The store fields that position dead reckoning reads. */
+export type PositionClock = Pick<PlayerStore, "state" | "stateReceivedAt">;
+
+/** Dead-reckoned current ambient position in ms at `now`.
  *  When playing, advances by wall-clock time since the last state was
- *  received. When paused, returns whatever the server last said. */
-export function selectAmbientPositionMs(s: PlayerStore): number {
+ *  received. When paused, returns whatever the server last said.
+ *
+ *  Not a store selector: the result changes with the clock, and a
+ *  useSyncExternalStore selector must return the same value for unchanged
+ *  state or React re-renders until it gives up. */
+export function ambientPositionMs(s: PositionClock, now = Date.now()): number {
   if (s.state === null) return 0;
   // No ambient track loaded → there is no position to report. Without this
   // guard the clock dead-reckons from a stale position_ms whenever the
@@ -89,21 +96,21 @@ export function selectAmbientPositionMs(s: PlayerStore): number {
   if (s.state.ambient.current_track_id === null) return 0;
   const base = s.state.ambient.position_ms;
   if (!s.state.is_playing || s.state.interrupt !== null) return base;
-  const elapsed = Date.now() - s.stateReceivedAt;
+  const elapsed = now - s.stateReceivedAt;
   return base + Math.max(0, elapsed);
 }
 
-/** Selector helper: dead-reckoned position of the audibly playing lane.
+/** Dead-reckoned position of the audibly playing lane at `now`.
  *  While an interrupt is active, its clock ticks regardless of `is_playing` —
  *  pause only freezes ambient (see backend `set_is_playing`) — so we
  *  dead-reckon from the interrupt's position unconditionally. The server
  *  materializes `position_ms` in every broadcast, so the base is current at
  *  `stateReceivedAt`. With no interrupt this is the ambient position. */
-export function selectActivePositionMs(s: PlayerStore): number {
+export function activePositionMs(s: PositionClock, now = Date.now()): number {
   if (s.state === null) return 0;
   const interrupt = s.state.interrupt;
-  if (interrupt === null) return selectAmbientPositionMs(s);
-  const elapsed = Date.now() - s.stateReceivedAt;
+  if (interrupt === null) return ambientPositionMs(s, now);
+  const elapsed = now - s.stateReceivedAt;
   return interrupt.position_ms + Math.max(0, elapsed);
 }
 

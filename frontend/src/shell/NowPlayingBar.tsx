@@ -19,7 +19,7 @@ import { SpeakersControl } from "@/components/SpeakersControl";
 import { libraryApi } from "@/core/api";
 import { useAuthStore } from "@/core/auth";
 import {
-  selectActivePositionMs,
+  activePositionMs,
   usePlayerStore,
 } from "@/core/playerStore";
 import { trackTitle } from "@/core/trackDisplay";
@@ -150,7 +150,9 @@ export function NowPlayingBar() {
   // just spin the render loop for a clock that should read 0:00.
   useTickWhile((isPlaying || interruptId !== null) && hasTrack, 500);
 
-  const positionMs = usePlayerStore(selectActivePositionMs);
+  const state = usePlayerStore((s) => s.state);
+  const stateReceivedAt = usePlayerStore((s) => s.stateReceivedAt);
+  const positionMs = activePositionMs({ state, stateReceivedAt });
   const totalMs = track !== null ? Math.round(track.length_s * 1000) : 0;
 
   function play() {

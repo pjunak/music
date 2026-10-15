@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  selectActivePositionMs,
-  selectAmbientPositionMs,
+  activePositionMs,
+  ambientPositionMs,
   usePlayerStore,
 } from "@/core/playerStore";
 import type { AmbientState, InterruptState, PlayerState } from "@/core/types";
@@ -73,23 +73,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("selectActivePositionMs", () => {
+describe("activePositionMs", () => {
   it("returns 0 with no state", () => {
-    expect(selectActivePositionMs(usePlayerStore.getState())).toBe(0);
+    expect(activePositionMs(usePlayerStore.getState())).toBe(0);
   });
 
   it("dead-reckons the ambient lane while playing, same as the ambient selector", () => {
     receiveState(makeState());
     vi.advanceTimersByTime(4_000);
     const s = usePlayerStore.getState();
-    expect(selectActivePositionMs(s)).toBe(14_000);
-    expect(selectActivePositionMs(s)).toBe(selectAmbientPositionMs(s));
+    expect(activePositionMs(s)).toBe(14_000);
+    expect(activePositionMs(s)).toBe(ambientPositionMs(s));
   });
 
   it("freezes the ambient lane when paused", () => {
     receiveState(makeState({ is_playing: false }));
     vi.advanceTimersByTime(4_000);
-    expect(selectActivePositionMs(usePlayerStore.getState())).toBe(10_000);
+    expect(activePositionMs(usePlayerStore.getState())).toBe(10_000);
   });
 
   it("dead-reckons the interrupt lane while an interrupt is active", () => {
@@ -97,7 +97,7 @@ describe("selectActivePositionMs", () => {
     vi.advanceTimersByTime(2_500);
     // Interrupt base (3s) + elapsed — NOT the frozen ambient position (10s),
     // which is what the bar showed before this selector existed.
-    expect(selectActivePositionMs(usePlayerStore.getState())).toBe(5_500);
+    expect(activePositionMs(usePlayerStore.getState())).toBe(5_500);
   });
 
   it("keeps the interrupt clock ticking even when is_playing is false", () => {
@@ -106,9 +106,9 @@ describe("selectActivePositionMs", () => {
     receiveState(makeState({ is_playing: false, interrupt: makeInterrupt() }));
     vi.advanceTimersByTime(2_000);
     const s = usePlayerStore.getState();
-    expect(selectActivePositionMs(s)).toBe(5_000);
+    expect(activePositionMs(s)).toBe(5_000);
     // ...while the ambient selector stays frozen at its base.
-    expect(selectAmbientPositionMs(s)).toBe(10_000);
+    expect(ambientPositionMs(s)).toBe(10_000);
   });
 
   it("falls back to ambient once the interrupt ends", () => {
@@ -117,13 +117,13 @@ describe("selectActivePositionMs", () => {
     // Interrupt ends; server broadcasts ambient resuming from its frozen base.
     receiveState(makeState());
     vi.advanceTimersByTime(1_000);
-    expect(selectActivePositionMs(usePlayerStore.getState())).toBe(11_000);
+    expect(activePositionMs(usePlayerStore.getState())).toBe(11_000);
   });
 
   it("clamps negative elapsed (clock skew) to the interrupt base", () => {
     receiveState(makeState({ interrupt: makeInterrupt() }));
     usePlayerStore.setState({ stateReceivedAt: Date.now() + 60_000 });
-    expect(selectActivePositionMs(usePlayerStore.getState())).toBe(3_000);
+    expect(activePositionMs(usePlayerStore.getState())).toBe(3_000);
   });
 });
 
