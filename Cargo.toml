@@ -62,7 +62,7 @@ utoipa-axum = "0.3.0"
 unicode-normalization = "0.1.25"
 unicode-casefold = "0.2.0"
 unicode-general-category = "1.1.0"
-uuid = { version = "1.26.1", features = ["v4"] }
+uuid = { version = "1.28.0", features = ["v4"] }
 zeroize = "1.8"
 
 [workspace.lints.rust]
