@@ -212,6 +212,9 @@ pub struct PlaybackState {
     pub is_playing: bool,
     pub active_mode_id: Option<String>,
     pub active_output_device_ids: Vec<String>,
+    /// Whether the active mode lets several outputs play at once. The playback
+    /// owner derives it from the mode catalog; it is never persisted.
+    pub multiple_outputs: bool,
     pub default_device_volume: UnitInterval,
     pub device_volumes: BTreeMap<String, UnitInterval>,
     pub active_soundboard_id: Option<String>,
@@ -233,6 +236,7 @@ impl Default for PlaybackState {
             is_playing: false,
             active_mode_id: None,
             active_output_device_ids: Vec::new(),
+            multiple_outputs: false,
             default_device_volume: UnitInterval::default(),
             device_volumes: BTreeMap::new(),
             active_soundboard_id: None,
@@ -258,6 +262,17 @@ impl PlaybackState {
         self.looping_sfx.clear();
         self.interrupt = None;
         self.ambient.position_anchor_ms = None;
+    }
+
+    /// Adopt the active mode's output policy. Leaving multi-output keeps the
+    /// longest-running output so the room does not jump to another speaker.
+    pub fn apply_output_policy(&mut self, multiple_outputs: bool) -> bool {
+        let mut changed = replace_if_different(&mut self.multiple_outputs, multiple_outputs);
+        if !multiple_outputs && self.active_output_device_ids.len() > 1 {
+            self.active_output_device_ids.truncate(1);
+            changed = true;
+        }
+        changed
     }
 }
 
@@ -426,6 +441,11 @@ pub fn reduce(
         }
         PlaybackCommand::SetActiveMode(mode_id) => set_active_mode(&mut next, mode_id),
         PlaybackCommand::SetActiveOutputs(device_ids) => {
+            let device_ids = if next.multiple_outputs {
+                device_ids
+            } else {
+                newest_output(&next.active_output_device_ids, device_ids)
+            };
             replace_if_different(&mut next.active_output_device_ids, device_ids)
         }
         PlaybackCommand::RegisterDevice {
@@ -692,11 +712,27 @@ fn register_device(state: &mut PlaybackState, device_id: String, activate: bool)
             .insert(device_id.clone(), state.default_device_volume);
         changed = true;
     }
-    if activate && !state.active_output_device_ids.contains(&device_id) {
+    // A single-output mode never lets an output-by-default connection take
+    // the room from the output the operator already chose.
+    let slot_free = state.multiple_outputs || state.active_output_device_ids.is_empty();
+    if activate && slot_free && !state.active_output_device_ids.contains(&device_id) {
         state.active_output_device_ids.push(device_id);
         changed = true;
     }
     changed
+}
+
+/// Single-output requests keep only the newest selection: the last requested
+/// device that is not already active, else the last requested device.
+fn newest_output(current: &[String], mut requested: Vec<String>) -> Vec<String> {
+    if requested.len() <= 1 {
+        return requested;
+    }
+    let index = requested
+        .iter()
+        .rposition(|device_id| !current.contains(device_id))
+        .unwrap_or(requested.len() - 1);
+    vec![requested.swap_remove(index)]
 }
 
 fn remove_active_output(state: &mut PlaybackState, device_id: &str) -> bool {
@@ -1479,6 +1515,77 @@ mod tests {
         )?;
         assert_eq!(state.crossfade_type, CrossfadeType::EqualPower);
         Ok(())
+    }
+
+    #[test]
+    fn single_output_policy_keeps_the_newest_selection() -> Result<(), Box<dyn Error>> {
+        let outputs = |ids: &[&str]| ids.iter().map(|id| (*id).to_owned()).collect::<Vec<_>>();
+        let state = PlaybackState {
+            active_output_device_ids: outputs(&["tv"]),
+            ..PlaybackState::default()
+        };
+        let appended = apply(
+            &state,
+            PlaybackCommand::SetActiveOutputs(outputs(&["tv", "phone"])),
+            1_000,
+        )?;
+        assert_eq!(appended.active_output_device_ids, ["phone"]);
+        let prepended = apply(
+            &state,
+            PlaybackCommand::SetActiveOutputs(outputs(&["phone", "tv"])),
+            1_000,
+        )?;
+        assert_eq!(prepended.active_output_device_ids, ["phone"]);
+        let cleared = apply(&state, PlaybackCommand::SetActiveOutputs(Vec::new()), 1_000)?;
+        assert!(cleared.active_output_device_ids.is_empty());
+
+        let multiple = PlaybackState {
+            multiple_outputs: true,
+            ..state
+        };
+        let together = apply(
+            &multiple,
+            PlaybackCommand::SetActiveOutputs(outputs(&["tv", "phone"])),
+            1_000,
+        )?;
+        assert_eq!(together.active_output_device_ids, ["tv", "phone"]);
+        Ok(())
+    }
+
+    #[test]
+    fn single_output_policy_keeps_the_chosen_output_on_default_connect()
+    -> Result<(), Box<dyn Error>> {
+        let register = |device_id: &str| PlaybackCommand::RegisterDevice {
+            device_id: device_id.to_owned(),
+            activate: true,
+        };
+        let first = apply(&PlaybackState::default(), register("tv"), 1_000)?;
+        assert_eq!(first.active_output_device_ids, ["tv"]);
+        let second = apply(&first, register("speaker"), 1_000)?;
+        assert_eq!(second.active_output_device_ids, ["tv"]);
+        assert!(second.device_volumes.contains_key("speaker"));
+
+        let multiple = PlaybackState {
+            multiple_outputs: true,
+            ..first
+        };
+        let together = apply(&multiple, register("speaker"), 1_000)?;
+        assert_eq!(together.active_output_device_ids, ["tv", "speaker"]);
+        Ok(())
+    }
+
+    #[test]
+    fn leaving_multiple_outputs_keeps_the_longest_running_output() {
+        let mut state = PlaybackState {
+            multiple_outputs: true,
+            active_output_device_ids: vec!["tv".to_owned(), "phone".to_owned()],
+            ..PlaybackState::default()
+        };
+        assert!(!state.apply_output_policy(true));
+        assert!(state.apply_output_policy(false));
+        assert!(!state.multiple_outputs);
+        assert_eq!(state.active_output_device_ids, ["tv"]);
+        assert!(!state.apply_output_policy(false));
     }
 
     #[test]

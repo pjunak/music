@@ -26,6 +26,7 @@ vi.mock("@/core/api", async (importActual) => {
 });
 
 import { useAuthStore } from "@/core/auth";
+import { playbackEngine } from "@/core/playbackEngine";
 import { usePlayerStore } from "@/core/playerStore";
 import { useUiStore } from "@/core/uiStore";
 import { wsClient } from "@/core/ws";
@@ -34,7 +35,9 @@ import { SpeakersControl } from "./SpeakersControl";
 
 const CID = "cid-test";
 
-function seedAuthed(opts: { designated?: boolean; active?: boolean } = {}) {
+function seedAuthed(
+  opts: { designated?: boolean; active?: boolean; multiple?: boolean } = {},
+) {
   useAuthStore.setState({ status: "authenticated", user: { id: 1, username: "dm" } });
   useUiStore.setState({ clientId: CID, deviceName: "DM", forceLocalPlayback: false });
   usePlayerStore.setState({
@@ -45,6 +48,7 @@ function seedAuthed(opts: { designated?: boolean; active?: boolean } = {}) {
       volume: 1,
       default_device_volume: 1,
       active_output_device_ids: opts.active ? [CID] : [],
+      multiple_outputs: opts.multiple ?? false,
       device_volumes: {},
       connected_devices: [
         { device_id: CID, name: "DM", is_output: opts.designated ?? true },
@@ -71,9 +75,9 @@ describe("SpeakersControl", () => {
     seedAuthed({ designated: true });
     renderControl();
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
-    const checkbox = screen.getByRole("checkbox", { name: "DM output" });
-    expect(checkbox).not.toBeChecked();
-    await userEvent.click(checkbox);
+    const choice = screen.getByRole("radio", { name: "DM output" });
+    expect(choice).not.toBeChecked();
+    await userEvent.click(choice);
     expect(wsClient.send).toHaveBeenCalledWith({
       type: "set_active_outputs",
       device_ids: [CID],
@@ -106,7 +110,7 @@ describe("SpeakersControl", () => {
     expect(screen.getByText("Living Room TV")).toBeInTheDocument();
     expect(screen.getByText("default")).toBeInTheDocument();
 
-    const tvOutput = screen.getByRole("checkbox", {
+    const tvOutput = screen.getByRole("radio", {
       name: "Living Room TV output",
     });
     await userEvent.click(tvOutput); // activate the TV — no PUT/designation
@@ -171,7 +175,7 @@ describe("SpeakersControl", () => {
     });
   });
 
-  it("replaces the current output when Multiple is off", async () => {
+  it("replaces the current output when the mode plays through one", async () => {
     seedAuthed({ active: true });
     usePlayerStore.setState((current) => ({
       state: current.state
@@ -191,7 +195,9 @@ describe("SpeakersControl", () => {
     }));
     renderControl();
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "TV output" }));
+    expect(screen.getByText("One at a time")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    await userEvent.click(screen.getByRole("radio", { name: "TV output" }));
 
     expect(wsClient.send).toHaveBeenCalledWith({
       type: "set_active_outputs",
@@ -199,8 +205,8 @@ describe("SpeakersControl", () => {
     });
   });
 
-  it("adds another output when Multiple is enabled", async () => {
-    seedAuthed({ active: true });
+  it("adds another output when the mode allows several", async () => {
+    seedAuthed({ active: true, multiple: true });
     usePlayerStore.setState((current) => ({
       state: current.state
         ? {
@@ -219,7 +225,8 @@ describe("SpeakersControl", () => {
     }));
     renderControl();
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Multiple" }));
+    expect(screen.getByText("Several at once")).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: "No speaker" })).toBeNull();
     await userEvent.click(screen.getByRole("checkbox", { name: "TV output" }));
 
     expect(wsClient.send).toHaveBeenCalledWith({
@@ -228,36 +235,17 @@ describe("SpeakersControl", () => {
     });
   });
 
-  it("collapses an existing multi-output session when Multiple is disabled", async () => {
+  it("silences every speaker through No speaker in a one-output mode", async () => {
     seedAuthed({ active: true });
-    usePlayerStore.setState((current) => ({
-      state: current.state
-        ? {
-            ...current.state,
-            active_output_device_ids: [CID, "tv-1"],
-            connected_devices: [
-              ...current.state.connected_devices,
-              {
-                device_id: "tv-1",
-                client_id: "tv-1",
-                name: "TV",
-                is_output: false,
-              },
-            ],
-          }
-        : null,
-    }));
     renderControl();
-    expect(screen.queryByLabelText(/volume in player bar/)).toBeNull();
-
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
-    const multiple = screen.getByRole("checkbox", { name: "Multiple" });
-    expect(multiple).toBeChecked();
-    await userEvent.click(multiple);
+    expect(screen.getByRole("radio", { name: "DM output" })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: "No speaker" }));
 
+    expect(playbackEngine.flushPositionReport).toHaveBeenCalled();
     expect(wsClient.send).toHaveBeenCalledWith({
       type: "set_active_outputs",
-      device_ids: [CID],
+      device_ids: [],
     });
   });
 
@@ -291,7 +279,8 @@ describe("SpeakersControl", () => {
     renderControl();
     await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
     expect(screen.getByRole("slider", { name: "DM volume" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "DM output" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "DM output" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "No speaker" })).toBeDisabled();
   });
 
   it("marks this device with a subtle visual, not '(this)' text", async () => {

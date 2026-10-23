@@ -28,6 +28,7 @@ pub fn canonical_state(
         is_playing: state.is_playing,
         active_mode_id: state.active_mode_id.clone(),
         active_output_device_ids: state.active_output_device_ids.clone(),
+        multiple_outputs: state.multiple_outputs,
         default_device_volume: state.default_device_volume.get(),
         device_volumes: state
             .device_volumes

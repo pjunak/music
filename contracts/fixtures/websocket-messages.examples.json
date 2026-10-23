@@ -86,6 +86,7 @@
           "is_playing": false,
           "last_position_report": null,
           "looping_sfx": [],
+          "multiple_outputs": false,
           "position_epoch": 0,
           "preset_revision": 0,
           "revision": 0
@@ -166,6 +167,7 @@
               "volume": 1.0
             }
           ],
+          "multiple_outputs": true,
           "position_epoch": 4,
           "preset_revision": 3,
           "revision": 17
@@ -236,6 +238,7 @@
               "soundboard_id": "weather"
             }
           ],
+          "multiple_outputs": true,
           "position_epoch": 4,
           "preset_revision": 3,
           "revision": 17

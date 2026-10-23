@@ -17,7 +17,7 @@ export type CanonicalInterruptState = { current_track_id: number, queue: Array<n
 
 export type LoopingSfx = { id: string, name: string, soundboard_id: string, item_path: string, interval_s: number, volume: number, };
 
-export type CanonicalPlayerState = { revision: number, position_epoch: number, is_playing: boolean, active_mode_id: string | null, active_output_device_ids: Array<string>, default_device_volume: number, device_volumes: { [key in string]: number }, active_soundboard_id: string | null, active_preset_ids: Array<string>, preset_revision: number, crossfade_ms: number, crossfade_type: CrossfadeType, ambient: CanonicalAmbientState, interrupt: CanonicalInterruptState | null, looping_sfx: Array<LoopingSfx>, last_position_report: PositionReport | null, connected_devices: Array<DeviceInfo>, };
+export type CanonicalPlayerState = { revision: number, position_epoch: number, is_playing: boolean, active_mode_id: string | null, active_output_device_ids: Array<string>, multiple_outputs: boolean, default_device_volume: number, device_volumes: { [key in string]: number }, active_soundboard_id: string | null, active_preset_ids: Array<string>, preset_revision: number, crossfade_ms: number, crossfade_type: CrossfadeType, ambient: CanonicalAmbientState, interrupt: CanonicalInterruptState | null, looping_sfx: Array<LoopingSfx>, last_position_report: PositionReport | null, connected_devices: Array<DeviceInfo>, };
 
 export type ErrorCode = "session_expired" | "session_revoked";
 

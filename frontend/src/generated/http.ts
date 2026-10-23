@@ -874,6 +874,7 @@ export type ModeDetail = {
   id: string;
   integrations: IntegrationsSpec;
   interrupts: InterruptSpec[];
+  multiple_outputs: boolean;
   name: string;
   panels: string[];
   playlist_categories: string[];
@@ -886,6 +887,7 @@ export type ModeSummary = {
   default_soundboard: string | null;
   has_theme: boolean;
   id: string;
+  multiple_outputs: boolean;
   name: string;
   panels: string[];
   playlist_categories: string[];
@@ -1168,6 +1170,7 @@ export type PlayerState = {
   is_playing?: boolean;
   last_position_report: PositionReport | null;
   looping_sfx?: LoopingSfx[];
+  multiple_outputs?: boolean;
   position_epoch?: number;
   preset_revision?: number;
   revision?: number;
@@ -1363,10 +1366,6 @@ export type ReadinessStatus = "starting" | "ready" | "degraded" | "not_ready";
 export type ReloadResult = {
   errors: Record<string, string>;
   loaded: string[];
-};
-
-export type RenameModeRequest = {
-  name: string;
 };
 
 export type RescanResult = {
@@ -1636,6 +1635,12 @@ export type UpdateItemRequest = {
   file?: string | null;
   hotkey?: string | null;
   icon?: string | null;
+  name?: string | null;
+};
+
+/** Mode settings edited in place; omitted fields keep their current value. */
+export type UpdateModeRequest = {
+  multiple_outputs?: boolean | null;
   name?: string | null;
 };
 

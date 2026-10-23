@@ -1187,6 +1187,37 @@ async fn mode_authoring_crud_is_journaled_validated_and_immediately_visible()
         .await?;
     assert_eq!(renamed.status(), StatusCode::OK);
 
+    let activated = router
+        .clone()
+        .oneshot(
+            Request::put("/api/modes/active")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"mode_id":"table"}"#))?,
+        )
+        .await?;
+    assert_eq!(activated.status(), StatusCode::OK);
+    assert!(!runtime.playback.snapshot().await?.state.multiple_outputs);
+    let multiple = router
+        .clone()
+        .oneshot(
+            Request::patch("/api/modes/table")
+                .header("cookie", &cookie)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"multiple_outputs":true}"#))?,
+        )
+        .await?;
+    assert_eq!(multiple.status(), StatusCode::OK);
+    let multiple: Value =
+        serde_json::from_slice(&to_bytes(multiple.into_body(), 1024 * 1024).await?)?;
+    assert_eq!(multiple["name"], "Game Table");
+    assert_eq!(multiple["multiple_outputs"], true);
+    assert!(
+        fs::read_to_string(directory.path().join("modes/table/manifest.yaml"))?
+            .contains("multiple_outputs: true")
+    );
+    assert!(runtime.playback.snapshot().await?.state.multiple_outputs);
+
     let soundboard = router
         .clone()
         .oneshot(
@@ -1909,6 +1940,7 @@ async fn startup_rolls_back_an_interrupted_mode_publication()
                     integrations: Default::default(),
                     default_crossfade_ms: 0,
                     default_soundboard: None,
+                    multiple_outputs: false,
                     extra: BTreeMap::new(),
                 },
             },
@@ -1988,6 +2020,7 @@ async fn startup_rolls_back_interrupted_authoring_files_and_playlists_together()
                     integrations: Default::default(),
                     default_crossfade_ms: 0,
                     default_soundboard: None,
+                    multiple_outputs: false,
                     extra: BTreeMap::new(),
                 },
                 soundboards: BTreeMap::new(),

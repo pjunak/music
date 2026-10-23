@@ -32,8 +32,9 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   track; clients follow state and seek only when `position_epoch` changes. Repeat, shuffle,
   crossfade, and a graphic-EQ effect chain are all there.
 - **Multi-device output** — any connected browser tab (or headless client) can be switched on as
-  a live speaker, each with its own canonical software volume. A device can be saved as "output by default" so
-  it auto-activates when it reconnects.
+  a live speaker, each with its own canonical software volume. Each mode decides whether several
+  speakers play together or choosing one replaces the other (Manage modes). A device can be saved as
+  "output by default" so it auto-activates when it reconnects.
 - **TV / room display** — a read-only now-playing view at `/tv` (also `/` for guests) for a screen in the room, usable
   **without logging in** (guest access), with cover art, up-next, and recently-played.
 - **Compatibility mode** — a dependency-free ES5 fallback player (`compat-mode.js`, built from TypeScript in `frontend/compat/`) for browsers

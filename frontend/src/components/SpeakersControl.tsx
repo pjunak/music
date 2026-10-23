@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuthStore } from "@/core/auth";
@@ -17,17 +17,19 @@ import { VolumeIcon } from "./icons";
 const EMPTY_VOLUMES: Record<string, number> = {};
 
 /** Footer "Speakers" control — pick the current output and control its volume.
- *  Single-output use stays directly accessible in the footer; multi-output is
- *  an explicit option in the popover.
+ *  Single-output use stays directly accessible in the footer; whether several
+ *  speakers may play together is the active mode's setting (Manage modes),
+ *  enforced by the server and mirrored here from `multiple_outputs`.
  *
  *   - Connecting (no snapshot yet) → a muted pill.
  *   - Guest → a local-only on/off (the server rejects output changes from guest
  *     sockets) via `forceLocalPlayback`; no multi-device popover.
  *   - Authed → a pill showing how many speakers are on. With exactly one active
  *     output, its volume is exposed beside the pill. The popover lists every
- *     connected device; selecting one replaces the current output unless
- *     "Multiple" is enabled. A "default" badge marks devices saved as
- *     output-by-default (Settings → Devices), which auto-activate on connect. */
+ *     connected device: a single choice (plus "No speaker") when the active
+ *     mode plays through one output, or checkboxes when it allows several. A
+ *     "default" badge marks devices saved as output-by-default (Settings →
+ *     Devices), which auto-activate on connect. */
 export function SpeakersControl() {
   const myDeviceId = usePlayerStore((s) => s.myDeviceId);
   const isGuest = useAuthStore((s) => s.status) !== "authenticated";
@@ -78,22 +80,16 @@ function GuestSpeaker() {
 function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const choiceGroup = useId();
 
   const devices = usePlayerArray((s) => s.state?.connected_devices);
   const activeIds = usePlayerArray((s) => s.state?.active_output_device_ids);
-  const [multiple, setMultiple] = useState(() => activeIds.length > 1);
+  const multiple = usePlayerStore((s) => s.state?.multiple_outputs ?? false);
   const deviceVolumes =
     usePlayerStore((s) => s.state?.device_volumes) ?? EMPTY_VOLUMES;
   const defaultDeviceVolume = usePlayerStore((s) => s.state?.default_device_volume ?? 1);
   const connected = usePlayerStore((s) => s.wsStatus === "connected");
   const deviceName = useUiStore((s) => s.deviceName);
-
-  // A second controller or an output-by-default connection can create a
-  // multi-output session outside this popover. Reflect that canonical state
-  // instead of presenting it as single-output mode.
-  useEffect(() => {
-    if (activeIds.length > 1) setMultiple(true);
-  }, [activeIds]);
 
   useEffect(() => {
     if (!open) return;
@@ -156,8 +152,8 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
     wsClient.send({ type: "set_active_outputs", device_ids: next });
   }
 
-  /** Turn a device on/off as a live output. In the default single-output mode,
-   *  turning one device on replaces the current output. */
+  /** Turn a device on/off as a live output. When the active mode plays through
+   *  one output, turning a device on replaces the current one. */
   function setOn(id: string, on: boolean) {
     const current = usePlayerStore.getState().state?.active_output_device_ids ?? [];
     const next = on
@@ -168,14 +164,6 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
         : [id]
       : current.filter((activeId) => activeId !== id);
     setActiveOutputs(next);
-  }
-
-  function setMultipleOutputs(enabled: boolean) {
-    setMultiple(enabled);
-    if (enabled) return;
-
-    const current = usePlayerStore.getState().state?.active_output_device_ids ?? [];
-    if (current.length > 1) setActiveOutputs([current[0]]);
   }
 
   function setVol(id: string, v: number) {
@@ -213,18 +201,12 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
         <div className="speakers-popover" role="dialog" aria-label="Speakers">
           <div className="speakers-popover-head">
             <span>Speakers</span>
-            <label
-              className="speakers-multiple-toggle"
-              title="Allow more than one speaker to play at the same time"
+            <span
+              className="speakers-policy"
+              title="Set per mode in Manage modes (header ⚙ next to the mode picker)"
             >
-              <input
-                type="checkbox"
-                checked={multiple}
-                disabled={!connected}
-                onChange={(event) => setMultipleOutputs(event.target.checked)}
-              />
-              <span>Multiple</span>
-            </label>
+              {multiple ? "Several at once" : "One at a time"}
+            </span>
             <Link
               to="/settings"
               className="btn-link-external"
@@ -236,6 +218,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
           <SpeakerRow
             rawName={thisDevice?.name ?? deviceName ?? "This device"}
             isThis
+            choiceGroup={multiple ? null : choiceGroup}
             on={activeIds.includes(deviceId)}
             isDefault={thisDevice?.is_output ?? false}
             volume={volumeFor(deviceId)}
@@ -247,6 +230,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
             <SpeakerRow
               key={d.device_id}
               rawName={d.name}
+              choiceGroup={multiple ? null : choiceGroup}
               on={activeIds.includes(d.device_id)}
               isDefault={d.is_output}
               volume={volumeFor(d.device_id)}
@@ -255,6 +239,20 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
               onVolume={(v) => setVol(d.device_id, v)}
             />
           ))}
+          {multiple ? null : (
+            <label className={`speaker-row speaker-row-none${activeIds.length === 0 ? " on" : ""}`}>
+              <VolumeIcon className="speaker-row-icon" />
+              <span className="speaker-row-name">No speaker</span>
+              <input
+                type="radio"
+                name={choiceGroup}
+                className="speaker-row-check"
+                checked={activeIds.length === 0}
+                disabled={!connected}
+                onChange={() => setActiveOutputs([])}
+              />
+            </label>
+          )}
         </div>
       ) : null}
     </div>
@@ -264,6 +262,7 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
 function SpeakerRow({
   rawName,
   isThis = false,
+  choiceGroup,
   on,
   isDefault,
   volume,
@@ -275,6 +274,9 @@ function SpeakerRow({
   rawName: string;
   /** The operator's own device — gets a subtle frame instead of "(this)" text. */
   isThis?: boolean;
+  /** Radio group shared by every row when the active mode plays through one
+   *  output; `null` when several may play together (checkboxes). */
+  choiceGroup: string | null;
   on: boolean;
   isDefault?: boolean;
   volume: number;
@@ -310,10 +312,11 @@ function SpeakerRow({
         readOnly={disabled}
         readOnlyTitle="Not connected"
       />
-      {/* Checkbox on the right edge — closest to the cursor when the popover
+      {/* Selector on the right edge — closest to the cursor when the popover
           opens above the footer pill. */}
       <input
-        type="checkbox"
+        type={choiceGroup === null ? "checkbox" : "radio"}
+        name={choiceGroup ?? undefined}
         className="speaker-row-check"
         checked={on}
         disabled={disabled}

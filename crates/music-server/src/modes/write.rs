@@ -36,10 +36,15 @@ struct CreateModeRequest {
     name: String,
 }
 
+/// Mode settings edited in place; omitted fields keep their current value.
 #[derive(Debug, Deserialize, ToSchema)]
-struct RenameModeRequest {
-    #[schema(min_length = 1, max_length = 128)]
-    name: String,
+struct UpdateModeRequest {
+    #[serde(default)]
+    #[schema(required = false, schema_with = nullable_nonempty_short_name_schema)]
+    name: Option<String>,
+    #[serde(default)]
+    #[schema(required = false)]
+    multiple_outputs: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -306,7 +311,7 @@ where
 pub(super) fn mode_write_router() -> OpenApiRouter<HttpState> {
     OpenApiRouter::default()
         .routes(routes!(create_mode))
-        .routes(routes!(rename_mode))
+        .routes(routes!(update_mode))
         .routes(routes!(delete_mode))
         .routes(routes!(create_soundboard))
         .routes(routes!(delete_soundboard))
@@ -360,6 +365,7 @@ async fn create_mode(
                 integrations: IntegrationsDocument::default(),
                 default_crossfade_ms: 0,
                 default_soundboard: None,
+                multiple_outputs: false,
                 extra: BTreeMap::new(),
             },
         },
@@ -376,24 +382,29 @@ async fn create_mode(
     patch,
     path = "/modes/{mode_id}",
     params(("mode_id" = String, Path)),
-    request_body = RenameModeRequest,
+    request_body = UpdateModeRequest,
     responses(
         (status = 200, description = "Successful Response", body = ModeSummary),
         (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
     ),
     tag = "modes"
 )]
-async fn rename_mode(
+async fn update_mode(
     State(state): State<HttpState>,
     _operator: Operator,
     Path(mode_id): Path<String>,
-    payload: Result<Json<RenameModeRequest>, JsonRejection>,
+    payload: Result<Json<UpdateModeRequest>, JsonRejection>,
 ) -> Result<Json<ModeSummary>, ApiError> {
     let Json(payload) = json_payload(payload)?;
-    validate_text(&payload.name, 1, Some(128))?;
+    validate_optional_text(payload.name.as_deref(), 1, Some(128))?;
     let catalog = mode_catalog(&state)?;
     let mut manifest = mode(&catalog, &mode_id)?.manifest.clone();
-    manifest.name = payload.name;
+    if let Some(name) = payload.name {
+        manifest.name = name;
+    }
+    if let Some(multiple_outputs) = payload.multiple_outputs {
+        manifest.multiple_outputs = multiple_outputs;
+    }
     let result = commit(
         &state,
         ModeMutation::PutManifest {

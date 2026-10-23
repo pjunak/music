@@ -39,6 +39,7 @@ pub struct CatalogMode {
     pub soundboard_items: BTreeMap<String, BTreeSet<String>>,
     pub cue_ids: BTreeSet<String>,
     pub preset_ids: BTreeSet<String>,
+    pub multiple_outputs: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -895,6 +896,7 @@ where
                                     soundboard_items: mode.soundboard_items,
                                     cue_ids: mode.cue_ids,
                                     preset_ids: mode.preset_ids,
+                                    multiple_outputs: mode.multiple_outputs,
                                 },
                             )
                         })
@@ -923,7 +925,7 @@ where
         let sample = self.clock.sample()?;
         let random_queue_index =
             random_queue_index(&self.state, &resolved.command, &mut self.random);
-        let reduction = reduce(
+        let mut reduction = reduce(
             &self.state,
             resolved.command,
             ReductionContext {
@@ -931,6 +933,12 @@ where
                 random_queue_index,
             },
         )?;
+        // A mode switch also switches the output policy, in the same commit.
+        if let Some(modes) = &self.catalog.modes {
+            let multiple_outputs =
+                active_mode_allows_multiple_outputs(&reduction.next_state, modes);
+            reduction.changed |= reduction.next_state.apply_output_policy(multiple_outputs);
+        }
         let restarted_loop_ids = reduction
             .events
             .iter()
@@ -1791,6 +1799,8 @@ fn prune_for_catalog(
             })
         });
         changed |= previous_loops != state.looping_sfx.len();
+        let multiple_outputs = active_mode_allows_multiple_outputs(state, modes);
+        changed |= state.apply_output_policy(multiple_outputs);
     }
 
     if active_preset_content_changed {
@@ -1801,6 +1811,18 @@ fn prune_for_catalog(
         changed = true;
     }
     Ok(changed)
+}
+
+/// Without an active mode the room plays through one output.
+fn active_mode_allows_multiple_outputs(
+    state: &PlaybackState,
+    modes: &BTreeMap<String, CatalogMode>,
+) -> bool {
+    state
+        .active_mode_id
+        .as_ref()
+        .and_then(|mode_id| modes.get(mode_id))
+        .is_some_and(|mode| mode.multiple_outputs)
 }
 
 fn emit_events(sender: &broadcast::Sender<DomainEvent>, events: Vec<DomainEvent>) {
@@ -2118,6 +2140,7 @@ mod tests {
                         )]),
                         cue_ids: BTreeSet::from(["arrival".to_owned()]),
                         preset_ids: BTreeSet::from(["cinematic".to_owned()]),
+                        multiple_outputs: false,
                     },
                 )])),
             },
@@ -2266,6 +2289,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn active_mode_owns_the_output_policy() -> Result<(), Box<dyn Error>> {
+        let generation = CatalogGeneration {
+            library: 0,
+            modes: 1,
+        };
+        let mode = |multiple_outputs| ModePlaybackReferences {
+            multiple_outputs,
+            ..ModePlaybackReferences::default()
+        };
+        let catalog = CatalogSnapshot {
+            generation,
+            tracks: None,
+            modes: Some(BTreeMap::from([
+                (
+                    "party".to_owned(),
+                    CatalogMode {
+                        multiple_outputs: true,
+                        ..CatalogMode::default()
+                    },
+                ),
+                ("table".to_owned(), CatalogMode::default()),
+            ])),
+        };
+        let spawned = start_playback_actor(
+            Arc::new(FakeStore::default()),
+            TestClock::default(),
+            FirstRandom,
+            test_config(),
+            catalog,
+        )
+        .await?;
+        let handle = &spawned.handle;
+        for (client_id, default_output) in [("tv", true), ("phone", true)] {
+            let connection = handle.open_connection().await?;
+            handle
+                .register_connection(connection, registration(client_id, default_output))
+                .await?;
+        }
+        let outputs = || vec!["tv".to_owned(), "phone".to_owned()];
+        let set_mode = |mode_id: &str| {
+            ResolvedPlaybackCommand::at_generation(
+                PlaybackCommand::SetActiveMode(Some(mode_id.to_owned())),
+                generation,
+            )
+        };
+        let state = handle.snapshot().await?.state;
+        assert!(!state.multiple_outputs);
+        assert_eq!(state.active_output_device_ids, ["tv"]);
+
+        handle.execute(set_mode("party")).await?;
+        handle
+            .execute(ResolvedPlaybackCommand::direct(
+                PlaybackCommand::SetActiveOutputs(outputs()),
+            ))
+            .await?;
+        let state = handle.snapshot().await?.state;
+        assert!(state.multiple_outputs);
+        assert_eq!(state.active_output_device_ids, ["tv", "phone"]);
+
+        handle.execute(set_mode("table")).await?;
+        let state = handle.snapshot().await?.state;
+        assert!(!state.multiple_outputs);
+        assert_eq!(state.active_output_device_ids, ["tv"]);
+
+        handle.execute(set_mode("party")).await?;
+        handle
+            .execute(ResolvedPlaybackCommand::direct(
+                PlaybackCommand::SetActiveOutputs(outputs()),
+            ))
+            .await?;
+        handle
+            .replace_mode_catalog(ModeCatalogPublication {
+                generation: 2,
+                modes: BTreeMap::from([
+                    ("party".to_owned(), mode(false)),
+                    ("table".to_owned(), mode(false)),
+                ]),
+                changed_presets: BTreeSet::new(),
+            })
+            .await?;
+        let state = handle.snapshot().await?.state;
+        assert!(!state.multiple_outputs);
+        assert_eq!(state.active_output_device_ids, ["tv"]);
+        spawned.handle.shutdown();
+        spawned.task.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn remembered_metadata_changes_projection_without_changing_live_activation()
     -> Result<(), Box<dyn Error>> {
         let store = Arc::new(FakeStore::default());
@@ -2335,6 +2447,7 @@ mod tests {
                     )]),
                     cue_ids: BTreeSet::new(),
                     preset_ids: BTreeSet::new(),
+                    multiple_outputs: false,
                 },
             )])),
         };
@@ -2425,6 +2538,7 @@ mod tests {
             soundboard_items: BTreeMap::new(),
             cue_ids: BTreeSet::new(),
             preset_ids: BTreeSet::from(["calm".to_owned()]),
+            multiple_outputs: false,
         };
         let catalog = CatalogSnapshot {
             generation: initial_generation,
@@ -2435,6 +2549,7 @@ mod tests {
                     soundboard_items: BTreeMap::new(),
                     cue_ids: BTreeSet::new(),
                     preset_ids: BTreeSet::from(["calm".to_owned()]),
+                    multiple_outputs: false,
                 },
             )])),
         };
@@ -2708,6 +2823,7 @@ mod tests {
                     )]),
                     cue_ids: BTreeSet::new(),
                     preset_ids: BTreeSet::new(),
+                    multiple_outputs: false,
                 },
             )])),
         };

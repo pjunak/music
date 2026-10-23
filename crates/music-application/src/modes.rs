@@ -75,6 +75,10 @@ pub struct ModeDocument {
     pub default_crossfade_ms: i64,
     #[serde(default)]
     pub default_soundboard: Option<String>,
+    /// Lets several outputs play together while this mode is active; the
+    /// playback owner enforces one output otherwise.
+    #[serde(default)]
+    pub multiple_outputs: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -289,6 +293,7 @@ pub struct ModePlaybackReferences {
     pub soundboard_items: BTreeMap<String, BTreeSet<String>>,
     pub cue_ids: BTreeSet<String>,
     pub preset_ids: BTreeSet<String>,
+    pub multiple_outputs: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1369,6 +1374,7 @@ fn playback_references(
                         .collect(),
                     cue_ids: mode.cues.keys().cloned().collect(),
                     preset_ids: mode.presets.keys().cloned().collect(),
+                    multiple_outputs: mode.manifest.multiple_outputs,
                 },
             )
         })
@@ -1597,6 +1603,7 @@ mod tests {
                 integrations: Default::default(),
                 default_crossfade_ms: 0,
                 default_soundboard: None,
+                multiple_outputs: false,
                 extra: BTreeMap::new(),
             },
             soundboards: BTreeMap::new(),

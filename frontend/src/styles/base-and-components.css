@@ -945,7 +945,7 @@ kbd,
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-1) var(--space-4);
   padding: var(--space-2) 0.55rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -963,6 +963,23 @@ kbd,
 .mode-manage-actions {
   display: flex;
   gap: var(--space-2);
+}
+/* Per-mode setting on its own line under the name. */
+.mode-manage-option {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted-strong);
+  cursor: pointer;
+}
+.mode-manage-option input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.mode-manage-option:has(input:disabled) {
+  cursor: default;
 }
 .tabs-placeholder {
   flex: 1;
@@ -1998,7 +2015,6 @@ kbd,
   margin: 0 0 var(--space-4);
 }
 
-/* Multi-device picker for fanning audio out to speakers mid-session. */
 /* --- footer Speakers control + popover (replaces the Outputs bar) --- */
 .speakers-control {
   position: relative;
@@ -2042,23 +2058,11 @@ kbd,
 .speakers-popover-head .btn-link-external {
   justify-self: end;
 }
-.speakers-multiple-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  color: var(--fg);
-  cursor: pointer;
+/* Read-only echo of the active mode's output policy (set in Manage modes). */
+.speakers-policy {
   white-space: nowrap;
-}
-.speakers-multiple-toggle input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-.speakers-multiple-toggle:has(input:disabled) {
-  color: var(--muted);
-  cursor: default;
+  text-transform: none;
+  letter-spacing: normal;
 }
 .speaker-row {
   display: grid;
@@ -2138,6 +2142,16 @@ kbd,
   accent-color: var(--accent);
   cursor: pointer;
   flex-shrink: 0;
+}
+/* "No speaker" choice offered when the active mode plays through one output. */
+.speaker-row-none {
+  cursor: pointer;
+}
+.speaker-row-none .speaker-row-name {
+  color: var(--muted-strong);
+}
+.speaker-row-none .speaker-row-check {
+  grid-column: 4;
 }
 .speakers-empty {
   padding: var(--space-2) 0.3rem;

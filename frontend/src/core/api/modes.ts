@@ -80,8 +80,8 @@ export const presetsApi = {
 export const modesAdminApi = {
   create: (id: string, name: string) =>
     api.post<ModeSummary>("/api/modes", { id, name }),
-  rename: (id: string, name: string) =>
-    api.patch<ModeSummary>(`/api/modes/${encodeURIComponent(id)}`, { name }),
+  update: (id: string, patch: Http.UpdateModeRequest) =>
+    api.patch<ModeSummary>(`/api/modes/${encodeURIComponent(id)}`, patch),
   delete: (id: string) =>
     api.delete<void>(`/api/modes/${encodeURIComponent(id)}`),
   reload: () =>

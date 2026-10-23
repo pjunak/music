@@ -4137,6 +4137,9 @@
             },
             "type": "array"
           },
+          "multiple_outputs": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -4173,6 +4176,7 @@
           "has_theme",
           "default_crossfade_ms",
           "default_soundboard",
+          "multiple_outputs",
           "interrupts",
           "integrations",
           "soundboards",
@@ -4202,6 +4206,9 @@
           "id": {
             "type": "string"
           },
+          "multiple_outputs": {
+            "type": "boolean"
+          },
           "name": {
             "type": "string"
           },
@@ -4225,7 +4232,8 @@
           "playlist_categories",
           "has_theme",
           "default_crossfade_ms",
-          "default_soundboard"
+          "default_soundboard",
+          "multiple_outputs"
         ],
         "type": "object"
       },
@@ -5632,6 +5640,10 @@
             },
             "type": "array"
           },
+          "multiple_outputs": {
+            "default": false,
+            "type": "boolean"
+          },
           "position_epoch": {
             "default": 0,
             "type": "integer"
@@ -6689,19 +6701,6 @@
         "required": [
           "loaded",
           "errors"
-        ],
-        "type": "object"
-      },
-      "RenameModeRequest": {
-        "properties": {
-          "name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
         ],
         "type": "object"
       },
@@ -7980,6 +7979,30 @@
             "anyOf": [
               {
                 "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "UpdateModeRequest": {
+        "description": "Mode settings edited in place; omitted fields keep their current value.",
+        "properties": {
+          "multiple_outputs": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -12366,7 +12389,7 @@
         ]
       },
       "patch": {
-        "operationId": "rename_mode",
+        "operationId": "update_mode",
         "parameters": [
           {
             "in": "path",
@@ -12381,7 +12404,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RenameModeRequest"
+                "$ref": "#/components/schemas/UpdateModeRequest"
               }
             }
           },

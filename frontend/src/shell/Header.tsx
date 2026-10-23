@@ -25,16 +25,16 @@ export function Header() {
 
   const [modes, setModes] = useState<ModeSummary[]>([]);
   const [modeMgrOpen, setModeMgrOpen] = useState(false);
-  const refreshModes = useCallback(() => {
+  const refreshModes = useCallback(async () => {
     // /api/modes requires auth; guests will 401 — silently skip.
     if (isGuest) {
       setModes([]);
       return;
     }
-    modesApi.list().then(setModes).catch(() => setModes([]));
+    await modesApi.list().then(setModes).catch(() => setModes([]));
   }, [isGuest]);
   useEffect(() => {
-    refreshModes();
+    void refreshModes();
   }, [refreshModes]);
 
   const openShortcutSheet = useUiTransient((s) => s.setShortcutSheetOpen);
@@ -86,7 +86,7 @@ export function Header() {
               ))}
             </select>
             <IconButton
-              label="Manage modes (create / rename / delete)"
+              label="Manage modes (create / rename / delete / settings)"
               icon={<SettingsIcon />}
               variant="ghost"
               className="header-mode-manage"

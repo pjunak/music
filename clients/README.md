@@ -87,7 +87,8 @@ Console and should keep its own local on/off.
    Registration is enough to make the device available in the Console's **Outputs** picker;
    any connected device can be activated for the current session. Saving it in Settings →
    Devices is optional. The saved **output by default** flag auto-activates that stable
-   `client_id` whenever it reconnects. SFX events are broadcast to every connected socket;
+   `client_id` whenever it reconnects (while the active mode plays through one output, only
+   when no other output is active). SFX events are broadcast to every connected socket;
    *you* still decide whether to play them using the same local/active gate as music (see
    [SFX events](#sfx-events)).
 4. From then on the server pushes a **`state_changed`** on every change:
@@ -118,6 +119,7 @@ following state. Reconnect on close and repeat from step 2.
 | `ambient.queue` / `ambient.history` | What's next / previous (only needed if you show a queue) |
 | `interrupt` | `null`, or an object `{ current_track_id, position_ms, … }` that **takes over** while present (alerts/stingers) |
 | `active_output_device_ids` | The device ids the operator has switched **on** |
+| `multiple_outputs` | Whether the active mode lets several outputs play together (a per-mode setting, `false` without an active mode). When `false` the server keeps at most one id in `active_output_device_ids` |
 | `active_preset_ids` | Ordered effect-preset ids applied to ambient music; simple `<audio>` outputs may ignore these |
 | `preset_revision` | Bumped when stored preset content changes; effect-aware outputs must refetch active manifests even when their ids are unchanged |
 
@@ -197,7 +199,8 @@ For an output, following without driving is exactly right. The narrow consequenc
 
 - **Identity and default-on survive reconnects; live membership does not.** The server removes a
   disconnected socket from `active_output_device_ids`. On reconnect, a remembered **output by
-  default** device is auto-activated; any other connected device can be enabled from the Console.
+  default** device is auto-activated (unless the active mode plays through one output and
+  another is already on); any other connected device can be enabled from the Console.
   An appliance may instead keep a local on/off (the reference client's default) and ignore live
   membership unless `--respect-console` is set.
 - **Position reporting is allowed (and optional).** A guest that is currently an *active*
@@ -212,6 +215,14 @@ Authenticated controllers that let an operator choose a queued slot should send
 `{"type":"ambient_jump_queue","position":N}`. The server performs that jump atomically: the
 selected zero-based slot becomes current, earlier unplayed slots are discarded, and the queue tail
 is preserved. Do not synthesize the jump from separate play and queue actions.
+
+Controllers choose outputs with `{"type":"set_active_outputs","device_ids":[…]}`, sending the
+whole desired list. Whether several may play together belongs to the active mode and is
+mirrored in `multiple_outputs`; offer a single choice when it is `false`. The server enforces
+it either way: a list of several ids keeps only the newest selection (the last id not already
+active), and switching to a one-output mode keeps the longest-running output. Operators edit
+the setting with an authenticated `PATCH /api/modes/{mode_id}` body such as
+`{"multiple_outputs": true}`; omitted fields, including `name`, keep their current value.
 
 ---
 

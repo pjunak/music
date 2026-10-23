@@ -159,6 +159,8 @@ pub fn decode_persisted_state(state_json: &str) -> Result<PlaybackState, Persist
         is_playing: persisted.is_playing,
         active_mode_id: persisted.active_mode_id,
         active_output_device_ids: persisted.active_output_device_ids,
+        // Derived from the active mode once the mode catalog is loaded.
+        multiple_outputs: false,
         default_device_volume: UnitInterval::new(persisted.default_device_volume)?,
         device_volumes: persisted
             .device_volumes

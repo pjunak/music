@@ -43,6 +43,7 @@ function makeState(overrides: Partial<PlayerState> = {}): PlayerState {
     default_device_volume: 1,
     active_mode_id: null,
     active_output_device_ids: [],
+    multiple_outputs: false,
     device_volumes: {},
     active_soundboard_id: null,
     active_preset_ids: [],

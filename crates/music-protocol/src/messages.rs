@@ -101,6 +101,10 @@ pub struct PlayerState {
     pub active_mode_id: Option<String>,
     #[schema(schema_with = string_array_schema)]
     pub active_output_device_ids: Vec<String>,
+    // Whether the active mode lets several outputs play at once. Without it,
+    // the server keeps at most one active output.
+    #[schema(schema_with = boolean_default_false_schema)]
+    pub multiple_outputs: bool,
     #[schema(schema_with = number_default_one_schema)]
     pub default_device_volume: f64,
     #[schema(schema_with = number_map_schema)]
@@ -135,6 +139,7 @@ impl Default for PlayerState {
             is_playing: false,
             active_mode_id: None,
             active_output_device_ids: Vec::new(),
+            multiple_outputs: false,
             default_device_volume: 1.0,
             device_volumes: std::collections::BTreeMap::new(),
             active_soundboard_id: None,

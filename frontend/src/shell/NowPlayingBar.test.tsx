@@ -22,6 +22,7 @@ const playing: PlayerState = {
   is_playing: true,
   active_mode_id: null,
   active_output_device_ids: [],
+  multiple_outputs: false,
   default_device_volume: 1,
   device_volumes: {},
   active_soundboard_id: null,

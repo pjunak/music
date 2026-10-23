@@ -43,6 +43,7 @@ struct ModeSummary {
     default_crossfade_ms: i64,
     #[schema(required = true, schema_with = openapi_nullable_string)]
     default_soundboard: Option<String>,
+    multiple_outputs: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -56,6 +57,7 @@ struct ModeDetail {
     default_crossfade_ms: i64,
     #[schema(required = true, schema_with = openapi_nullable_string)]
     default_soundboard: Option<String>,
+    multiple_outputs: bool,
     interrupts: Vec<InterruptSpec>,
     integrations: IntegrationsSpec,
     #[schema(schema_with = soundboard_map_schema)]
@@ -476,6 +478,7 @@ fn summary(mode: &ModeBundle) -> ModeSummary {
         has_theme: mode.theme_css.is_some(),
         default_crossfade_ms: manifest.default_crossfade_ms,
         default_soundboard: manifest.default_soundboard.clone(),
+        multiple_outputs: manifest.multiple_outputs,
     }
 }
 
@@ -489,6 +492,7 @@ fn detail(mode: &ModeBundle) -> ModeDetail {
         has_theme: mode.theme_css.is_some(),
         default_crossfade_ms: manifest.default_crossfade_ms,
         default_soundboard: manifest.default_soundboard.clone(),
+        multiple_outputs: manifest.multiple_outputs,
         interrupts: manifest.interrupts.iter().map(interrupt_spec).collect(),
         integrations: integrations_spec(&manifest.integrations),
         soundboards: mode

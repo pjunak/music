@@ -1444,6 +1444,7 @@ mod tests {
             integrations: Default::default(),
             default_crossfade_ms: 0,
             default_soundboard: None,
+            multiple_outputs: false,
             extra: BTreeMap::new(),
         }
     }

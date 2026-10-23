@@ -35,6 +35,7 @@ function looksLikePlayerState(v: unknown): boolean {
     return false;
   }
   if (!Array.isArray(v.active_output_device_ids)) return false;
+  if (typeof v.multiple_outputs !== "boolean") return false;
   if (typeof v.is_playing !== "boolean") return false;
   if (!isNumber(v.default_device_volume)) return false;
   return true;

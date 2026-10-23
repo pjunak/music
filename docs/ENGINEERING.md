@@ -93,6 +93,12 @@ is selected using [the validation matrix](VALIDATION.md).
   - `device_volumes` stores canonical absolute software levels by `client_id`.
 - Any connected device may be activated. Designation only auto-activates a
   device when it connects and must not gate manual activation.
+- The active mode's `multiple_outputs` manifest setting decides whether several
+  outputs play together; without an active mode there is one output. The
+  playback owner derives the policy from the mode catalog (never persisted) and
+  enforces it: a single-output request keeps the newest selection, entering a
+  single-output mode keeps the longest-running output, and default-on
+  connections never displace a chosen output. Clients only mirror it.
 - Per-device volume is the only volume model; there is no master volume. Do
   not let presets override device volume.
 - Output clients apply their own level to all audio, including SFX. The server

@@ -89,7 +89,8 @@ MUSIC_SERVER_URL=http://your-music-server:8000 target/release/music-output
 ```
 
 The device appears in the Console's Outputs picker. Saving it in Settings → Devices
-is optional; output by default makes the server activate its stable identity on reconnect.
+is optional; output by default makes the server activate its stable identity on reconnect
+(in a mode that plays through one output, only when no other output is on).
 
 ## Options
 

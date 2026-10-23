@@ -9,6 +9,7 @@
           "lights": null
         },
         "interrupts": [],
+        "multiple_outputs": false,
         "name": "Default",
         "panels": [
           "now-playing",
@@ -32,6 +33,7 @@
           "lights": null
         },
         "interrupts": [],
+        "multiple_outputs": false,
         "name": "Dungeons & Dragons",
         "panels": [
           "now-playing",

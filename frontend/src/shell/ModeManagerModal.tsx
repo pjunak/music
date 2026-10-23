@@ -9,9 +9,10 @@ import { toast } from "@/core/toast";
 import type { ModeSummary } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
-/** Create / rename / delete modes — opened from the header button next to the
- *  mode picker. Modes own everything authored (playlists, soundboards, cues,
- *  EQ presets), so this is the one place to manage the campaign containers. */
+/** Create / rename / delete modes and edit their settings — opened from the
+ *  header button next to the mode picker. Modes own everything authored
+ *  (playlists, soundboards, cues, EQ presets) and whether several speakers may
+ *  play together, so this is the one place to manage the campaign containers. */
 export function ModeManagerModal({
   open,
   onClose,
@@ -27,6 +28,7 @@ export function ModeManagerModal({
 }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   if (!open) return null;
 
@@ -59,11 +61,23 @@ export function ModeManagerModal({
     });
     if (next === null || next.trim() === "" || next.trim() === m.name) return;
     try {
-      await modesAdminApi.rename(m.id, next.trim());
+      await modesAdminApi.update(m.id, { name: next.trim() });
       toast.success("Mode renamed");
       await onChanged();
     } catch (err) {
       toast.error("Rename failed", err instanceof Error ? err.message : undefined);
+    }
+  }
+
+  async function setMultipleOutputs(m: ModeSummary, multipleOutputs: boolean) {
+    setSavingId(m.id);
+    try {
+      await modesAdminApi.update(m.id, { multiple_outputs: multipleOutputs });
+      await onChanged();
+    } catch (err) {
+      toast.error("Save failed", err instanceof Error ? err.message : undefined);
+    } finally {
+      setSavingId(null);
     }
   }
 
@@ -141,6 +155,20 @@ export function ModeManagerModal({
                       Delete
                     </button>
                   </span>
+                  <label
+                    className="mode-manage-option"
+                    title="When off, choosing a speaker replaces the one playing"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={m.multiple_outputs}
+                      disabled={savingId === m.id}
+                      onChange={(event) =>
+                        void setMultipleOutputs(m, event.target.checked)
+                      }
+                    />
+                    Play on several speakers at once
+                  </label>
                 </li>
               ))}
             </ul>

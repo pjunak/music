@@ -11,6 +11,7 @@ const VALID_PLAYER_STATE = {
   ambient: { current_track_id: 1, queue: [], history: [], position_ms: 0, loop: "off" },
   connected_devices: [],
   active_output_device_ids: [],
+  multiple_outputs: false,
   is_playing: false,
   default_device_volume: 0.8,
   revision: 0,
@@ -30,6 +31,13 @@ describe("validateWsMessage", () => {
   it("rejects a state_snapshot missing your_device_id", () => {
     expect(
       validateWsMessage({ type: "state_snapshot", state: VALID_PLAYER_STATE }),
+    ).toBeNull();
+  });
+
+  it("rejects a state without the mode's output policy", () => {
+    const { multiple_outputs: _omitted, ...withoutPolicy } = VALID_PLAYER_STATE;
+    expect(
+      validateWsMessage({ type: "state_changed", state: withoutPolicy }),
     ).toBeNull();
   });
 

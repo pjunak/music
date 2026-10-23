@@ -41,6 +41,7 @@ function mode(id: string, name: string): ModeSummary {
     has_theme: false,
     default_crossfade_ms: 1200,
     default_soundboard: null,
+    multiple_outputs: false,
   };
 }
 
