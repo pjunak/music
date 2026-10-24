@@ -188,6 +188,7 @@ mod tests {
             size_bytes: 1,
             mtime_unix_seconds: 1,
             added_at_unix_seconds: 1,
+            original: None,
         })
     }
     fn release(id: &str, second: &str) -> ReleaseDetail {

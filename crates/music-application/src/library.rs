@@ -7,7 +7,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use music_domain::{IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata};
+use music_domain::{
+    IndexedTrack, LibraryGeneration, LibraryPath, TrackId, TrackMetadata, TrackOriginal,
+};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -42,6 +44,9 @@ pub use mutation::{
 };
 
 const LIBRARY_COMMAND_CAPACITY: usize = 4;
+
+/// Extension of the streaming copies that conversion publishes in the library.
+pub const CONVERTED_TRACK_EXTENSION: &str = "m4a";
 
 pub type LibraryDependencyError = Box<dyn Error + Send + Sync>;
 pub type LibraryFuture<'a, T> =
@@ -255,6 +260,25 @@ pub trait LibraryMutationRepository: LibraryRepository + RecoveryJournalReposito
         path: &'a LibraryPath,
         patch: &'a TrackMetadataPatch,
         discovered: Option<&'a DiscoveredTrack>,
+        original: Option<&'a TrackOriginal>,
+    ) -> LibraryFuture<'a, LibraryTrackMutationCommit>;
+
+    fn commit_track_conversion<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        track_id: TrackId,
+        source: &'a LibraryPath,
+        staged: &'a LibraryPath,
+        discovered: &'a DiscoveredTrack,
+        original: &'a TrackOriginal,
+    ) -> LibraryFuture<'a, LibraryTrackMutationCommit>;
+
+    fn commit_track_restore<'a>(
+        &'a self,
+        journal_id: &'a crate::recovery::RecoveryJournalId,
+        track_id: TrackId,
+        path: &'a LibraryPath,
+        discovered: &'a DiscoveredTrack,
     ) -> LibraryFuture<'a, LibraryTrackMutationCommit>;
 
     fn commit_upload<'a>(
@@ -344,6 +368,12 @@ pub enum LibraryCoordinatorError {
     TrackNotFound {
         track_id: TrackId,
     },
+    TrackAlreadyConverted {
+        track_id: TrackId,
+    },
+    TrackNotConverted {
+        track_id: TrackId,
+    },
     InvalidCleanupBatchSize,
     InvalidCleanupRevertSize,
     InvalidCleanupScopeLabel,
@@ -378,6 +408,20 @@ impl Display for LibraryCoordinatorError {
             Self::TrackNotFound { track_id } => {
                 write!(formatter, "library track {} was not found", track_id.get())
             }
+            Self::TrackAlreadyConverted { track_id } => {
+                write!(
+                    formatter,
+                    "library track {} is already converted",
+                    track_id.get()
+                )
+            }
+            Self::TrackNotConverted { track_id } => {
+                write!(
+                    formatter,
+                    "library track {} has no kept original",
+                    track_id.get()
+                )
+            }
             Self::InvalidCleanupBatchSize => write!(
                 formatter,
                 "cleanup apply requires between 1 and {MAX_CLEANUP_APPLY_OPERATIONS} operations"
@@ -410,6 +454,8 @@ impl Error for LibraryCoordinatorError {
             | Self::RecoveryConflict
             | Self::InvalidMutationOutcome
             | Self::TrackNotFound { .. }
+            | Self::TrackAlreadyConverted { .. }
+            | Self::TrackNotConverted { .. }
             | Self::InvalidCleanupBatchSize
             | Self::InvalidCleanupRevertSize
             | Self::InvalidCleanupScopeLabel
@@ -423,6 +469,7 @@ impl Error for LibraryCoordinatorError {
 
 pub type TrackMoveBatchResults = Vec<(TrackId, Result<IndexedTrack, LibraryCoordinatorError>)>;
 pub type TrackDeleteBatchResults = Vec<(TrackId, Result<(), LibraryCoordinatorError>)>;
+pub type TrackRestoreBatchResults = Vec<(TrackId, Result<IndexedTrack, LibraryCoordinatorError>)>;
 
 #[derive(Debug)]
 pub struct TrackMetadataBatchItem {
@@ -653,6 +700,42 @@ impl LibraryCoordinatorHandle {
             .map_err(|_| LibraryCoordinatorError::Unavailable)?
     }
 
+    /// Publishes `staged`, an encoded streaming copy beside the track's file, in
+    /// place of the track and keeps the replaced file as its original. A staged
+    /// file the conversion did not consume is removed unless recovery needs it.
+    pub async fn convert_track(
+        &self,
+        track_id: TrackId,
+        staged: LibraryPath,
+    ) -> Result<IndexedTrack, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::ConvertTrack {
+                track_id,
+                staged,
+                reply,
+            })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
+    pub async fn restore_tracks(
+        &self,
+        track_ids: Vec<TrackId>,
+    ) -> Result<TrackRestoreBatchResults, LibraryCoordinatorError> {
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .send(LibraryCommand::RestoreTracks { track_ids, reply })
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?;
+        response
+            .await
+            .map_err(|_| LibraryCoordinatorError::Unavailable)?
+    }
+
     pub async fn apply_cleanup(
         &self,
         batch_id: Option<i64>,
@@ -822,6 +905,15 @@ enum LibraryCommand {
         policy: UploadConflictPolicy,
         reply: oneshot::Sender<Result<Vec<LibraryUploadBatchItem>, LibraryCoordinatorError>>,
     },
+    ConvertTrack {
+        track_id: TrackId,
+        staged: LibraryPath,
+        reply: oneshot::Sender<Result<IndexedTrack, LibraryCoordinatorError>>,
+    },
+    RestoreTracks {
+        track_ids: Vec<TrackId>,
+        reply: oneshot::Sender<Result<TrackRestoreBatchResults, LibraryCoordinatorError>>,
+    },
     ApplyCleanup {
         batch_id: Option<i64>,
         scope_label: String,
@@ -927,6 +1019,18 @@ impl LibraryCoordinator {
                             reply,
                         } => {
                             let result = self.publish_uploads_once(uploads, policy).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::ConvertTrack {
+                            track_id,
+                            staged,
+                            reply,
+                        } => {
+                            let result = self.convert_track_once(track_id, staged).await;
+                            let _ = reply.send(result);
+                        }
+                        LibraryCommand::RestoreTracks { track_ids, reply } => {
+                            let result = self.restore_tracks_once(track_ids).await;
                             let _ = reply.send(result);
                         }
                         LibraryCommand::ApplyCleanup {
@@ -1338,6 +1442,119 @@ impl LibraryCoordinator {
         Ok(results)
     }
 
+    async fn convert_track_once(
+        &self,
+        track_id: TrackId,
+        staged: LibraryPath,
+    ) -> Result<IndexedTrack, LibraryCoordinatorError> {
+        let result = self.convert_staged_track(track_id, &staged).await;
+        if result
+            .as_ref()
+            .is_err_and(|error| !mutation_error_requires_recovery(error))
+        {
+            let _ = self.effects.discard_upload(&staged).await;
+        }
+        result
+    }
+
+    async fn convert_staged_track(
+        &self,
+        track_id: TrackId,
+        staged: &LibraryPath,
+    ) -> Result<IndexedTrack, LibraryCoordinatorError> {
+        let track = self
+            .repository
+            .track(track_id)
+            .await
+            .map_err(|source| dependency("load a track for conversion", source))?
+            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })?;
+        if track.original.is_some() {
+            return Err(LibraryCoordinatorError::TrackAlreadyConverted { track_id });
+        }
+        let destination = track
+            .path
+            .with_extension(CONVERTED_TRACK_EXTENSION)
+            .map_err(|source| dependency("derive the converted track path", Box::new(source)))?;
+        let mutation = LibraryFileMutation::ConvertTrack {
+            track_id,
+            source: track.path,
+            staged: staged.clone(),
+            destination,
+        };
+        let applied = self.apply_mutation(mutation, true).await?;
+        if !matches!(
+            applied.outcome,
+            LibraryFileMutationOutcome::TrackConverted {
+                track_id: converted_id,
+                ..
+            } if converted_id == track_id
+        ) {
+            return Err(LibraryCoordinatorError::InvalidMutationOutcome);
+        }
+        applied
+            .track
+            .ok_or(LibraryCoordinatorError::InvalidMutationOutcome)
+    }
+
+    async fn restore_track_once(
+        &self,
+        track_id: TrackId,
+    ) -> Result<IndexedTrack, LibraryCoordinatorError> {
+        let track = self
+            .repository
+            .track(track_id)
+            .await
+            .map_err(|source| dependency("load a track for restoring", source))?
+            .ok_or(LibraryCoordinatorError::TrackNotFound { track_id })?;
+        let destination = track
+            .original_path()
+            .ok_or(LibraryCoordinatorError::TrackNotConverted { track_id })?;
+        let mutation = LibraryFileMutation::RestoreTrack {
+            track_id,
+            path: track.path,
+            destination,
+        };
+        let applied = self.apply_mutation(mutation, false).await?;
+        if !matches!(
+            applied.outcome,
+            LibraryFileMutationOutcome::TrackRestored {
+                track_id: restored_id,
+                ..
+            } if restored_id == track_id
+        ) {
+            return Err(LibraryCoordinatorError::InvalidMutationOutcome);
+        }
+        applied
+            .track
+            .ok_or(LibraryCoordinatorError::InvalidMutationOutcome)
+    }
+
+    async fn restore_tracks_once(
+        &self,
+        track_ids: Vec<TrackId>,
+    ) -> Result<TrackRestoreBatchResults, LibraryCoordinatorError> {
+        let mut results = Vec::with_capacity(track_ids.len());
+        let mut succeeded = false;
+        let mut track_ids = track_ids.into_iter();
+        while let Some(track_id) = track_ids.next() {
+            let result = self.restore_track_once(track_id).await;
+            succeeded |= result.is_ok();
+            let stop = result.as_ref().is_err_and(mutation_error_requires_recovery);
+            results.push((track_id, result));
+            if stop {
+                results
+                    .extend(track_ids.map(|track_id| {
+                        (track_id, Err(LibraryCoordinatorError::RecoveryConflict))
+                    }));
+                break;
+            }
+        }
+        if succeeded {
+            self.publish_current_catalog().await?;
+        }
+        Ok(results)
+    }
+
     async fn discard_staged_uploads(&self, uploads: impl IntoIterator<Item = StagedLibraryUpload>) {
         for upload in uploads {
             let _ = self.effects.discard_upload(&upload.staged).await;
@@ -1629,12 +1846,20 @@ where
             LibraryFileMutationOutcome::TrackMetadataUpdated {
                 track_id: updated_id,
                 discovered,
+                original,
             },
         ) if track_id == &updated_id
             && discovered.as_ref().is_none_or(|track| &track.path == path) =>
         {
             let commit = repository
-                .commit_track_metadata(&journal.id, *track_id, path, patch, discovered.as_ref())
+                .commit_track_metadata(
+                    &journal.id,
+                    *track_id,
+                    path,
+                    patch,
+                    discovered.as_ref(),
+                    original.as_ref(),
+                )
                 .await
                 .map_err(|source| dependency("commit a track metadata update", source))?;
             Ok((
@@ -1642,6 +1867,7 @@ where
                     outcome: LibraryFileMutationOutcome::TrackMetadataUpdated {
                         track_id: updated_id,
                         discovered,
+                        original,
                     },
                     affected_tracks: 1,
                     track: Some(commit.track),
@@ -1683,6 +1909,63 @@ where
                     },
                     affected_tracks,
                     track: commit.track,
+                },
+                Some(commit.status),
+            ))
+        }
+        (
+            LibraryFileMutation::ConvertTrack {
+                track_id,
+                source,
+                staged,
+                destination,
+            },
+            LibraryFileMutationOutcome::TrackConverted {
+                track_id: converted_id,
+                track,
+                original,
+            },
+        ) if track_id == &converted_id && destination == &track.path => {
+            let commit = repository
+                .commit_track_conversion(&journal.id, *track_id, source, staged, &track, &original)
+                .await
+                .map_err(|source| dependency("commit a track conversion", source))?;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::TrackConverted {
+                        track_id: converted_id,
+                        track,
+                        original,
+                    },
+                    affected_tracks: 1,
+                    track: Some(commit.track),
+                },
+                Some(commit.status),
+            ))
+        }
+        (
+            LibraryFileMutation::RestoreTrack {
+                track_id,
+                path,
+                destination,
+            },
+            LibraryFileMutationOutcome::TrackRestored {
+                track_id: restored_id,
+                track,
+            },
+        ) if track_id == &restored_id && destination == &track.path => {
+            let commit = repository
+                .commit_track_restore(&journal.id, *track_id, path, &track)
+                .await
+                .map_err(|source| dependency("commit a track restore", source))?;
+            Ok((
+                AppliedLibraryMutation {
+                    outcome: LibraryFileMutationOutcome::TrackRestored {
+                        track_id: restored_id,
+                        track,
+                    },
+                    affected_tracks: 1,
+                    track: Some(commit.track),
                 },
                 Some(commit.status),
             ))

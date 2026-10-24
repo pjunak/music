@@ -82,6 +82,23 @@ is selected using [the validation matrix](VALIDATION.md).
   [rich metadata mappings](LIBRARY_RICH_METADATA.md) for format support and evidence semantics.
 - Library cleanup is propose -> review -> journal -> execute. Detection must
   remain pure and must never mutate files while merely scanning.
+- Conversion needs `MUSIC_ORIGINALS_DIR`, a separate root that neither contains nor
+  sits inside `MUSIC_DIR`. Only sources above 256 kbps (lossless files without a
+  known rate count as above) with natively writable tags convert, to 192 kbps AAC
+  in `.m4a` beside the track, and a copy that is not smaller is discarded. The
+  `library_conversion` job encodes and verifies tags, cover and duration; the
+  coordinator's journaled `convert_track` keeps the replaced file at the same
+  relative path under the originals root and keeps the track ID. `track_originals`
+  stores the original's extension, size and mtime; a missing row means the library
+  file is the original.
+- The original is part of the track. Track and folder moves, renames, deletes and
+  tag edits (including cleanup and its reverts) apply to it in the same journaled
+  mutation, before the library file where a refusal must leave both untouched.
+  `restore_track` puts it back. Uploads convert only through the background job,
+  never inline; scans never convert or touch originals.
+- Copies between roots on different filesystems are synced and keep the mtime.
+  Context analysis reads the original and signs a converted track with the
+  original's path, size and mtime, so conversion and restore keep stored analysis current.
 - SFX paths are rooted under `SFX_LIBRARY_DIR`; serving remains gated by loaded
   soundboard references.
 

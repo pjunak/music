@@ -2,6 +2,7 @@ import type { FoldersResponse, Track, TreeResponse } from "@/core/types";
 import type * as Http from "@/generated/http";
 
 import { BASE, api, uploadWithProgress } from "./http";
+import type { BackgroundJob } from "./jobs";
 
 export type LibrarySortKey =
   | "title"
@@ -49,6 +50,11 @@ export type BulkActionSkip = Http.BulkActionSkip;
 export type BulkMoveResult = Http.BulkMoveResult;
 
 export type BulkDeleteResult = Http.BulkDeleteResult;
+
+export type BulkRestoreResult = Http.BulkRestoreResult;
+
+/** Background job kind that converts tracks into lighter streaming copies. */
+export const LIBRARY_CONVERSION_JOB_KIND = "library_conversion";
 
 export const libraryApi = {
   getTrack: (id: number) => api.get<Track>(`/api/library/tracks/${id}`),
@@ -103,6 +109,16 @@ export const libraryApi = {
     }),
   bulkDelete: (trackIds: number[]) =>
     api.post<BulkDeleteResult>("/api/library/tracks/bulk-delete", {
+      track_ids: trackIds,
+    }),
+  /** Starts converting the given tracks, or every eligible track when omitted. */
+  convert: (trackIds?: number[]) =>
+    api.post<BackgroundJob>("/api/library/convert", {
+      track_ids: trackIds ?? null,
+    }),
+  /** Puts the kept originals of converted tracks back in the library. */
+  bulkRestore: (trackIds: number[]) =>
+    api.post<BulkRestoreResult>("/api/library/tracks/bulk-restore", {
       track_ids: trackIds,
     }),
   coverUrl: (id: number) => `${BASE}/api/library/tracks/${id}/cover`,

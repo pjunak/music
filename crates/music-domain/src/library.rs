@@ -53,6 +53,27 @@ pub struct IndexedTrack {
     pub size_bytes: u64,
     pub mtime_unix_seconds: i64,
     pub added_at_unix_seconds: i64,
+    pub original: Option<TrackOriginal>,
+}
+
+impl IndexedTrack {
+    /// Where a converted track's original file sits under the originals root:
+    /// the library path with the original file's extension.
+    #[must_use]
+    pub fn original_path(&self) -> Option<LibraryPath> {
+        self.original
+            .as_ref()
+            .and_then(|original| self.path.with_extension(&original.extension).ok())
+    }
+}
+
+/// The kept original of a track whose library file was converted for streaming.
+/// Its size and mtime are the original file's, so analysis identity survives conversion.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TrackOriginal {
+    pub extension: String,
+    pub size_bytes: u64,
+    pub mtime_unix_seconds: i64,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

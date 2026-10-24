@@ -40,6 +40,12 @@ impl Default for BlockingMediaExecutor {
 }
 
 impl BlockingMediaExecutor {
+    /// One slot for work that its owner already runs one item at a time, kept
+    /// apart so long encodes never take request-path media slots.
+    pub(crate) fn single() -> Self {
+        Self::with_capacity(1)
+    }
+
     fn with_capacity(capacity: usize) -> Self {
         Self {
             slots: Arc::new(Semaphore::new(capacity)),

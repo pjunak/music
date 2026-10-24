@@ -28,8 +28,9 @@ pub use discovery::{
 };
 pub use metadata::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataError, MetadataWriteCapability,
-    StagedTagUpdate, TagField, TagPatch, TagValue, metadata_write_capability, read_audio_metadata,
-    read_cleanup_evidence, stage_tag_update,
+    STREAMING_BITRATE_KBPS, StagedTagUpdate, StreamingAssessment, StreamingEncoder, TagField,
+    TagPatch, TagValue, metadata_write_capability, read_audio_metadata, read_cleanup_evidence,
+    stage_tag_update,
 };
 pub use mode_mutation::{FilesystemModeMutations, ModeFilesystemMutationError};
 pub use modes::FilesystemModeCatalogSource;

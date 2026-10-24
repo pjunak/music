@@ -39,11 +39,13 @@ use uuid::Uuid;
 
 use crate::auth::Operator;
 use crate::blocking::{BlockingMediaError, BlockingMediaExecutor};
+use crate::conversion::{ConversionParameters, LIBRARY_CONVERSION_JOB_KIND};
 use crate::error::{
     ApiError, HttpValidationErrorBody, openapi_datetime, openapi_integer, openapi_nullable_integer,
     openapi_nullable_string, openapi_number,
 };
 use crate::http::HttpState;
+use crate::jobs::{BackgroundJobResponse, job_response, map_job_error};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeLibrary {
@@ -53,6 +55,9 @@ pub(crate) struct RuntimeLibrary {
     pub(crate) cleanup_sources: Arc<CleanupSourceService>,
     pub(crate) coordinator: LibraryCoordinatorHandle,
     pub(crate) root: LibraryRoot,
+    /// Where converted tracks keep their originals; `None` disables conversion.
+    pub(crate) originals: Option<LibraryRoot>,
+    pub(crate) convert_uploads: bool,
     pub(crate) metadata: MetadataAdapter,
     pub(crate) max_upload_files: usize,
     pub(crate) max_upload_file_bytes: u64,
@@ -76,6 +81,8 @@ pub(crate) fn library_router() -> OpenApiRouter<HttpState> {
         .routes(routes!(bulk_update_metadata))
         .routes(routes!(bulk_move_tracks))
         .routes(routes!(bulk_delete_tracks))
+        .routes(routes!(bulk_restore_tracks))
+        .routes(routes!(convert_tracks))
         .routes(routes!(track))
         .routes(routes!(update_metadata))
         .routes(routes!(move_track))
@@ -115,6 +122,9 @@ struct TrackResponse {
     added_at: String,
     display_title: String,
     origin: String,
+    /// Extension of the kept original when the library file is a streaming copy.
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    original_format: Option<String>,
 }
 
 impl TryFrom<IndexedTrack> for TrackResponse {
@@ -141,6 +151,7 @@ impl TryFrom<IndexedTrack> for TrackResponse {
             added_at: crate::auth::format_rfc3339(UnixSeconds::new(track.added_at_unix_seconds))?,
             display_title: track.display_title,
             origin: track.origin,
+            original_format: track.original.map(|original| original.extension),
         })
     }
 }
@@ -244,6 +255,56 @@ struct BulkMoveResponse {
     skipped: Vec<BulkActionSkipResponse>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = BulkRestoreRequest)]
+struct BulkRestoreRequest {
+    #[schema(schema_with = bounded_track_id_array_schema)]
+    track_ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = BulkRestoreResult)]
+struct BulkRestoreResponse {
+    restored: Vec<TrackResponse>,
+    skipped: Vec<BulkActionSkipResponse>,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[schema(as = LibraryConversionRequest)]
+struct ConversionRequest {
+    /// Tracks to convert; omit to convert every eligible track in the library.
+    #[serde(default)]
+    #[schema(required = false, schema_with = nullable_bounded_track_id_array_schema)]
+    track_ids: Option<Vec<i64>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum StreamVariant {
+    /// The library file: the streaming copy of a converted track.
+    #[default]
+    Library,
+    /// The kept original of a converted track, or the library file otherwise.
+    Original,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct StreamQuery {
+    /// `original` serves a converted track's kept original instead of its streaming copy.
+    #[serde(default)]
+    #[param(schema_with = stream_variant_schema, required = false)]
+    variant: StreamVariant,
+}
+
+fn stream_variant_schema() -> RefOr<Schema> {
+    ObjectBuilder::new()
+        .schema_type(Type::String)
+        .enum_values(Some(["library", "original"]))
+        .default(Some(serde_json::json!("library")))
+        .into()
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[schema(as = BulkDeleteResult)]
 struct BulkDeleteResponse {
@@ -321,6 +382,9 @@ struct UploadResponse {
     saved: Vec<TrackResponse>,
     destination: String,
     skipped: Vec<String>,
+    /// The background job converting the saved tracks, when uploads convert.
+    #[schema(required = true, schema_with = openapi_nullable_string)]
+    conversion_job_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
@@ -607,6 +671,16 @@ struct FolderDeleteQuery {
     #[serde(default)]
     #[param(default = false)]
     recursive: bool,
+}
+
+fn nullable_bounded_track_id_array_schema() -> RefOr<Schema> {
+    Schema::AnyOf(
+        AnyOfBuilder::new()
+            .item(bounded_track_id_array_schema())
+            .item(ObjectBuilder::new().schema_type(Type::Null).build())
+            .build(),
+    )
+    .into()
 }
 
 fn bounded_track_id_array_schema() -> RefOr<Schema> {
@@ -1139,6 +1213,105 @@ async fn bulk_delete_tracks(
 }
 
 #[utoipa::path(
+    post,
+    path = "/library/tracks/bulk-restore",
+    request_body = BulkRestoreRequest,
+    responses(
+        (status = 200, description = "Successful Response", body = BulkRestoreResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn bulk_restore_tracks(
+    State(state): State<HttpState>,
+    _operator: Operator,
+    payload: Result<Json<BulkRestoreRequest>, JsonRejection>,
+) -> Result<Json<BulkRestoreResponse>, ApiError> {
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if !(1..=1000).contains(&payload.track_ids.len()) {
+        return Err(ApiError::validation());
+    }
+    let mut track_ids = Vec::with_capacity(payload.track_ids.len());
+    let mut skipped = Vec::new();
+    for raw_track_id in payload.track_ids {
+        match TrackId::new(raw_track_id) {
+            Ok(track_id) => track_ids.push(track_id),
+            Err(_) => skipped.push(BulkActionSkipResponse {
+                track_id: raw_track_id,
+                reason: "not found".to_owned(),
+            }),
+        }
+    }
+    let results = library(&state)?
+        .coordinator
+        .restore_tracks(track_ids)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %ErrorChain(&error), "bulk track restore coordinator failed");
+            ApiError::internal()
+        })?;
+    let mut restored = Vec::new();
+    for (track_id, result) in results {
+        match result {
+            Ok(track) => restored.push(track.try_into()?),
+            Err(error) => skipped.push(BulkActionSkipResponse {
+                track_id: track_id.get(),
+                reason: bulk_mutation_reason(&error),
+            }),
+        }
+    }
+    Ok(Json(BulkRestoreResponse { restored, skipped }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/library/convert",
+    request_body = ConversionRequest,
+    responses(
+        (status = 202, description = "Successful Response", body = BackgroundJobResponse),
+        (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
+    ),
+    tag = "library"
+)]
+async fn convert_tracks(
+    State(state): State<HttpState>,
+    _operator: Operator,
+    payload: Result<Json<ConversionRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<BackgroundJobResponse>), ApiError> {
+    let Json(payload) = payload.map_err(|_| ApiError::validation())?;
+    if payload
+        .track_ids
+        .as_ref()
+        .is_some_and(|ids| !(1..=1000).contains(&ids.len()))
+    {
+        return Err(ApiError::validation());
+    }
+    if library(&state)?.originals.is_none() {
+        return Err(ApiError::conflict(
+            "Set MUSIC_ORIGINALS_DIR so converted tracks can keep their originals.",
+        ));
+    }
+    let job = enqueue_conversion(&state, payload.track_ids).await?;
+    Ok((StatusCode::ACCEPTED, Json(job_response(job)?)))
+}
+
+async fn enqueue_conversion(
+    state: &HttpState,
+    track_ids: Option<Vec<i64>>,
+) -> Result<music_application::jobs::JobRecord, ApiError> {
+    let parameters = serde_json::to_value(ConversionParameters { track_ids }).map_err(|error| {
+        ApiError::internal_from("conversion parameters could not be encoded", &error)
+    })?;
+    state
+        .jobs
+        .as_deref()
+        .ok_or_else(ApiError::service_unavailable)?
+        .enqueue(LIBRARY_CONVERSION_JOB_KIND, parameters)
+        .await
+        .map_err(map_job_error)
+}
+
+#[utoipa::path(
     get,
     path = "/library/tracks/{track_id}",
     params(("track_id" = i128, Path, description = "Track identifier")),
@@ -1250,7 +1423,7 @@ async fn delete_track(
 #[utoipa::path(
     get,
     path = "/library/tracks/{track_id}/stream",
-    params(("track_id" = i128, Path, description = "Track identifier")),
+    params(("track_id" = i128, Path, description = "Track identifier"), StreamQuery),
     responses(
         (status = 200, description = "Successful Response", body = serde_json::Value),
         (status = 422, description = "Validation Error", body = HttpValidationErrorBody)
@@ -1260,15 +1433,23 @@ async fn delete_track(
 async fn stream(
     State(state): State<HttpState>,
     track_id: Result<Path<i64>, PathRejection>,
+    query: Result<Query<StreamQuery>, QueryRejection>,
     request: Request,
 ) -> Result<Response, ApiError> {
     let _ = crate::auth::optional_session(&state, request.headers(), SessionTouch::UpdateLastSeen)
         .await?;
     let Path(raw_track_id) = track_id.map_err(|_| ApiError::validation())?;
+    let Query(query) = query.map_err(|_| ApiError::validation())?;
     let track = indexed_track(&state, raw_track_id).await?;
     let library = library(&state)?;
-    let root = library.root.clone();
-    let path = track.path;
+    let original = (query.variant == StreamVariant::Original)
+        .then(|| track.original_path())
+        .flatten()
+        .zip(library.originals.clone());
+    let (root, path) = match original {
+        Some((path, originals)) => (originals, path),
+        None => (library.root.clone(), track.path),
+    };
     let absolute = library
         .media_executor
         .execute(move || resolve_library_media_file(&root, &path))
@@ -1428,19 +1609,34 @@ async fn upload(
         match result {
             LibraryUploadBatchItem::Published {
                 track: Some(track), ..
-            } => saved.push((*track).try_into()?),
+            } => saved.push(TrackResponse::try_from(*track)?),
             LibraryUploadBatchItem::Published { track: None, .. } => {}
             LibraryUploadBatchItem::Skipped { requested } => {
                 skipped.push(requested.file_name().to_owned());
             }
         }
     }
+    let conversion_job_id =
+        if library.convert_uploads && library.originals.is_some() && !saved.is_empty() {
+            let track_ids = saved.iter().map(|track| track.id).collect();
+            // The upload is already published; a conversion that cannot start leaves it as is.
+            match enqueue_conversion(&state, Some(track_ids)).await {
+                Ok(job) => Some(job.id),
+                Err(_) => {
+                    tracing::warn!("uploaded tracks could not be queued for conversion");
+                    None
+                }
+            }
+        } else {
+            None
+        };
     Ok((
         StatusCode::CREATED,
         Json(UploadResponse {
             saved,
             destination: directory.map_or_else(String::new, LibraryPath::into_string),
             skipped,
+            conversion_job_id,
         }),
     ))
 }
@@ -1807,6 +2003,18 @@ fn bulk_metadata_reason(error: &LibraryCoordinatorError) -> String {
 fn bulk_mutation_reason(error: &LibraryCoordinatorError) -> String {
     match error {
         LibraryCoordinatorError::TrackNotFound { .. } => "not found",
+        LibraryCoordinatorError::TrackNotConverted { .. } => "not converted",
+        LibraryCoordinatorError::TrackAlreadyConverted { .. } => "already converted",
+        LibraryCoordinatorError::Mutation(failure)
+            if failure.code() == "track_original_missing" =>
+        {
+            "kept original missing"
+        }
+        LibraryCoordinatorError::Mutation(failure)
+            if failure.code() == "track_conversion_unavailable" =>
+        {
+            "no originals folder configured"
+        }
         LibraryCoordinatorError::Mutation(failure) => match failure.kind() {
             LibraryMutationFailureKind::NotFound => "source file missing",
             LibraryMutationFailureKind::Conflict => "destination already exists",

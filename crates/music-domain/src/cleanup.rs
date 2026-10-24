@@ -2068,6 +2068,7 @@ mod tests {
             size_bytes: 0,
             mtime_unix_seconds: 0,
             added_at_unix_seconds: 0,
+            original: None,
         })
     }
 

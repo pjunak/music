@@ -18,6 +18,7 @@ use music_application::library::{
 use music_application::recovery::RecoveryJournalId;
 use music_domain::{
     IndexedTrack, LibraryGeneration, LibraryPath, NameVerdicts, TrackId, TrackMetadata,
+    TrackOriginal,
 };
 use serde_json::{Value, json};
 use sqlx::sqlite::SqliteRow;
@@ -28,7 +29,10 @@ use crate::{SqliteStorage, StorageError};
 
 pub(crate) const TRACK_COLUMNS: &str = "id, path, title, artist, album_artist, album, track_no, disc_no, \
     year, release_date, original_release_date, composer, genre, length_s, bpm, display_title, origin, size_bytes, mtime, \
-    CAST(strftime('%s', added_at) AS INTEGER) AS added_at_unix_seconds";
+    CAST(strftime('%s', added_at) AS INTEGER) AS added_at_unix_seconds, \
+    (SELECT extension FROM track_originals WHERE track_id = tracks.id) AS original_extension, \
+    (SELECT size_bytes FROM track_originals WHERE track_id = tracks.id) AS original_size_bytes, \
+    (SELECT mtime FROM track_originals WHERE track_id = tracks.id) AS original_mtime";
 const MAX_RECONCILIATION_TRACKS: usize = 1_000_000;
 const RECONCILIATION_BATCH_SIZE: usize = 500;
 const MAX_CLEANUP_BATCH_JSON_BYTES: i64 = 16 * 1024 * 1024;
@@ -522,6 +526,7 @@ impl CleanupMutationRepository for SqliteStorage {
                     LibraryFileMutationOutcome::TrackMetadataUpdated {
                         track_id: updated_id,
                         discovered,
+                        original,
                     },
                 ) if track_id == &updated_id
                     && discovered.as_ref().is_none_or(|track| &track.path == path) =>
@@ -529,10 +534,13 @@ impl CleanupMutationRepository for SqliteStorage {
                     let (commit, batch_id) = self
                         .commit_library_track_metadata_with_cleanup(
                             journal_id,
-                            *track_id,
-                            path,
-                            patch,
-                            discovered.as_ref(),
+                            TrackMetadataCommit {
+                                track_id: *track_id,
+                                path,
+                                patch,
+                                discovered: discovered.as_ref(),
+                                original: original.as_ref(),
+                            },
                             MutationJournalContext::CleanupApply(append),
                         )
                         .await
@@ -618,6 +626,7 @@ impl CleanupMutationRepository for SqliteStorage {
                     LibraryFileMutationOutcome::TrackMetadataUpdated {
                         track_id: updated_id,
                         discovered,
+                        original,
                     },
                 ) if track_id == &updated_id
                     && discovered.as_ref().is_none_or(|track| &track.path == path) =>
@@ -625,10 +634,13 @@ impl CleanupMutationRepository for SqliteStorage {
                     let (commit, batch_id) = self
                         .commit_library_track_metadata_with_cleanup(
                             journal_id,
-                            *track_id,
-                            path,
-                            patch,
-                            discovered.as_ref(),
+                            TrackMetadataCommit {
+                                track_id: *track_id,
+                                path,
+                                patch,
+                                discovered: discovered.as_ref(),
+                                original: original.as_ref(),
+                            },
                             MutationJournalContext::CleanupRevert(revert),
                         )
                         .await
@@ -826,11 +838,76 @@ impl LibraryMutationRepository for SqliteStorage {
         path: &'a LibraryPath,
         patch: &'a TrackMetadataPatch,
         discovered: Option<&'a DiscoveredTrack>,
+        original: Option<&'a TrackOriginal>,
     ) -> LibraryFuture<'a, LibraryTrackMutationCommit> {
         Box::pin(async move {
-            self.commit_library_track_metadata(journal_id, track_id, path, patch, discovered)
-                .await
-                .map_err(box_storage)
+            self.commit_library_track_metadata_with_cleanup(
+                journal_id,
+                TrackMetadataCommit {
+                    track_id,
+                    path,
+                    patch,
+                    discovered,
+                    original,
+                },
+                MutationJournalContext::Library,
+            )
+            .await
+            .map(|(commit, _)| commit)
+            .map_err(box_storage)
+        })
+    }
+
+    fn commit_track_conversion<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        track_id: TrackId,
+        source: &'a LibraryPath,
+        staged: &'a LibraryPath,
+        discovered: &'a DiscoveredTrack,
+        original: &'a TrackOriginal,
+    ) -> LibraryFuture<'a, LibraryTrackMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_track_file_swap(
+                journal_id,
+                track_id,
+                &LibraryFileMutation::ConvertTrack {
+                    track_id,
+                    source: source.clone(),
+                    staged: staged.clone(),
+                    destination: discovered.path.clone(),
+                },
+                source,
+                discovered,
+                Some(original),
+            )
+            .await
+            .map_err(box_storage)
+        })
+    }
+
+    fn commit_track_restore<'a>(
+        &'a self,
+        journal_id: &'a RecoveryJournalId,
+        track_id: TrackId,
+        path: &'a LibraryPath,
+        discovered: &'a DiscoveredTrack,
+    ) -> LibraryFuture<'a, LibraryTrackMutationCommit> {
+        Box::pin(async move {
+            self.commit_library_track_file_swap(
+                journal_id,
+                track_id,
+                &LibraryFileMutation::RestoreTrack {
+                    track_id,
+                    path: path.clone(),
+                    destination: discovered.path.clone(),
+                },
+                path,
+                discovered,
+                None,
+            )
+            .await
+            .map_err(box_storage)
         })
     }
 
@@ -1031,35 +1108,19 @@ impl SqliteStorage {
         })
     }
 
-    async fn commit_library_track_metadata(
+    async fn commit_library_track_metadata_with_cleanup(
         &self,
         journal_id: &RecoveryJournalId,
-        track_id: TrackId,
-        path: &LibraryPath,
-        patch: &TrackMetadataPatch,
-        discovered: Option<&DiscoveredTrack>,
-    ) -> Result<LibraryTrackMutationCommit, StorageError> {
-        self.commit_library_track_metadata_with_cleanup(
-            journal_id,
+        commit: TrackMetadataCommit<'_>,
+        context: MutationJournalContext<'_>,
+    ) -> Result<(LibraryTrackMutationCommit, Option<i64>), StorageError> {
+        let TrackMetadataCommit {
             track_id,
             path,
             patch,
             discovered,
-            MutationJournalContext::Library,
-        )
-        .await
-        .map(|(commit, _)| commit)
-    }
-
-    async fn commit_library_track_metadata_with_cleanup(
-        &self,
-        journal_id: &RecoveryJournalId,
-        track_id: TrackId,
-        path: &LibraryPath,
-        patch: &TrackMetadataPatch,
-        discovered: Option<&DiscoveredTrack>,
-        context: MutationJournalContext<'_>,
-    ) -> Result<(LibraryTrackMutationCommit, Option<i64>), StorageError> {
+            original,
+        } = commit;
         if patch.is_empty() || patch.has_tag_changes() != discovered.is_some() {
             return Err(StorageError::InvalidLibraryState(
                 "metadata mutation outcome does not match its patch",
@@ -1160,6 +1221,22 @@ impl SqliteStorage {
                 "metadata mutation track changed",
             ));
         }
+        if let Some(original) = original {
+            let refreshed = sqlx::query(
+                "UPDATE track_originals SET size_bytes = ?, mtime = ? WHERE track_id = ?",
+            )
+            .bind(stored_size(original.size_bytes)?)
+            .bind(original.mtime_unix_seconds)
+            .bind(track_id.get())
+            .execute(&mut *transaction)
+            .await?;
+            if refreshed.rows_affected() != 1 {
+                transaction.rollback().await?;
+                return Err(StorageError::InvalidLibraryRecord(
+                    "edited original is not recorded for the track",
+                ));
+            }
+        }
 
         let batch_id = finish_library_index_mutation(
             &mut transaction,
@@ -1183,6 +1260,110 @@ impl SqliteStorage {
             },
             batch_id,
         ))
+    }
+
+    /// Points the track at the file a conversion or restore published at
+    /// `discovered.path` and records or forgets the kept original.
+    #[allow(clippy::too_many_arguments)]
+    async fn commit_library_track_file_swap(
+        &self,
+        journal_id: &RecoveryJournalId,
+        track_id: TrackId,
+        mutation: &LibraryFileMutation,
+        previous_path: &LibraryPath,
+        discovered: &DiscoveredTrack,
+        original: Option<&TrackOriginal>,
+    ) -> Result<LibraryTrackMutationCommit, StorageError> {
+        let size_bytes = stored_size(discovered.size_bytes)?;
+        let _admission = self.write_gate.lock().await;
+        let mut transaction = self.pool.begin_with(BEGIN_WRITE).await?;
+        validate_library_mutation_journal(
+            &mut transaction,
+            journal_id,
+            mutation,
+            MutationJournalContext::Library,
+        )
+        .await?;
+        let updated = sqlx::query(
+            "UPDATE tracks SET path = ?, title = ?, artist = ?, album_artist = ?, album = ?, \
+             track_no = ?, disc_no = ?, year = ?, release_date = ?, original_release_date = ?, composer = ?, genre = ?, length_s = ?, bpm = ?, \
+             size_bytes = ?, mtime = ? WHERE id = ? AND path = ?",
+        )
+        .bind(discovered.path.as_str())
+        .bind(&discovered.metadata.title)
+        .bind(&discovered.metadata.artist)
+        .bind(&discovered.metadata.album_artist)
+        .bind(&discovered.metadata.album)
+        .bind(discovered.metadata.track_no.map(i64::from))
+        .bind(discovered.metadata.disc_no.map(i64::from))
+        .bind(discovered.metadata.year.map(i64::from))
+        .bind(&discovered.metadata.release_date)
+        .bind(&discovered.metadata.original_release_date)
+        .bind(&discovered.metadata.composer)
+        .bind(&discovered.metadata.genre)
+        .bind(discovered.duration.as_secs_f64())
+        .bind(discovered.metadata.bpm.map(i64::from))
+        .bind(size_bytes)
+        .bind(discovered.mtime_unix_seconds)
+        .bind(track_id.get())
+        .bind(previous_path.as_str())
+        .execute(&mut *transaction)
+        .await?;
+        if updated.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryRecord(
+                "converted track changed during its file swap",
+            ));
+        }
+        let recorded = match original {
+            Some(original) => {
+                sqlx::query(
+                    "INSERT INTO track_originals (track_id, extension, size_bytes, mtime) \
+                 VALUES (?, ?, ?, ?)",
+                )
+                .bind(track_id.get())
+                .bind(&original.extension)
+                .bind(stored_size(original.size_bytes)?)
+                .bind(original.mtime_unix_seconds)
+                .execute(&mut *transaction)
+                .await?
+            }
+            None => {
+                sqlx::query("DELETE FROM track_originals WHERE track_id = ?")
+                    .bind(track_id.get())
+                    .execute(&mut *transaction)
+                    .await?
+            }
+        };
+        if recorded.rows_affected() != 1 {
+            transaction.rollback().await?;
+            return Err(StorageError::InvalidLibraryRecord(
+                "kept original record changed during its file swap",
+            ));
+        }
+        let operation = match mutation {
+            LibraryFileMutation::ConvertTrack { .. } => "convert_track",
+            _ => "restore_track",
+        };
+        finish_library_index_mutation(
+            &mut transaction,
+            journal_id,
+            operation,
+            1,
+            LibraryCatalogEffect::PreserveMembership,
+            MutationJournalContext::Library,
+        )
+        .await?;
+        let mut query =
+            QueryBuilder::<Sqlite>::new(format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE id = "));
+        query.push_bind(track_id.get());
+        let row = query.build().fetch_one(&mut *transaction).await?;
+        let track = indexed_track_from_row(&row)?;
+        transaction.commit().await?;
+        Ok(LibraryTrackMutationCommit {
+            status: self.read_library_status().await?,
+            track,
+        })
     }
 
     async fn commit_library_upload(
@@ -1965,7 +2146,43 @@ pub(crate) fn indexed_track_from_row(row: &SqliteRow) -> Result<IndexedTrack, St
         added_at_unix_seconds: row
             .try_get::<Option<i64>, _>("added_at_unix_seconds")?
             .ok_or(StorageError::InvalidTimestamp)?,
+        original: track_original_from_row(row)?,
     })
+}
+
+fn track_original_from_row(row: &SqliteRow) -> Result<Option<TrackOriginal>, StorageError> {
+    let Some(extension) = row.try_get::<Option<String>, _>("original_extension")? else {
+        return Ok(None);
+    };
+    let size_bytes = row
+        .try_get::<Option<i64>, _>("original_size_bytes")?
+        .and_then(|size| u64::try_from(size).ok())
+        .ok_or(StorageError::InvalidLibraryRecord(
+            "kept original size is invalid",
+        ))?;
+    let mtime_unix_seconds = row.try_get::<Option<i64>, _>("original_mtime")?.ok_or(
+        StorageError::InvalidLibraryRecord("kept original mtime is missing"),
+    )?;
+    Ok(Some(TrackOriginal {
+        extension,
+        size_bytes,
+        mtime_unix_seconds,
+    }))
+}
+
+fn stored_size(size_bytes: u64) -> Result<i64, StorageError> {
+    i64::try_from(size_bytes)
+        .map_err(|_| StorageError::InvalidLibraryRecord("track size exceeds SQLite integer range"))
+}
+
+/// One journaled tag edit as its index commit sees it.
+#[derive(Debug, Clone, Copy)]
+struct TrackMetadataCommit<'a> {
+    track_id: TrackId,
+    path: &'a LibraryPath,
+    patch: &'a TrackMetadataPatch,
+    discovered: Option<&'a DiscoveredTrack>,
+    original: Option<&'a TrackOriginal>,
 }
 
 fn library_catalog_track_from_row(row: &SqliteRow) -> Result<LibraryCatalogTrack, StorageError> {
@@ -2687,6 +2904,125 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conversions_record_and_restores_forget_the_kept_original()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let directory = tempdir()?;
+        let storage = SqliteStorage::open(SqliteStorageOptions::new(
+            directory.path().join("track-conversions.db"),
+        ))
+        .await?;
+        let raw_id = insert_track(&storage, "Album/song.flac", "Song", "Artist").await?;
+        let track_id = TrackId::new(raw_id)?;
+        let original = music_domain::TrackOriginal {
+            extension: "flac".to_owned(),
+            size_bytes: 123,
+            mtime_unix_seconds: 456,
+        };
+        let source = LibraryPath::parse("Album/song.flac")?;
+        let staged = LibraryPath::parse("Album/.convert-1.partial")?;
+        let conversion = LibraryFileMutation::ConvertTrack {
+            track_id,
+            source: source.clone(),
+            staged: staged.clone(),
+            destination: LibraryPath::parse("Album/song.m4a")?,
+        };
+        let journal = applying_journal(&storage, &conversion).await?;
+        let copy = discovered("Album/song.m4a", "Song", "Artist", 40, 789)?;
+        let converted = LibraryMutationRepository::commit_track_conversion(
+            &storage, &journal, track_id, &source, &staged, &copy, &original,
+        )
+        .await?;
+        assert_eq!(converted.track.path.as_str(), "Album/song.m4a");
+        assert_eq!(converted.track.size_bytes, 40);
+        assert_eq!(converted.track.original.as_ref(), Some(&original));
+        assert_eq!(
+            converted
+                .track
+                .original_path()
+                .map(LibraryPath::into_string),
+            Some("Album/song.flac".to_owned())
+        );
+        let query =
+            LibrarySearch::new("Song", 100, 0, LibrarySortKey::Title, SortOrder::Ascending)?;
+        assert_eq!(
+            LibraryRepository::search(&storage, &query).await?.tracks[0].original,
+            Some(original.clone())
+        );
+
+        let mut patch = TrackMetadataPatch::new();
+        patch.insert_text(TrackMetadataField::Title, Some("Edited".to_owned()))?;
+        let edit = LibraryFileMutation::UpdateTrackMetadata {
+            track_id,
+            path: LibraryPath::parse("Album/song.m4a")?,
+            patch: patch.clone(),
+        };
+        let edit_journal = applying_journal(&storage, &edit).await?;
+        let edited_original = music_domain::TrackOriginal {
+            size_bytes: 130,
+            mtime_unix_seconds: 999,
+            ..original.clone()
+        };
+        let edited = LibraryMutationRepository::commit_track_metadata(
+            &storage,
+            &edit_journal,
+            track_id,
+            &LibraryPath::parse("Album/song.m4a")?,
+            &patch,
+            Some(&discovered("Album/song.m4a", "Edited", "Artist", 41, 800)?),
+            Some(&edited_original),
+        )
+        .await?;
+        assert_eq!(edited.track.original, Some(edited_original));
+
+        let restore = LibraryFileMutation::RestoreTrack {
+            track_id,
+            path: LibraryPath::parse("Album/song.m4a")?,
+            destination: source.clone(),
+        };
+        let restore_journal = applying_journal(&storage, &restore).await?;
+        let restored = LibraryMutationRepository::commit_track_restore(
+            &storage,
+            &restore_journal,
+            track_id,
+            &LibraryPath::parse("Album/song.m4a")?,
+            &discovered("Album/song.flac", "Edited", "Artist", 130, 999)?,
+        )
+        .await?;
+        assert_eq!(restored.track.id, track_id);
+        assert_eq!(restored.track.path, source);
+        assert_eq!(restored.track.original, None);
+
+        let reconversion = applying_journal(&storage, &conversion).await?;
+        LibraryMutationRepository::commit_track_conversion(
+            &storage,
+            &reconversion,
+            track_id,
+            &source,
+            &staged,
+            &copy,
+            &original,
+        )
+        .await?;
+        let deletion = LibraryFileMutation::DeleteTrack {
+            track_id,
+            path: LibraryPath::parse("Album/song.m4a")?,
+        };
+        let deletion_journal = applying_journal(&storage, &deletion).await?;
+        LibraryMutationRepository::commit_track_delete(
+            &storage,
+            &deletion_journal,
+            track_id,
+            &LibraryPath::parse("Album/song.m4a")?,
+        )
+        .await?;
+        let kept: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM track_originals")
+            .fetch_one(&storage.pool)
+            .await?;
+        assert_eq!(kept, 0);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn journaled_metadata_updates_commit_file_and_database_fields_atomically()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let directory = tempdir()?;
@@ -2722,6 +3058,7 @@ mod tests {
             &LibraryPath::parse("Album/song.wav")?,
             &mixed_patch,
             Some(&retagged),
+            None,
         )
         .await?;
         assert_eq!(mixed.track.id, track_id);
@@ -2754,6 +3091,7 @@ mod tests {
             track_id,
             &LibraryPath::parse("Album/song.wav")?,
             &database_patch,
+            None,
             None,
         )
         .await?;

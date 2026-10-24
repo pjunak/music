@@ -44,6 +44,9 @@ pub(crate) fn create_storage_directories(
     config: &AppConfig,
 ) -> io::Result<StorageInitializationOutcome> {
     fs::create_dir_all(&config.music_dir)?;
+    if let Some(originals) = &config.music_originals_dir {
+        fs::create_dir_all(originals)?;
+    }
     fs::create_dir_all(&config.sfx_library_dir)?;
     fs::create_dir_all(&config.modes_dir)?;
     Ok(StorageInitializationOutcome {

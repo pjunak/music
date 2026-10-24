@@ -14,6 +14,7 @@ import {
 import type { CollectedFile } from "@/core/dropTraversal";
 import { toast } from "@/core/toast";
 
+import { followConversion } from "./conversion";
 import { collisionKey, formatSize } from "./shared";
 import type { Root } from "./shared";
 import { FolderHeader } from "./FolderHeader";
@@ -73,6 +74,7 @@ export function FolderBand({
     setBusy(true);
     let savedTotal = 0;
     let skippedCount = 0;
+    const conversionJobs: string[] = [];
     try {
       const groups = groupByParent(collected);
 
@@ -167,6 +169,9 @@ export function FolderBand({
         savedTotal += r.saved.length;
         skippedCount += r.skipped.length;
         baseLoaded += groupBytes;
+        if ("conversion_job_id" in r && r.conversion_job_id) {
+          conversionJobs.push(r.conversion_job_id);
+        }
       }
 
       const folderCount = workGroups.length;
@@ -176,7 +181,11 @@ export function FolderBand({
           : `→ ${dest || "(root)"}`;
       const detail =
         skippedCount > 0 ? `${where} · skipped ${skippedCount} existing` : where;
-      toast.success(`Uploaded ${savedTotal}`, detail);
+      toast.success(
+        `Uploaded ${savedTotal}`,
+        conversionJobs.length > 0 ? `${detail} · converting in the background` : detail,
+      );
+      for (const jobId of conversionJobs) void followConversion(jobId, onUploaded);
       // Refresh (re-reads the index/tree so new folders + tracks show up).
       // For a folder drop, navigate INTO the uploaded folder so the result
       // is visible instead of hiding in a collapsed subtree. Loose-file

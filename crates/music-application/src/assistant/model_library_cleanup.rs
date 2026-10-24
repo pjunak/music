@@ -324,6 +324,7 @@ pub fn library_cleanup_quality_cases()
         size_bytes: 1,
         mtime_unix_seconds: 1,
         added_at_unix_seconds: 1,
+        original: None,
     };
     let good = Candidate {
         id: "recording-one".into(),

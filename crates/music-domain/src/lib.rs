@@ -24,7 +24,9 @@ pub use cleanup::{
 
 pub use metadata_date::metadata_date_year;
 
-pub use library::{IndexedTrack, LibraryGeneration, LibraryRecordError, TrackMetadata};
+pub use library::{
+    IndexedTrack, LibraryGeneration, LibraryRecordError, TrackMetadata, TrackOriginal,
+};
 
 pub use media_path::{
     LibraryMedia, LibraryPath, MAX_MEDIA_PATH_BYTES, MediaPathError, RootedMediaPath, SfxMedia,

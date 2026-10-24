@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
 
-use music_domain::{IndexedTrack, LibraryPath, TrackId};
+use music_domain::{IndexedTrack, LibraryPath, TrackId, TrackOriginal};
 use serde_json::{Value, json};
 
 use crate::recovery::{RecoveryJournalEntry, RecoveryJournalId, RecoveryOperation};
@@ -87,6 +87,21 @@ pub enum LibraryFileMutation {
         destination: LibraryPath,
         replace_existing: bool,
     },
+    /// Keeps `source` under the originals root at the same path and publishes the
+    /// already encoded `staged` file at `destination` in its place.
+    ConvertTrack {
+        track_id: TrackId,
+        source: LibraryPath,
+        staged: LibraryPath,
+        destination: LibraryPath,
+    },
+    /// Returns the original kept at `destination` under the originals root to the
+    /// library and removes the converted file at `path`.
+    RestoreTrack {
+        track_id: TrackId,
+        path: LibraryPath,
+        destination: LibraryPath,
+    },
 }
 
 impl LibraryFileMutation {
@@ -99,6 +114,8 @@ impl LibraryFileMutation {
             Self::DeleteTrack { .. } => "delete_track",
             Self::UpdateTrackMetadata { .. } => "update_track_metadata",
             Self::PublishUpload { .. } => "publish_upload",
+            Self::ConvertTrack { .. } => "convert_track",
+            Self::RestoreTrack { .. } => "restore_track",
         })
         .map_err(|_| LibraryMutationValidationError::InvalidJournalOperation)
     }
@@ -146,6 +163,26 @@ impl LibraryFileMutation {
                 "staged": staged.as_str(),
                 "destination": destination.as_str(),
                 "replace_existing": replace_existing,
+            }),
+            Self::ConvertTrack {
+                track_id,
+                source,
+                staged,
+                destination,
+            } => json!({
+                "track_id": track_id.get(),
+                "source": source.as_str(),
+                "staged": staged.as_str(),
+                "destination": destination.as_str(),
+            }),
+            Self::RestoreTrack {
+                track_id,
+                path,
+                destination,
+            } => json!({
+                "track_id": track_id.get(),
+                "path": path.as_str(),
+                "destination": destination.as_str(),
             }),
         }
     }
@@ -198,6 +235,17 @@ impl LibraryFileMutation {
                     .and_then(Value::as_bool)
                     .ok_or(LibraryMutationValidationError::InvalidJournalPlan)?,
             }),
+            "convert_track" => Ok(Self::ConvertTrack {
+                track_id: parse_track_id(&entry.plan)?,
+                source: parse_path(&entry.plan, "source")?,
+                staged: parse_path(&entry.plan, "staged")?,
+                destination: parse_path(&entry.plan, "destination")?,
+            }),
+            "restore_track" => Ok(Self::RestoreTrack {
+                track_id: parse_track_id(&entry.plan)?,
+                path: parse_path(&entry.plan, "path")?,
+                destination: parse_path(&entry.plan, "destination")?,
+            }),
             _ => Err(LibraryMutationValidationError::UnknownJournalOperation),
         }
     }
@@ -245,10 +293,21 @@ pub enum LibraryFileMutationOutcome {
     TrackMetadataUpdated {
         track_id: TrackId,
         discovered: Option<DiscoveredTrack>,
+        /// The kept original's refreshed facts when its tags were edited too.
+        original: Option<TrackOriginal>,
     },
     UploadPublished {
         destination: LibraryPath,
         discovered: Option<DiscoveredTrack>,
+    },
+    TrackConverted {
+        track_id: TrackId,
+        track: DiscoveredTrack,
+        original: TrackOriginal,
+    },
+    TrackRestored {
+        track_id: TrackId,
+        track: DiscoveredTrack,
     },
     Deleted,
 }
@@ -440,6 +499,17 @@ mod tests {
                 staged: LibraryPath::parse("Uploads/.song.1234.upload-partial")?,
                 destination: LibraryPath::parse("Uploads/song.mp3")?,
                 replace_existing: true,
+            },
+            LibraryFileMutation::ConvertTrack {
+                track_id: TrackId::new(17)?,
+                source: LibraryPath::parse("New/track.flac")?,
+                staged: LibraryPath::parse("New/.convert-1234.partial")?,
+                destination: LibraryPath::parse("New/track.m4a")?,
+            },
+            LibraryFileMutation::RestoreTrack {
+                track_id: TrackId::new(17)?,
+                path: LibraryPath::parse("New/track.m4a")?,
+                destination: LibraryPath::parse("New/track.flac")?,
             },
         ];
         for mutation in mutations {

@@ -17,6 +17,13 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   a file or a whole album folder; native Rust metadata adapters read its tags, with a
   filename/parent-folder fallback. SQLite keeps a durable materialized index, and a visible,
   retryable reconciliation job refreshes it without blocking startup.
+- **Light streaming copies** — with `MUSIC_ORIGINALS_DIR` set, tracks above 256 kbps (in
+  practice lossless and high-bitrate files) can be converted to 192 kbps AAC in `.m4a`, which every browser, smart
+  TV, Android device and mpv plays. Uploads convert in the background; **Convert** in the Library
+  toolbar or the track selection converts existing tracks. The replaced file is kept at the same
+  relative path under `MUSIC_ORIGINALS_DIR`: moves, renames, tag edits and deletes apply to both
+  files, **Restore originals** puts it back, analysis keeps reading it, and
+  `/stream?variant=original` serves it.
 - **Review-first library cleanup** — open **Assistant → Library cleanup** (or use the scoped
   Library toolbar shortcut) to repair filenames, folder names, and embedded metadata through one
   proposal and per-change review. Enabled Sources can identify a recording through a conservative
@@ -260,6 +267,8 @@ DB-backed tokens, nothing is signed.)
 | Variable | Required | Default (in image) | Purpose |
 |---|---|---|---|
 | `MUSIC_DIR` | | `/data/music` | Root of the scanned music library |
+| `MUSIC_ORIGINALS_DIR` | Only for conversion | — | Folder outside `MUSIC_DIR` that keeps converted tracks' originals; unset disables conversion |
+| `MUSIC_CONVERT_UPLOADS` | | `true` | Convert eligible uploads automatically when `MUSIC_ORIGINALS_DIR` is set |
 | `SFX_LIBRARY_DIR` | | `/data/sfx` | Root for soundboard SFX files |
 | `MODES_DIR` | | `/data/modes` | On-disk mode bundles (seeded on first boot) |
 | `DATABASE_URL` | | `sqlite:////data/app.db` | App DB (auth, playlists, indexed tracks) |

@@ -162,6 +162,67 @@ fn stage_wma_tag_update_inner(
     Ok(StagedTagUpdate::new(staged.to_path_buf(), after.metadata))
 }
 
+/// How [`encode_aac`] shapes its output stream.
+pub(super) struct AacEncoding {
+    pub(super) bitrate_kbps: u32,
+    /// Resample to this rate; `None` keeps the source rate.
+    pub(super) sample_rate: Option<u32>,
+    pub(super) downmix_to_stereo: bool,
+    pub(super) timeout: Duration,
+}
+
+/// Encodes the first audio stream of `source` as AAC in MP4 at the new path
+/// `target`, without tags, chapters or pictures; the caller writes those.
+pub(super) fn encode_aac(
+    source: &Path,
+    target: &Path,
+    encoding: &AacEncoding,
+    tools: &FfmpegTools,
+) -> Result<(), MetadataError> {
+    let source = fs::canonicalize(source).map_err(|source| MetadataError::Io {
+        action: "canonicalize streaming copy source",
+        source,
+    })?;
+    let target = absolute_new_path(target)?;
+    let mut arguments = vec![
+        OsString::from("-n"),
+        OsString::from("-nostdin"),
+        OsString::from("-hide_banner"),
+        OsString::from("-loglevel"),
+        OsString::from("error"),
+        OsString::from("-protocol_whitelist"),
+        OsString::from("file"),
+        OsString::from("-i"),
+        source.into_os_string(),
+        OsString::from("-map"),
+        OsString::from("0:a:0"),
+        OsString::from("-map_metadata"),
+        OsString::from("-1"),
+        OsString::from("-map_chapters"),
+        OsString::from("-1"),
+        OsString::from("-c:a"),
+        OsString::from("aac"),
+        OsString::from("-b:a"),
+        OsString::from(format!("{}k", encoding.bitrate_kbps)),
+    ];
+    if let Some(rate) = encoding.sample_rate {
+        arguments.extend([OsString::from("-ar"), OsString::from(rate.to_string())]);
+    }
+    if encoding.downmix_to_stereo {
+        arguments.extend([OsString::from("-ac"), OsString::from("2")]);
+    }
+    arguments.extend([
+        OsString::from("-movflags"),
+        OsString::from("+faststart"),
+        OsString::from("-threads"),
+        OsString::from("1"),
+        OsString::from("-f"),
+        OsString::from("mp4"),
+        target.into_os_string(),
+    ]);
+    run_tool(&tools.ffmpeg, "ffmpeg", &arguments, encoding.timeout).map(|_| ())
+}
+
 fn absolute_new_path(path: &Path) -> Result<PathBuf, MetadataError> {
     let parent = path
         .parent()

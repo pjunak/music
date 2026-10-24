@@ -16,6 +16,8 @@ const MULTIPART_FILE_OVERHEAD_BYTES: u64 = 8 * 1_024;
 const ENVIRONMENT_NAMES: &[&str] = &[
     "DATABASE_URL",
     "MUSIC_DIR",
+    "MUSIC_ORIGINALS_DIR",
+    "MUSIC_CONVERT_UPLOADS",
     "SFX_LIBRARY_DIR",
     "MODES_DIR",
     "MODES_SEED_DIR",
@@ -65,6 +67,10 @@ pub struct AppConfig {
     pub database_url: String,
     pub database_path: PathBuf,
     pub music_dir: PathBuf,
+    /// Where converted tracks keep their originals; conversion is off without it.
+    pub music_originals_dir: Option<PathBuf>,
+    /// Convert eligible uploads automatically when originals can be kept.
+    pub music_convert_uploads: bool,
     pub sfx_library_dir: PathBuf,
     pub modes_dir: PathBuf,
     pub modes_seed_dir: Option<PathBuf>,
@@ -185,6 +191,8 @@ impl AppConfig {
             database_url,
             database_path,
             music_dir: required_path(values, "MUSIC_DIR", "./music")?,
+            music_originals_dir: optional_path(values, "MUSIC_ORIGINALS_DIR"),
+            music_convert_uploads: parse_bool(values, "MUSIC_CONVERT_UPLOADS", true)?,
             sfx_library_dir: required_path(values, "SFX_LIBRARY_DIR", "./sfx")?,
             modes_dir: required_path(values, "MODES_DIR", "../modes")?,
             modes_seed_dir: optional_path(values, "MODES_SEED_DIR"),

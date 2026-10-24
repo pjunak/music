@@ -25,6 +25,7 @@ mod cleanup_model;
 mod cleanup_rejections;
 mod config;
 mod contracts;
+mod conversion;
 mod devices;
 mod diagnostics;
 mod error;

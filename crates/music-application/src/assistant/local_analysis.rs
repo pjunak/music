@@ -445,16 +445,29 @@ impl LocalAnalysisService {
     }
 }
 
+/// Analysis reads a converted track's original, so the original file's facts form
+/// its identity: converting or restoring a track leaves stored analysis current.
 pub fn context_source_signature(
     track: &IndexedTrack,
     implementation_id: &str,
     voice_signature: Option<&str>,
 ) -> Result<String, String> {
+    let (path, size_bytes, mtime_unix_seconds) =
+        match (track.original.as_ref(), track.original_path()) {
+            (Some(original), Some(path)) => {
+                (path, original.size_bytes, original.mtime_unix_seconds)
+            }
+            _ => (
+                track.path.clone(),
+                track.size_bytes,
+                track.mtime_unix_seconds,
+            ),
+        };
     let mut source_facts = vec![
         Value::String(implementation_id.to_owned()),
-        Value::String(track.path.as_str().to_owned()),
-        json!(track.size_bytes),
-        json!(track.mtime_unix_seconds),
+        Value::String(path.into_string()),
+        json!(size_bytes),
+        json!(mtime_unix_seconds),
     ];
     if let Some(voice_signature) = voice_signature {
         source_facts.push(Value::String(voice_signature.to_owned()));
@@ -717,7 +730,33 @@ mod tests {
             size_bytes: 42,
             mtime_unix_seconds: 100,
             added_at_unix_seconds: 100,
+            original: None,
         })
+    }
+
+    #[test]
+    fn converted_tracks_keep_the_context_identity_of_their_original()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let original = track()?;
+        let mut converted = original.clone();
+        converted.path = LibraryPath::parse("Battle/Final Boss.m4a")?;
+        converted.size_bytes = 7;
+        converted.mtime_unix_seconds = 200;
+        converted.original = Some(music_domain::TrackOriginal {
+            extension: "flac".to_owned(),
+            size_bytes: original.size_bytes,
+            mtime_unix_seconds: original.mtime_unix_seconds,
+        });
+        assert_eq!(
+            context_source_signature(&converted, LOCAL_CONTEXT_IMPLEMENTATION_ID, None)?,
+            context_source_signature(&original, LOCAL_CONTEXT_IMPLEMENTATION_ID, None)?
+        );
+        converted.original = None;
+        assert_ne!(
+            context_source_signature(&converted, LOCAL_CONTEXT_IMPLEMENTATION_ID, None)?,
+            context_source_signature(&original, LOCAL_CONTEXT_IMPLEMENTATION_ID, None)?
+        );
+        Ok(())
     }
 
     #[test]

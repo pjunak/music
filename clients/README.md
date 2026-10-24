@@ -165,6 +165,14 @@ clock; position reports from outputs are optional drift corrections on top.
 Library track responses add optional `release_date`, `original_release_date` and `composer`
 strings. Unknown values are empty; clients should tolerate their absence on older servers.
 Dates retain source precision (YYYY, YYYY-MM or YYYY-MM-DD), with no timezone conversion.
+
+A track may be a converted streaming copy: 192 kbps AAC in MP4 (`.m4a`), which browsers,
+smart TVs, Android and mpv all decode. Its `original_format` names the kept original's
+extension (for example `flac`) and is `null` otherwise; clients should tolerate its absence on
+older servers. The stream URL serves the copy. Add `?variant=original` to receive the kept
+original instead, for example on a local network; for a track without one it serves the
+library file. Both variants support HTTP Range requests, and the track's path and length follow
+the copy.
 The numeric `year` remains the release-year compatibility projection. Composer is a separate
 credit, not a replacement for artist or album artist. Metadata PATCH and bulk metadata PATCH
 accept these strings; omission preserves the value, while empty/null clears it. Editing `year`

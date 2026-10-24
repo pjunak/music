@@ -494,6 +494,7 @@ mod tests {
                 size_bytes: 1,
                 mtime_unix_seconds: 1,
                 added_at_unix_seconds: 1,
+                original: None,
             },
             manual_tags: vec!["calm".to_owned()],
             analyses: Vec::new(),

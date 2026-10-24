@@ -1631,6 +1631,43 @@
         ],
         "type": "object"
       },
+      "BulkRestoreRequest": {
+        "properties": {
+          "track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "track_ids"
+        ],
+        "type": "object"
+      },
+      "BulkRestoreResult": {
+        "properties": {
+          "restored": {
+            "items": {
+              "$ref": "#/components/schemas/TrackOut"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/BulkActionSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "restored",
+          "skipped"
+        ],
+        "type": "object"
+      },
       "CleanupEnrichmentRequest": {
         "properties": {
           "force": {
@@ -3723,6 +3760,26 @@
           "stale_tracks",
           "last_updated_at"
         ],
+        "type": "object"
+      },
+      "LibraryConversionRequest": {
+        "properties": {
+          "track_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 1000,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "LibraryTagPage": {
@@ -7864,6 +7921,16 @@
           "origin": {
             "type": "string"
           },
+          "original_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "original_release_date": {
             "type": "string"
           },
@@ -7919,7 +7986,8 @@
           "size_bytes",
           "added_at",
           "display_title",
-          "origin"
+          "origin",
+          "original_format"
         ],
         "type": "object"
       },
@@ -8058,6 +8126,16 @@
       },
       "UploadResult": {
         "properties": {
+          "conversion_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "destination": {
             "type": "string"
           },
@@ -8077,7 +8155,8 @@
         "required": [
           "saved",
           "destination",
-          "skipped"
+          "skipped",
+          "conversion_job_id"
         ],
         "type": "object"
       },
@@ -11354,6 +11433,46 @@
         ]
       }
     },
+    "/api/library/convert": {
+      "post": {
+        "operationId": "convert_tracks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryConversionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundJobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/api/library/folders": {
       "delete": {
         "operationId": "delete_folder",
@@ -11779,6 +11898,46 @@
         ]
       }
     },
+    "/api/library/tracks/bulk-restore": {
+      "post": {
+        "operationId": "bulk_restore_tracks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkRestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkRestoreResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "tags": [
+          "library"
+        ]
+      }
+    },
     "/api/library/tracks/{track_id}": {
       "delete": {
         "operationId": "delete_track",
@@ -12004,6 +12163,19 @@
             "required": true,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "variant",
+            "required": false,
+            "schema": {
+              "default": "library",
+              "enum": [
+                "library",
+                "original"
+              ],
+              "type": "string"
             }
           }
         ],

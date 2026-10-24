@@ -1541,6 +1541,7 @@ mod tests {
             size_bytes: 10,
             mtime_unix_seconds: 20,
             added_at_unix_seconds: 30,
+            original: None,
         };
         let catalog = json!({"claims":[{"id":"catalog.musicbrainz.genres","recording_id":"raw-id","values":["folk"]}]});
         let input = model_tag_track_input(&track, None, Some(&catalog));
@@ -1977,6 +1978,7 @@ mod tests {
             origin: "Game".to_owned(),
             size_bytes: 100,
             mtime_unix_seconds: 200,
+            original: None,
             added_at_unix_seconds: 300,
         };
         let context = CurrentTrackContext {

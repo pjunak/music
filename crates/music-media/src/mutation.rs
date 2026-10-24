@@ -16,18 +16,47 @@ use crate::{
     TagField, TagPatch, inspect_library_track, is_supported_library_path,
 };
 
+mod conversion;
+mod originals;
+
+use conversion::{ConversionRoots, TrackConversion, apply_track_conversion, apply_track_restore};
+
 const MAX_UPLOAD_RENAME_ATTEMPTS: u32 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct FilesystemLibraryMutations {
     root: LibraryRoot,
     metadata: MetadataAdapter,
+    originals: Option<LibraryRoot>,
 }
 
 impl FilesystemLibraryMutations {
     #[must_use]
     pub const fn new(root: LibraryRoot, metadata: MetadataAdapter) -> Self {
-        Self { root, metadata }
+        Self {
+            root,
+            metadata,
+            originals: None,
+        }
+    }
+
+    /// Keeps converted tracks' originals under `originals`, mirroring every
+    /// track and folder change there. Without it conversion is unavailable.
+    #[must_use]
+    pub fn with_originals(mut self, originals: LibraryRoot) -> Self {
+        self.originals = Some(originals);
+        self
+    }
+
+    fn conversion_roots(&self) -> Result<ConversionRoots<'_>, FilesystemMutationError> {
+        Ok(ConversionRoots {
+            library: &self.root,
+            originals: self
+                .originals
+                .as_ref()
+                .ok_or(FilesystemMutationError::ConversionUnavailable)?,
+            metadata: &self.metadata,
+        })
     }
 
     fn apply_blocking(
@@ -118,6 +147,9 @@ impl FilesystemLibraryMutations {
                         });
                     }
                 }
+                if let Some(originals) = &self.originals {
+                    originals::rename_original_folder(originals, &source, &destination, case_only)?;
+                }
                 std::fs::rename(&source_absolute, &destination_absolute).map_err(|source| {
                     FilesystemMutationError::Io {
                         operation: "rename library folder",
@@ -130,29 +162,31 @@ impl FilesystemLibraryMutations {
                 })
             }
             LibraryFileMutation::DeleteFolder { path, recursive } => {
-                let absolute = match self.root.resolve_existing_directory(&path) {
-                    Ok(path) => path,
-                    Err(error) if replay && rooted_path_is_missing(&error) => {
-                        return Ok(LibraryFileMutationOutcome::Deleted);
+                match self.root.resolve_existing_directory(&path) {
+                    Ok(absolute) => {
+                        ensure_directory(&absolute)?;
+                        let result = if recursive {
+                            std::fs::remove_dir_all(&absolute)
+                        } else {
+                            std::fs::remove_dir(&absolute)
+                        };
+                        result.map_err(|source| {
+                            if source.kind() == std::io::ErrorKind::DirectoryNotEmpty {
+                                FilesystemMutationError::DirectoryNotEmpty
+                            } else {
+                                FilesystemMutationError::Io {
+                                    operation: "delete library folder",
+                                    source,
+                                }
+                            }
+                        })?;
                     }
+                    Err(error) if replay && rooted_path_is_missing(&error) => {}
                     Err(error) => return Err(FilesystemMutationError::RootedPath(error)),
-                };
-                ensure_directory(&absolute)?;
-                let result = if recursive {
-                    std::fs::remove_dir_all(&absolute)
-                } else {
-                    std::fs::remove_dir(&absolute)
-                };
-                result.map_err(|source| {
-                    if source.kind() == std::io::ErrorKind::DirectoryNotEmpty {
-                        FilesystemMutationError::DirectoryNotEmpty
-                    } else {
-                        FilesystemMutationError::Io {
-                            operation: "delete library folder",
-                            source,
-                        }
-                    }
-                })?;
+                }
+                if let Some(originals) = &self.originals {
+                    originals::delete_original_folder(originals, &path, recursive)?;
+                }
                 Ok(LibraryFileMutationOutcome::Deleted)
             }
             LibraryFileMutation::MoveTrack {
@@ -217,6 +251,9 @@ impl FilesystemLibraryMutations {
                         });
                     }
                 }
+                if let Some(originals) = &self.originals {
+                    originals::move_original(originals, &source, &destination, case_only)?;
+                }
                 std::fs::rename(&source_absolute, &destination_absolute).map_err(|source| {
                     FilesystemMutationError::Io {
                         operation: "move library track",
@@ -228,6 +265,9 @@ impl FilesystemLibraryMutations {
                 Ok(LibraryFileMutationOutcome::TrackMoved { track_id, track })
             }
             LibraryFileMutation::DeleteTrack { track_id, path } => {
+                if let Some(originals) = &self.originals {
+                    originals::delete_original(originals, &path)?;
+                }
                 let absolute = match self.root.resolve_existing_file_for_mutation(&path) {
                     Ok(path) => path,
                     Err(error) if rooted_path_is_missing(&error) => {
@@ -257,6 +297,34 @@ impl FilesystemLibraryMutations {
                 replace_existing,
                 replay,
             ),
+            LibraryFileMutation::ConvertTrack {
+                track_id,
+                source,
+                staged,
+                destination,
+            } => apply_track_conversion(
+                &self.conversion_roots()?,
+                journal_id,
+                &TrackConversion {
+                    track_id,
+                    source: &source,
+                    staged: &staged,
+                    destination: &destination,
+                },
+                replay,
+            ),
+            LibraryFileMutation::RestoreTrack {
+                track_id,
+                path,
+                destination,
+            } => apply_track_restore(
+                &self.conversion_roots()?,
+                journal_id,
+                track_id,
+                &path,
+                &destination,
+                replay,
+            ),
         }
     }
 
@@ -272,30 +340,61 @@ impl FilesystemLibraryMutations {
             return Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
                 track_id,
                 discovered: None,
+                original: None,
             });
         }
-        let stage_path = metadata_sibling_path(&path, journal_id, "stage")?;
-        let backup_path = metadata_sibling_path(&path, journal_id, "backup")?;
-        let stage_absolute = self
-            .root
+        // The original is edited first so a refused edit leaves both files alone.
+        let original = match &self.originals {
+            Some(originals) => {
+                match originals::find_original_for_tag_edit(originals, &path, journal_id, replay)? {
+                    Some(original) => {
+                        self.replace_file_tags(originals, journal_id, &original, patch, replay)?;
+                        Some(originals::original_facts(originals, &original)?)
+                    }
+                    None => None,
+                }
+            }
+            None => None,
+        };
+        self.replace_file_tags(&self.root, journal_id, &path, patch, replay)?;
+        let discovered = inspect_library_track(&self.root, &self.metadata, &path)
+            .map_err(FilesystemMutationError::Discovery)?;
+        Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
+            track_id,
+            discovered: Some(discovered),
+            original,
+        })
+    }
+
+    /// Replaces `path` under `root` with a verified tag-edited copy, resuming an
+    /// interrupted replacement from its journal-named stage and backup files.
+    fn replace_file_tags(
+        &self,
+        root: &LibraryRoot,
+        journal_id: &RecoveryJournalId,
+        path: &music_domain::LibraryPath,
+        patch: &TrackMetadataPatch,
+        replay: bool,
+    ) -> Result<(), FilesystemMutationError> {
+        let stage_path = metadata_sibling_path(path, journal_id, "stage")?;
+        let backup_path = metadata_sibling_path(path, journal_id, "backup")?;
+        let stage_absolute = root
             .resolve_for_creation(&stage_path)
             .map_err(FilesystemMutationError::RootedPath)?;
-        let backup_absolute = self
-            .root
+        let backup_absolute = root
             .resolve_for_creation(&backup_path)
             .map_err(FilesystemMutationError::RootedPath)?;
         let stage_state = mutation_artifact_state(&stage_absolute)?;
         let mut backup_state = mutation_artifact_state(&backup_absolute)?;
 
-        let source_absolute = match self.root.resolve_existing_file_for_mutation(&path) {
+        let source_absolute = match root.resolve_existing_file_for_mutation(path) {
             Ok(source) => source,
             Err(error) if rooted_path_is_missing(&error) => {
                 if backup_state == MutationArtifactState::RegularFile
                     && stage_state == MutationArtifactState::RegularFile
                 {
-                    let target = self
-                        .root
-                        .resolve_for_creation(&path)
+                    let target = root
+                        .resolve_for_creation(path)
                         .map_err(FilesystemMutationError::RootedPath)?;
                     std::fs::rename(&stage_absolute, target).map_err(|source| {
                         FilesystemMutationError::Io {
@@ -303,21 +402,14 @@ impl FilesystemLibraryMutations {
                             source,
                         }
                     })?;
-                    remove_regular_file_if_present(
+                    return remove_regular_file_if_present(
                         &backup_absolute,
                         "remove recovered metadata backup",
-                    )?;
-                    let discovered = inspect_library_track(&self.root, &self.metadata, &path)
-                        .map_err(FilesystemMutationError::Discovery)?;
-                    return Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
-                        track_id,
-                        discovered: Some(discovered),
-                    });
+                    );
                 }
                 if backup_state == MutationArtifactState::RegularFile {
-                    let target = self
-                        .root
-                        .resolve_for_creation(&path)
+                    let target = root
+                        .resolve_for_creation(path)
                         .map_err(FilesystemMutationError::RootedPath)?;
                     std::fs::rename(&backup_absolute, target).map_err(|source| {
                         FilesystemMutationError::Io {
@@ -326,8 +418,7 @@ impl FilesystemLibraryMutations {
                         }
                     })?;
                     backup_state = MutationArtifactState::Missing;
-                    self.root
-                        .resolve_existing_file_for_mutation(&path)
+                    root.resolve_existing_file_for_mutation(path)
                         .map_err(FilesystemMutationError::RootedPath)?
                 } else {
                     return Err(FilesystemMutationError::RootedPath(error));
@@ -340,13 +431,10 @@ impl FilesystemLibraryMutations {
             && backup_state == MutationArtifactState::RegularFile
             && stage_state == MutationArtifactState::Missing
         {
-            remove_regular_file_if_present(&backup_absolute, "remove recovered metadata backup")?;
-            let discovered = inspect_library_track(&self.root, &self.metadata, &path)
-                .map_err(FilesystemMutationError::Discovery)?;
-            return Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
-                track_id,
-                discovered: Some(discovered),
-            });
+            return remove_regular_file_if_present(
+                &backup_absolute,
+                "remove recovered metadata backup",
+            );
         }
         remove_regular_file_if_present(&stage_absolute, "remove stale metadata stage")?;
         if backup_state != MutationArtifactState::Missing {
@@ -374,13 +462,7 @@ impl FilesystemLibraryMutations {
                 source,
             });
         }
-        remove_regular_file_if_present(&backup_absolute, "remove metadata source backup")?;
-        let discovered = inspect_library_track(&self.root, &self.metadata, &path)
-            .map_err(FilesystemMutationError::Discovery)?;
-        Ok(LibraryFileMutationOutcome::TrackMetadataUpdated {
-            track_id,
-            discovered: Some(discovered),
-        })
+        remove_regular_file_if_present(&backup_absolute, "remove metadata source backup")
     }
 
     fn apply_upload_publish(
@@ -934,6 +1016,11 @@ enum FilesystemMutationError {
     RecoveryArtifactConflict,
     UploadStageMissing,
     UploadRenameExhausted,
+    ConversionUnavailable,
+    ConversionStageMissing,
+    TrackFileMissing,
+    OriginalMissing,
+    AmbiguousOriginal,
 }
 
 impl Display for FilesystemMutationError {
@@ -959,6 +1046,15 @@ impl Display for FilesystemMutationError {
             Self::UploadRenameExhausted => {
                 formatter.write_str("no available upload filename was found")
             }
+            Self::ConversionUnavailable => {
+                formatter.write_str("no originals folder is configured for conversion")
+            }
+            Self::ConversionStageMissing => formatter.write_str("encoded track copy is missing"),
+            Self::TrackFileMissing => formatter.write_str("library track file is missing"),
+            Self::OriginalMissing => formatter.write_str("kept original file is missing"),
+            Self::AmbiguousOriginal => {
+                formatter.write_str("more than one kept original matches the track")
+            }
         }
     }
 }
@@ -979,7 +1075,12 @@ impl Error for FilesystemMutationError {
             | Self::UnexpectedMutationArtifact
             | Self::RecoveryArtifactConflict
             | Self::UploadStageMissing
-            | Self::UploadRenameExhausted => None,
+            | Self::UploadRenameExhausted
+            | Self::ConversionUnavailable
+            | Self::ConversionStageMissing
+            | Self::TrackFileMissing
+            | Self::OriginalMissing
+            | Self::AmbiguousOriginal => None,
         }
     }
 }
@@ -1103,6 +1204,31 @@ fn map_failure(error: FilesystemMutationError) -> LibraryMutationFailure {
         FilesystemMutationError::UploadRenameExhausted => (
             LibraryMutationFailureKind::Conflict,
             "upload_rename_exhausted",
+            false,
+        ),
+        FilesystemMutationError::ConversionUnavailable => (
+            LibraryMutationFailureKind::Invalid,
+            "track_conversion_unavailable",
+            false,
+        ),
+        FilesystemMutationError::ConversionStageMissing => (
+            LibraryMutationFailureKind::NotFound,
+            "conversion_stage_missing",
+            false,
+        ),
+        FilesystemMutationError::TrackFileMissing => (
+            LibraryMutationFailureKind::NotFound,
+            "library_path_not_found",
+            false,
+        ),
+        FilesystemMutationError::OriginalMissing => (
+            LibraryMutationFailureKind::NotFound,
+            "track_original_missing",
+            false,
+        ),
+        FilesystemMutationError::AmbiguousOriginal => (
+            LibraryMutationFailureKind::Conflict,
+            "track_original_ambiguous",
             false,
         ),
     };
@@ -1587,6 +1713,366 @@ mod tests {
             )
             .await?;
         assert!(!root.join(replay_stage.as_str()).exists());
+        Ok(())
+    }
+
+    fn fixture_bytes(extension: &str) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/fixtures/metadata.examples.json"
+        ))?;
+        let encoded = fixture["cases"]
+            .as_array()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case["extension"].as_str() == Some(extension))
+            })
+            .and_then(|case| case["source_base64"].as_str())
+            .ok_or("metadata fixture is missing")?;
+        Ok(STANDARD.decode(encoded)?)
+    }
+
+    struct ConversionFixture {
+        _directory: tempfile::TempDir,
+        library: std::path::PathBuf,
+        originals: std::path::PathBuf,
+        effects: FilesystemLibraryMutations,
+        wav: Vec<u8>,
+        streaming: Vec<u8>,
+    }
+
+    impl ConversionFixture {
+        fn new() -> Result<Self, Box<dyn Error + Send + Sync>> {
+            let directory = tempdir()?;
+            let library = directory.path().join("music");
+            let originals = directory.path().join("originals");
+            std::fs::create_dir_all(library.join("Album"))?;
+            std::fs::create_dir(&originals)?;
+            let wav = fixture_bytes(".wav")?;
+            let streaming = fixture_bytes(".m4a")?;
+            std::fs::write(library.join("Album/song.wav"), &wav)?;
+            let effects = FilesystemLibraryMutations::new(
+                LibraryRoot::open(&library)?,
+                crate::MetadataAdapter::native_only(),
+            )
+            .with_originals(LibraryRoot::open(&originals)?);
+            Ok(Self {
+                _directory: directory,
+                library,
+                originals,
+                effects,
+                wav,
+                streaming,
+            })
+        }
+
+        /// Stages an "encoded" copy; the MP4 fixture stands in for real output.
+        fn stage(&self, folder: &str) -> Result<LibraryPath, Box<dyn Error + Send + Sync>> {
+            let staged = LibraryPath::parse(format!("{folder}/.convert-7.partial"))?;
+            std::fs::write(self.library.join(staged.as_str()), &self.streaming)?;
+            Ok(staged)
+        }
+
+        fn conversion(
+            &self,
+            folder: &str,
+            staged: LibraryPath,
+        ) -> Result<LibraryFileMutation, Box<dyn Error + Send + Sync>> {
+            Ok(LibraryFileMutation::ConvertTrack {
+                track_id: TrackId::new(7)?,
+                source: LibraryPath::parse(format!("{folder}/song.wav"))?,
+                staged,
+                destination: LibraryPath::parse(format!("{folder}/song.m4a"))?,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn converted_tracks_keep_originals_through_every_track_and_folder_change()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fixture = ConversionFixture::new()?;
+        let effects = &fixture.effects;
+        let journal_id = RecoveryJournalId::new();
+        let conversion = fixture.conversion("Album", fixture.stage("Album")?)?;
+        let converted = effects
+            .apply(&journal_id, conversion.clone(), false)
+            .await?;
+        let LibraryFileMutationOutcome::TrackConverted {
+            track, original, ..
+        } = converted
+        else {
+            return Err("conversion returned another outcome".into());
+        };
+        assert_eq!(track.path.as_str(), "Album/song.m4a");
+        assert_eq!(original.extension, "wav");
+        assert_eq!(original.size_bytes, fixture.wav.len() as u64);
+        assert_eq!(
+            std::fs::read(fixture.library.join("Album/song.m4a"))?,
+            fixture.streaming
+        );
+        assert_eq!(
+            std::fs::read(fixture.originals.join("Album/song.wav"))?,
+            fixture.wav
+        );
+        assert!(!fixture.library.join("Album/song.wav").exists());
+        assert!(!fixture.library.join("Album/.convert-7.partial").exists());
+        assert!(matches!(
+            effects.apply(&journal_id, conversion.clone(), true).await?,
+            LibraryFileMutationOutcome::TrackConverted { .. }
+        ));
+        let again = effects
+            .apply(&RecoveryJournalId::new(), conversion, false)
+            .await
+            .err()
+            .ok_or("a second conversion unexpectedly succeeded")?;
+        assert_eq!(again.kind(), LibraryMutationFailureKind::Conflict);
+
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::MoveTrack {
+                    track_id: TrackId::new(7)?,
+                    source: LibraryPath::parse("Album/song.m4a")?,
+                    destination: LibraryPath::parse("Moved/renamed.m4a")?,
+                },
+                false,
+            )
+            .await?;
+        assert!(fixture.originals.join("Moved/renamed.wav").is_file());
+        assert!(!fixture.originals.join("Album/song.wav").exists());
+
+        let mut patch = TrackMetadataPatch::new();
+        patch.insert_text(TrackMetadataField::Title, Some("Both files".to_owned()))?;
+        let edited = effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::UpdateTrackMetadata {
+                    track_id: TrackId::new(7)?,
+                    path: LibraryPath::parse("Moved/renamed.m4a")?,
+                    patch,
+                },
+                false,
+            )
+            .await?;
+        let LibraryFileMutationOutcome::TrackMetadataUpdated {
+            discovered: Some(discovered),
+            original: Some(edited_original),
+            ..
+        } = edited
+        else {
+            return Err("tag edit did not report both files".into());
+        };
+        assert_eq!(discovered.metadata.title, "Both files");
+        assert_eq!(
+            crate::read_audio_metadata(&fixture.originals.join("Moved/renamed.wav"))?.title,
+            "Both files"
+        );
+        assert_eq!(
+            edited_original.size_bytes,
+            std::fs::metadata(fixture.originals.join("Moved/renamed.wav"))?.len()
+        );
+
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::RenameFolder {
+                    source: LibraryPath::parse("Moved")?,
+                    destination: LibraryPath::parse("Archive/Moved")?,
+                },
+                false,
+            )
+            .await?;
+        assert!(
+            fixture
+                .originals
+                .join("Archive/Moved/renamed.wav")
+                .is_file()
+        );
+
+        let restore_id = RecoveryJournalId::new();
+        let restore = LibraryFileMutation::RestoreTrack {
+            track_id: TrackId::new(7)?,
+            path: LibraryPath::parse("Archive/Moved/renamed.m4a")?,
+            destination: LibraryPath::parse("Archive/Moved/renamed.wav")?,
+        };
+        let restored = effects.apply(&restore_id, restore.clone(), false).await?;
+        assert!(matches!(
+            restored,
+            LibraryFileMutationOutcome::TrackRestored { track, .. }
+                if track.path.as_str() == "Archive/Moved/renamed.wav"
+                    && track.metadata.title == "Both files"
+        ));
+        assert!(!fixture.library.join("Archive/Moved/renamed.m4a").exists());
+        assert!(!fixture.originals.join("Archive/Moved/renamed.wav").exists());
+        assert!(matches!(
+            effects.apply(&restore_id, restore.clone(), true).await?,
+            LibraryFileMutationOutcome::TrackRestored { .. }
+        ));
+        let missing = effects
+            .apply(&RecoveryJournalId::new(), restore, false)
+            .await
+            .err()
+            .ok_or("restoring a restored track unexpectedly succeeded")?;
+        assert_eq!(missing.kind(), LibraryMutationFailureKind::NotFound);
+
+        let staged = LibraryPath::parse("Archive/Moved/.convert-7.partial")?;
+        std::fs::write(fixture.library.join(staged.as_str()), &fixture.streaming)?;
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::ConvertTrack {
+                    track_id: TrackId::new(7)?,
+                    source: LibraryPath::parse("Archive/Moved/renamed.wav")?,
+                    staged,
+                    destination: LibraryPath::parse("Archive/Moved/renamed.m4a")?,
+                },
+                false,
+            )
+            .await?;
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::DeleteTrack {
+                    track_id: TrackId::new(7)?,
+                    path: LibraryPath::parse("Archive/Moved/renamed.m4a")?,
+                },
+                false,
+            )
+            .await?;
+        assert!(!fixture.library.join("Archive/Moved/renamed.m4a").exists());
+        assert!(!fixture.originals.join("Archive/Moved/renamed.wav").exists());
+
+        effects
+            .apply(
+                &RecoveryJournalId::new(),
+                LibraryFileMutation::DeleteFolder {
+                    path: LibraryPath::parse("Archive")?,
+                    recursive: true,
+                },
+                false,
+            )
+            .await?;
+        assert!(!fixture.originals.join("Archive").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn cross_root_copies_keep_the_mtime_and_replays_finish_copied_conversions()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fixture = ConversionFixture::new()?;
+        let source = fixture.library.join("Album/song.wav");
+        let original = fixture.originals.join("Album/song.wav");
+        let partial = fixture.originals.join("Album/.song.wav.copy-partial");
+        std::fs::create_dir_all(fixture.originals.join("Album"))?;
+        std::fs::write(&partial, b"stale")?;
+        super::originals::copy_into_place(&source, &original, &partial)?;
+        assert_eq!(std::fs::read(&original)?, fixture.wav);
+        assert!(source.is_file(), "a copy leaves its source for the caller");
+        assert!(!partial.exists());
+        assert_eq!(
+            std::fs::metadata(&original)?.modified()?,
+            std::fs::metadata(&source)?.modified()?
+        );
+
+        // A crash after the copy, before the stage was published or the source removed.
+        let conversion = fixture.conversion("Album", fixture.stage("Album")?)?;
+        let converted = fixture
+            .effects
+            .apply(&RecoveryJournalId::new(), conversion, true)
+            .await?;
+        assert!(matches!(
+            converted,
+            LibraryFileMutationOutcome::TrackConverted { original, .. }
+                if original.size_bytes == fixture.wav.len() as u64
+        ));
+        assert!(!source.exists());
+        assert_eq!(
+            std::fs::read(fixture.library.join("Album/song.m4a"))?,
+            fixture.streaming
+        );
+        assert_eq!(std::fs::read(&original)?, fixture.wav);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn refused_or_interrupted_conversions_leave_the_library_as_it_was()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fixture = ConversionFixture::new()?;
+        let effects = &fixture.effects;
+
+        let missing_stage = effects
+            .apply(
+                &RecoveryJournalId::new(),
+                fixture.conversion("Album", LibraryPath::parse("Album/.convert-7.partial")?)?,
+                false,
+            )
+            .await
+            .err()
+            .ok_or("conversion without a stage unexpectedly succeeded")?;
+        assert_eq!(missing_stage.kind(), LibraryMutationFailureKind::NotFound);
+        assert!(!missing_stage.requires_recovery());
+        assert!(fixture.library.join("Album/song.wav").is_file());
+        assert!(!fixture.originals.join("Album/song.wav").exists());
+
+        std::fs::write(
+            fixture.library.join("Album/song.m4a"),
+            b"someone else's file",
+        )?;
+        let occupied = effects
+            .apply(
+                &RecoveryJournalId::new(),
+                fixture.conversion("Album", fixture.stage("Album")?)?,
+                false,
+            )
+            .await
+            .err()
+            .ok_or("conversion over an existing file unexpectedly succeeded")?;
+        assert_eq!(occupied.kind(), LibraryMutationFailureKind::Conflict);
+        assert!(!occupied.requires_recovery());
+        assert_eq!(
+            std::fs::read(fixture.library.join("Album/song.m4a"))?,
+            b"someone else's file"
+        );
+        std::fs::remove_file(fixture.library.join("Album/song.m4a"))?;
+        std::fs::remove_file(fixture.library.join("Album/.convert-7.partial"))?;
+
+        // A crash after the original was kept, with the stage lost before publishing.
+        std::fs::create_dir_all(fixture.originals.join("Album"))?;
+        std::fs::rename(
+            fixture.library.join("Album/song.wav"),
+            fixture.originals.join("Album/song.wav"),
+        )?;
+        let rolled_back = effects
+            .apply(
+                &RecoveryJournalId::new(),
+                fixture.conversion("Album", LibraryPath::parse("Album/.convert-7.partial")?)?,
+                true,
+            )
+            .await
+            .err()
+            .ok_or("a replay without its stage unexpectedly succeeded")?;
+        assert_eq!(rolled_back.code(), "conversion_stage_missing");
+        assert!(!rolled_back.requires_recovery());
+        assert_eq!(
+            std::fs::read(fixture.library.join("Album/song.wav"))?,
+            fixture.wav
+        );
+        assert!(!fixture.originals.join("Album/song.wav").exists());
+
+        let plain = FilesystemLibraryMutations::new(
+            LibraryRoot::open(&fixture.library)?,
+            crate::MetadataAdapter::native_only(),
+        );
+        let unavailable = plain
+            .apply(
+                &RecoveryJournalId::new(),
+                fixture.conversion("Album", fixture.stage("Album")?)?,
+                false,
+            )
+            .await
+            .err()
+            .ok_or("conversion without originals unexpectedly succeeded")?;
+        assert_eq!(unavailable.code(), "track_conversion_unavailable");
         Ok(())
     }
 }

@@ -804,6 +804,7 @@ mod tests {
                 size_bytes: 10,
                 mtime_unix_seconds: 20,
                 added_at_unix_seconds: added_at,
+                original: None,
             },
             tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         })

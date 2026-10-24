@@ -3834,3 +3834,209 @@ async fn library_status_shows_a_generation_only_after_playback_holds_it()
     spawned.task.await??;
     Ok(())
 }
+
+/// CD-rate stereo noise: heavy enough that a streaming copy is far lighter.
+fn noise_wav(seconds: u32) -> Vec<u8> {
+    const RATE: u32 = 44_100;
+    let data_len = RATE * seconds * 4;
+    let mut wav = Vec::with_capacity(44 + data_len as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&2_u16.to_le_bytes());
+    wav.extend_from_slice(&RATE.to_le_bytes());
+    wav.extend_from_slice(&(RATE * 4).to_le_bytes());
+    wav.extend_from_slice(&4_u16.to_le_bytes());
+    wav.extend_from_slice(&16_u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    let mut state = 0x2545_f491_u32;
+    for _ in 0..data_len / 2 {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        wav.extend_from_slice(&((state >> 16) as u16 / 4).to_le_bytes());
+    }
+    wav
+}
+
+#[tokio::test]
+async fn converted_uploads_stream_light_copies_and_restore_their_originals()
+-> Result<(), Box<dyn Error + Send + Sync>> {
+    let directory = tempdir()?;
+    let wav = noise_wav(3);
+    let mut config = runtime_config(directory.path())?;
+    config.music_originals_dir = Some(directory.path().join("originals"));
+    crate::storage_admin::create_storage_directories(&config)?;
+    let runtime = AppRuntime::start(config).await?;
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime.library_status().status != ReconciliationStatus::Current {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    let (router, cookie) = operator_router(&runtime)
+        .await
+        .map_err(|error| error.to_string())?;
+    let request_json = |method: &str, uri: &str, body: &str| {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", &cookie)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_owned()))
+    };
+    let json = |response: axum::response::Response| async move {
+        let status = response.status();
+        let value: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 4 * 1024 * 1024).await?)?;
+        Ok::<_, Box<dyn Error + Send + Sync>>((status, value))
+    };
+    let finish = |job_id: String| {
+        let router = router.clone();
+        let cookie = cookie.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(60), async {
+                loop {
+                    let response = router
+                        .clone()
+                        .oneshot(
+                            Request::get(format!("/api/jobs/{job_id}"))
+                                .header("cookie", &cookie)
+                                .body(Body::empty())?,
+                        )
+                        .await?;
+                    let job: Value = serde_json::from_slice(
+                        &to_bytes(response.into_body(), 1024 * 1024).await?,
+                    )?;
+                    if !["queued", "running"].contains(&job["status"].as_str().unwrap_or_default())
+                    {
+                        return Ok::<_, Box<dyn Error + Send + Sync>>(job);
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await?
+        }
+    };
+
+    let (content_type, body) = multipart_upload(&[("song.wav", &wav)]);
+    let (status, uploaded) = json(
+        router
+            .clone()
+            .oneshot(
+                Request::post("/api/library/upload?dest=Uploads")
+                    .header("cookie", &cookie)
+                    .header("content-type", &content_type)
+                    .body(Body::from(body))?,
+            )
+            .await?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::CREATED);
+    let track_id = uploaded["saved"][0]["id"]
+        .as_i64()
+        .ok_or("uploaded track id is missing")?;
+    let job_id = uploaded["conversion_job_id"]
+        .as_str()
+        .ok_or("upload did not start a conversion")?
+        .to_owned();
+    let job = finish(job_id).await?;
+    assert_eq!(job["status"], "succeeded", "{job}");
+    assert_eq!(job["result"]["converted"], 1, "{job}");
+
+    let (_, track) = json(
+        router
+            .clone()
+            .oneshot(request_json(
+                "GET",
+                &format!("/api/library/tracks/{track_id}"),
+                "",
+            )?)
+            .await?,
+    )
+    .await?;
+    assert_eq!(track["path"], "Uploads/song.m4a");
+    assert_eq!(track["original_format"], "wav");
+    assert!(track["size_bytes"].as_u64().unwrap_or(u64::MAX) < wav.len() as u64 / 3);
+    let music = directory.path().join("music/Uploads");
+    let originals = directory.path().join("originals/Uploads");
+    assert!(music.join("song.m4a").is_file());
+    assert!(!music.join("song.wav").exists());
+    assert_eq!(std::fs::read(originals.join("song.wav"))?, wav);
+
+    let stream = |query: &'static str| {
+        let router = router.clone();
+        async move {
+            let response = router
+                .oneshot(
+                    Request::get(format!("/api/library/tracks/{track_id}/stream{query}"))
+                        .body(Body::empty())?,
+                )
+                .await?;
+            assert_eq!(response.status(), StatusCode::OK);
+            Ok::<_, Box<dyn Error + Send + Sync>>(
+                to_bytes(response.into_body(), 4 * 1024 * 1024)
+                    .await?
+                    .to_vec(),
+            )
+        }
+    };
+    let light = stream("").await?;
+    assert_eq!(light.get(4..8), Some(&b"ftyp"[..]));
+    assert_eq!(stream("?variant=original").await?, wav);
+
+    let (status, restored) = json(
+        router
+            .clone()
+            .oneshot(request_json(
+                "POST",
+                "/api/library/tracks/bulk-restore",
+                &format!(r#"{{"track_ids":[{track_id}]}}"#),
+            )?)
+            .await?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(restored["restored"][0]["path"], "Uploads/song.wav");
+    assert_eq!(restored["restored"][0]["original_format"], Value::Null);
+    assert_eq!(std::fs::read(music.join("song.wav"))?, wav);
+    assert!(!music.join("song.m4a").exists());
+    assert!(!originals.join("song.wav").exists());
+
+    let (status, started) = json(
+        router
+            .clone()
+            .oneshot(request_json(
+                "POST",
+                "/api/library/convert",
+                &format!(r#"{{"track_ids":[{track_id}]}}"#),
+            )?)
+            .await?,
+    )
+    .await?;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let job = finish(
+        started["id"]
+            .as_str()
+            .ok_or("conversion job id is missing")?
+            .to_owned(),
+    )
+    .await?;
+    assert_eq!(job["result"]["converted"], 1, "{job}");
+
+    let deleted = router
+        .clone()
+        .oneshot(request_json(
+            "DELETE",
+            &format!("/api/library/tracks/{track_id}"),
+            "",
+        )?)
+        .await?;
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert!(!music.join("song.m4a").exists());
+    assert!(!originals.join("song.wav").exists());
+
+    runtime.shutdown().await?;
+    Ok(())
+}

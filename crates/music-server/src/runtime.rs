@@ -43,7 +43,7 @@ use music_application::sfx::SfxCoordinator;
 use music_media::{
     FfmpegTools, FilesystemLibraryDiscovery, FilesystemLibraryMutations,
     FilesystemModeCatalogSource, FilesystemModeMutations, FilesystemSfxEffects, LibraryRoot,
-    MetadataAdapter, SfxRoot,
+    MetadataAdapter, SfxRoot, StreamingEncoder,
 };
 use music_storage::{SqliteStorage, SqliteStorageOptions};
 use tokio::net::TcpListener;
@@ -59,6 +59,7 @@ use crate::cleanup_enrichment::{
     CleanupConnectorConfig, CleanupEnrichmentServices, cleanup_enrichment_handler,
 };
 use crate::config::AppConfig;
+use crate::conversion::LibraryConversionJobHandler;
 use crate::devices::RuntimeDevices;
 use crate::error::RuntimeError;
 use crate::health::{Component, ComponentStatus, HealthRegistry, ReadinessSnapshot};
@@ -98,6 +99,7 @@ pub struct AppRuntime {
     jobs: Arc<JobService>,
     sfx: Arc<RuntimeSfx>,
     library_root: LibraryRoot,
+    originals_root: Option<LibraryRoot>,
     library_metadata: MetadataAdapter,
     media_executor: BlockingMediaExecutor,
 }
@@ -269,8 +271,9 @@ impl AppRuntime {
         });
         health.set_component(Component::Sfx, ComponentStatus::Ready);
         let library_root = LibraryRoot::open(&config.music_dir)?;
-        let library_metadata =
-            MetadataAdapter::with_ffmpeg(FfmpegTools::new(ffmpeg.clone(), ffprobe_executable()));
+        let originals_root = open_originals_root(&config, &library_root)?;
+        let ffmpeg_tools = FfmpegTools::new(ffmpeg.clone(), ffprobe_executable());
+        let library_metadata = MetadataAdapter::with_ffmpeg(ffmpeg_tools.clone());
         let discovery = Arc::new(FilesystemLibraryDiscovery::new(
             library_root.clone(),
             library_metadata.clone(),
@@ -289,10 +292,12 @@ impl AppRuntime {
         })?);
         let cleanup_name_lookup: Arc<dyn CleanupNameLookup> = cleanup_lookup.clone();
         let catalog_sink: Arc<dyn LibraryCatalogSink> = Arc::new(playback.clone());
-        let effects = Arc::new(FilesystemLibraryMutations::new(
-            library_root.clone(),
-            library_metadata.clone(),
-        ));
+        let effects =
+            FilesystemLibraryMutations::new(library_root.clone(), library_metadata.clone());
+        let effects = Arc::new(match &originals_root {
+            Some(originals) => effects.with_originals(originals.clone()),
+            None => effects,
+        });
         let spawned_library =
             start_library_coordinator(mutation_repository, discovery, catalog_sink, effects)
                 .await?;
@@ -359,12 +364,19 @@ impl AppRuntime {
             Arc::new(ContextAnalysisJobHandler::new(
                 Arc::clone(&local_analysis_repository),
                 library_root.clone(),
+                originals_root.clone(),
                 analysis_executor,
                 context_analyzer,
                 voice_analyzer,
                 voice_worker_factory,
             )),
         ];
+        job_handlers.push(Arc::new(LibraryConversionJobHandler::new(
+            Arc::clone(&library_service),
+            library.clone(),
+            library_root.clone(),
+            StreamingEncoder::new(ffmpeg_tools),
+        )));
         job_handlers.push(Arc::new(
             music_application::cleanup_enrichment::ai::CleanupAiJobHandler {
                 cleanup: Arc::clone(&cleanup_service),
@@ -430,6 +442,7 @@ impl AppRuntime {
             jobs,
             sfx,
             library_root,
+            originals_root,
             library_metadata,
             media_executor,
         })
@@ -469,6 +482,8 @@ impl AppRuntime {
                     cleanup_sources: Arc::clone(&self.cleanup_source_service),
                     coordinator: self.library.clone(),
                     root: self.library_root.clone(),
+                    originals: self.originals_root.clone(),
+                    convert_uploads: self.config.music_convert_uploads,
                     metadata: self.library_metadata.clone(),
                     max_upload_files: self.config.max_upload_files,
                     max_upload_file_bytes: self.config.max_upload_file_bytes,
@@ -819,6 +834,30 @@ fn initialize_directories(config: &AppConfig, health: &HealthRegistry) -> Result
         }
     }
     Ok(())
+}
+
+/// Kept originals live outside the library tree, which scans index wholesale.
+fn open_originals_root(
+    config: &AppConfig,
+    library: &LibraryRoot,
+) -> Result<Option<LibraryRoot>, RuntimeError> {
+    let Some(directory) = &config.music_originals_dir else {
+        return Ok(None);
+    };
+    let originals = LibraryRoot::open(directory)?;
+    if originals
+        .canonical_path()
+        .starts_with(library.canonical_path())
+        || library
+            .canonical_path()
+            .starts_with(originals.canonical_path())
+    {
+        return Err(RuntimeError::io(
+            "use MUSIC_ORIGINALS_DIR",
+            io::Error::other("MUSIC_ORIGINALS_DIR and MUSIC_DIR must not contain each other"),
+        ));
+    }
+    Ok(Some(originals))
 }
 
 #[cfg(test)]

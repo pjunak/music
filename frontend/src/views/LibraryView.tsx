@@ -1,8 +1,18 @@
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { confirmDialog } from "@/components/confirmDialog";
 import { IconButton } from "@/components/IconButton";
-import { LightningIcon, MusicNoteIcon, RescanIcon, SearchIcon, SparkleIcon, TagIcon, XIcon } from "@/components/icons";
+import {
+  CompressIcon,
+  LightningIcon,
+  MusicNoteIcon,
+  RescanIcon,
+  SearchIcon,
+  SparkleIcon,
+  TagIcon,
+  XIcon,
+} from "@/components/icons";
 import { libraryApi } from "@/core/api";
 import { toast } from "@/core/toast";
 import { useDebouncedValue } from "@/core/useDebouncedValue";
@@ -10,6 +20,7 @@ import { lazyNamed } from "@/core/lazyNamed";
 import { RouteSpinner } from "@/shell/routeGuards";
 
 import type { Root } from "./library/shared";
+import { followConversion } from "./library/conversion";
 import { MusicWorkspace } from "./library/MusicWorkspace";
 import { SfxBrowser } from "./library/SfxBrowser";
 
@@ -132,6 +143,9 @@ export function LibraryView() {
             Clean up
           </IconButton>
         ) : null}
+        {root === "music" ? (
+          <ConvertLibraryButton onFinished={() => setRefreshKey((k) => k + 1)} />
+        ) : null}
         <RescanButton root={root} onComplete={() => setRefreshKey((k) => k + 1)} />
       </header>
 
@@ -175,6 +189,43 @@ export function LibraryView() {
 }
 
 // --- shared bits ---------------------------------------------------------
+
+function ConvertLibraryButton({ onFinished }: { onFinished: () => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <IconButton
+      label="Convert lossless and high-bitrate tracks to lighter streaming copies"
+      icon={<CompressIcon />}
+      className="library-convert-btn"
+      disabled={busy}
+      onClick={() => {
+        void (async () => {
+          const ok = await confirmDialog({
+            title: "Convert the library for streaming?",
+            body:
+              "Lossless and high-bitrate tracks become 192 kbps AAC copies in the library. " +
+              "Each original is kept in the originals folder and can be restored from the " +
+              "track selection. Lighter files are left as they are.",
+            confirmLabel: "Convert",
+          });
+          if (!ok) return;
+          setBusy(true);
+          try {
+            const job = await libraryApi.convert();
+            toast.info("Converting the library", "This runs in the background.");
+            await followConversion(job.id, onFinished);
+          } catch (e) {
+            toast.error("Conversion did not start", e instanceof Error ? e.message : undefined);
+          } finally {
+            setBusy(false);
+          }
+        })();
+      }}
+    >
+      {busy ? "Converting…" : "Convert"}
+    </IconButton>
+  );
+}
 
 function RescanButton({
   root,

@@ -246,6 +246,7 @@ impl Fixture {
         let handler = ContextAnalysisJobHandler::new(
             self.storage.clone(),
             LibraryRoot::open(self.directory.path().join("music"))?,
+            None,
             AnalysisExecutor::new(1)?,
             self.analyzer.clone(),
             voice.status,

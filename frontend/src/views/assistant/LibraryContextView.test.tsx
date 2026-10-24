@@ -44,6 +44,7 @@ const track: Track = {
   size_bytes: 1000,
   added_at: "2026-08-24T10:00:00Z",
   origin: "",
+  original_format: null,
 };
 
 const secondTrack: Track = {

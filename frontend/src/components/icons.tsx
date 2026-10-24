@@ -314,6 +314,17 @@ export function MoveIcon(props: IconProps) {
   );
 }
 
+export function CompressIcon(props: IconProps) {
+  // Two arrows pressing inward onto a bar — make files lighter.
+  return (
+    <svg {...baseProps} {...props}>
+      <path d="M12 3v6M9 6l3 3 3-3" {...stroke} />
+      <path d="M4 12h16" {...stroke} />
+      <path d="M12 21v-6M9 18l3-3 3 3" {...stroke} />
+    </svg>
+  );
+}
+
 export function ImportIcon(props: IconProps) {
   // Down-into-tray — Upload/Import (was ⬇).
   return (

@@ -5,6 +5,7 @@ export function TrackMetadataDetails({ track }: { track: Track }) {
     track.composer ? `Composer: ${track.composer}` : "",
     track.release_date ? `Released: ${track.release_date}` : "",
     track.original_release_date ? `Original: ${track.original_release_date}` : "",
+    track.original_format ? `Streaming copy of ${track.original_format.toUpperCase()}` : "",
   ].filter(Boolean);
   return details.length ? <span className="track-metadata-details muted small">{details.join(" · ")}</span> : null;
 }

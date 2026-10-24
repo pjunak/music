@@ -91,6 +91,23 @@ impl<Kind> RootedMediaPath<Kind> {
         Self::parse(format!("{}/{descendant}", self.encoded))
     }
 
+    /// The final component's name before its extension; a leading dot is part of the stem.
+    #[must_use]
+    pub fn file_stem(&self) -> &str {
+        let name = self.file_name();
+        match name.rfind('.') {
+            Some(index) if index > 0 => &name[..index],
+            _ => name,
+        }
+    }
+
+    /// Replaces the final component's extension, or appends one when it has none.
+    pub fn with_extension(&self, extension: &str) -> Result<Self, MediaPathError> {
+        let name = format!("{}.{extension}", self.file_stem());
+        self.parent()
+            .map_or_else(|| Self::parse(&name), |parent| parent.join(&name))
+    }
+
     #[must_use]
     pub fn into_string(self) -> String {
         self.encoded
@@ -187,6 +204,18 @@ mod tests {
             "Albums/Björk/Covers/front.jpg"
         );
         assert_eq!(SfxPath::parse("cues/bell.opus")?.file_name(), "bell.opus");
+        assert_eq!(path.file_stem(), "01 - Jóga");
+        assert_eq!(
+            path.with_extension("m4a")?.as_str(),
+            "Albums/Björk/01 - Jóga.m4a"
+        );
+        assert_eq!(
+            LibraryPath::parse("No extension")?
+                .with_extension("m4a")?
+                .as_str(),
+            "No extension.m4a"
+        );
+        assert_eq!(LibraryPath::parse(".hidden")?.file_stem(), ".hidden");
         Ok(())
     }
 

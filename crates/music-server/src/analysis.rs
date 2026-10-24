@@ -37,10 +37,19 @@ impl CancelAnalysisOnDrop {
     }
 }
 
+/// The file a track's audio is analyzed from: a converted track is measured
+/// from its kept original, which also defines its analysis identity.
+#[derive(Debug, Clone)]
+enum AudioSource {
+    Library(music_domain::LibraryPath),
+    Original(music_domain::LibraryPath),
+}
+
 #[derive(Debug)]
 pub(crate) struct ContextAnalysisJobHandler {
     repository: Arc<dyn LocalAnalysisRepository>,
     root: LibraryRoot,
+    originals: Option<LibraryRoot>,
     executor: AnalysisExecutor,
     analyzer: Arc<dyn AudioContextAnalyzer>,
     voice_analyzer: VoiceAnalyzerStatus,
@@ -51,6 +60,7 @@ impl ContextAnalysisJobHandler {
     pub(crate) fn new(
         repository: Arc<dyn LocalAnalysisRepository>,
         root: LibraryRoot,
+        originals: Option<LibraryRoot>,
         executor: AnalysisExecutor,
         analyzer: Arc<dyn AudioContextAnalyzer>,
         voice_analyzer: VoiceAnalyzerStatus,
@@ -59,10 +69,35 @@ impl ContextAnalysisJobHandler {
         Self {
             repository,
             root,
+            originals,
             executor,
             analyzer,
             voice_analyzer,
             voice_worker_factory,
+        }
+    }
+
+    fn audio_source(track: &music_domain::IndexedTrack) -> AudioSource {
+        track.original_path().map_or_else(
+            || AudioSource::Library(track.path.clone()),
+            AudioSource::Original,
+        )
+    }
+
+    fn resolve_audio(
+        &self,
+        source: &AudioSource,
+    ) -> Result<std::path::PathBuf, music_media::RootedPathError> {
+        match source {
+            AudioSource::Library(path) => self.root.resolve_existing(path),
+            AudioSource::Original(path) => match &self.originals {
+                Some(originals) => originals.resolve_existing(path),
+                None => Err(music_media::RootedPathError::Io {
+                    operation: "resolve a kept original without an originals folder",
+                    path: std::path::PathBuf::from(path.as_str()),
+                    source: std::io::Error::from(std::io::ErrorKind::NotFound),
+                }),
+            },
         }
     }
 
@@ -285,7 +320,7 @@ struct ContextRun<'a> {
 
 /// Tracks whose signal analysis must run, and what earlier attempts settled.
 struct SignalPlan {
-    work: Vec<(music_domain::TrackId, music_domain::LibraryPath, String)>,
+    work: Vec<(music_domain::TrackId, AudioSource, String)>,
     completed: usize,
     failed: usize,
     pending_voice: usize,
@@ -302,11 +337,7 @@ struct SignalOutcome {
 /// The audio pass as stored after signal analysis, and the voice work left.
 struct VoicePlan {
     audio: ContextPassProgress,
-    work: Vec<(
-        music_domain::TrackId,
-        music_domain::LibraryPath,
-        ContextState,
-    )>,
+    work: Vec<(music_domain::TrackId, AudioSource, ContextState)>,
     completed: usize,
     failed: usize,
     skipped: usize,
@@ -454,7 +485,11 @@ impl ContextRun<'_> {
                 plan.failed = plan.failed.saturating_add(1);
                 continue;
             }
-            plan.work.push((track.id, track.path.clone(), signature));
+            plan.work.push((
+                track.id,
+                ContextAnalysisJobHandler::audio_source(track),
+                signature,
+            ));
         }
         Ok(plan)
     }
@@ -517,7 +552,7 @@ impl ContextRun<'_> {
         let context = self.context;
         let mut results = stream::iter(work.into_iter().map(
             |(track_id, track_path, signature)| async move {
-                let analysis = match handler.root.resolve_existing(&track_path) {
+                let analysis = match handler.resolve_audio(&track_path) {
                     Ok(path) => handler.analyze_track(context, path).await,
                     Err(_) => Ok(Err(AudioContextError::MissingFile)),
                 };
@@ -630,8 +665,11 @@ impl ContextRun<'_> {
                 audio_completed = audio_completed.saturating_add(1);
                 if self.voice_enabled {
                     if voice_needs_attempt(&parsed, state, self.job_id()) {
-                        plan.work
-                            .push((track.id, track.path.clone(), state.clone()));
+                        plan.work.push((
+                            track.id,
+                            ContextAnalysisJobHandler::audio_source(track),
+                            state.clone(),
+                        ));
                         continue;
                     }
                     match context_voice_stage_status(&parsed) {
@@ -720,7 +758,7 @@ impl ContextRun<'_> {
                 .await
                 .map_err(JobHandlerError::from_execution)?;
             let attempt_started = Instant::now();
-            let analysis = match self.handler.root.resolve_existing(&track_path) {
+            let analysis = match self.handler.resolve_audio(&track_path) {
                 Ok(path) => match worker.as_ref() {
                     Some(worker) => {
                         self.handler

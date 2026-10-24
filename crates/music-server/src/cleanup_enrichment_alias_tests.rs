@@ -231,6 +231,7 @@ mod tests {
             size_bytes: 0,
             mtime_unix_seconds: 0,
             added_at_unix_seconds: 0,
+            original: None,
         };
         assert!(connector.search_metadata(&track).await.is_err());
         assert_eq!(connector.search_metadata(&track).await?.len(), 1);

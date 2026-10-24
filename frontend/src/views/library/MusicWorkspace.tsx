@@ -18,6 +18,7 @@ import type { Track } from "@/core/types";
 import { wsClient } from "@/core/ws";
 
 import { formatDuration, musicAllFolders, basename } from "./shared";
+import { followConversion } from "./conversion";
 import { FolderActions } from "./FolderHeader";
 import { FolderBand } from "./FolderUploadBand";
 
@@ -241,6 +242,38 @@ function SelectionToolbar({
     }
   }
 
+  async function doConvert() {
+    setBusy(true);
+    try {
+      const job = await libraryApi.convert(ids);
+      toast.info(
+        `Converting ${ids.length} track${ids.length === 1 ? "" : "s"}`,
+        "Lossless and high-bitrate files become 192 kbps AAC; originals are kept.",
+      );
+      void followConversion(job.id, onChanged);
+    } catch (e) {
+      toast.error("Conversion did not start", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doRestore() {
+    setBusy(true);
+    try {
+      const r = await libraryApi.bulkRestore(ids);
+      toast.success(
+        `Restored ${r.restored.length} original${r.restored.length === 1 ? "" : "s"}`,
+      );
+      reportSkips(r.skipped);
+      onChanged();
+    } catch (e) {
+      toast.error("Restore failed", e instanceof Error ? e.message : undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doDelete() {
     const ok = await confirmDialog({
       title: "Delete selected tracks?",
@@ -276,6 +309,22 @@ function SelectionToolbar({
         </span>
         <button type="button" disabled={busy} onClick={() => setMoveOpen(true)}>
           Move…
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Convert lossless and high-bitrate tracks to 192 kbps AAC, keeping the originals"
+          onClick={() => void doConvert()}
+        >
+          Convert
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          title="Put the kept originals of converted tracks back in the library"
+          onClick={() => void doRestore()}
+        >
+          Restore originals
         </button>
         <button
           type="button"

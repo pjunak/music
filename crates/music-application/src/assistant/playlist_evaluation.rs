@@ -830,6 +830,7 @@ fn evaluation_track_evidence(
         size_bytes: 1,
         mtime_unix_seconds: fixture.id,
         added_at_unix_seconds: 0,
+        original: None,
     };
     let analyses = Vec::new();
     Ok(AssistantTrackEvidence {

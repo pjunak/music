@@ -347,6 +347,15 @@ export type BulkMoveResult = {
   skipped: BulkActionSkip[];
 };
 
+export type BulkRestoreRequest = {
+  track_ids: number[];
+};
+
+export type BulkRestoreResult = {
+  restored: TrackOut[];
+  skipped: BulkActionSkip[];
+};
+
 export type CleanupEnrichmentRequest = {
   force?: boolean;
   imports?: unknown[];
@@ -781,6 +790,10 @@ export type LibraryContextSummary = {
   passes: LibraryContextPasses;
   stale_tracks: number;
   voice_analyzer: VoiceAnalyzerStatus;
+};
+
+export type LibraryConversionRequest = {
+  track_ids?: number[] | null;
 };
 
 export type LibraryTagPage = {
@@ -1617,6 +1630,7 @@ export type TrackOut = {
   id: number;
   length_s: number;
   origin: string;
+  original_format: string | null;
   original_release_date: string;
   path: string;
   release_date: string;
@@ -1658,6 +1672,7 @@ export type UploadCheckResponse = {
 };
 
 export type UploadResult = {
+  conversion_job_id: string | null;
   destination: string;
   saved: TrackOut[];
   skipped: string[];

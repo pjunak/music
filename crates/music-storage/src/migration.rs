@@ -101,6 +101,11 @@ pub(crate) const MIGRATIONS: &[(i64, &str, &str)] = &[
         "remove legacy device import ledger",
         include_str!("../migrations/0017_remove_legacy_device_imports.sql"),
     ),
+    (
+        18,
+        "kept originals of converted tracks",
+        include_str!("../migrations/0018_track_originals.sql"),
+    ),
 ];
 
 const BACKUP_KIND: &str = "pre-migration";
