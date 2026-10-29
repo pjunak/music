@@ -73,6 +73,14 @@ struct ReaderContext {
     cancellation: CancellationToken,
 }
 
+/// What the writer follows from the playback owner. The handle supplies a
+/// freshly materialized state when only this socket's projection changed.
+struct WriterFeeds {
+    playback: PlaybackActorHandle,
+    publications: watch::Receiver<PlaybackPublication>,
+    events: broadcast::Receiver<DomainEvent>,
+}
+
 struct WebsocketServices {
     playback: PlaybackActorHandle,
     shutdown: CancellationToken,
@@ -181,6 +189,12 @@ async fn websocket_session(
             return;
         }
     };
+    // The handle's receiver has seen only the startup publication. Mark the
+    // latest one seen before taking the snapshot, or the writer would follow
+    // the fresh snapshot with that older publication and its stale clock;
+    // anything published after this point is still delivered.
+    let mut publications = playback.subscribe_state();
+    publications.mark_unchanged();
     let initial = match playback.snapshot().await {
         Ok(publication) => publication,
         Err(_) => {
@@ -189,8 +203,11 @@ async fn websocket_session(
             return;
         }
     };
-    let publications = playback.subscribe_state();
-    let events = playback.subscribe_events();
+    let feeds = WriterFeeds {
+        playback: playback.clone(),
+        publications,
+        events: playback.subscribe_events(),
+    };
     let authorization = SessionAuthorization::from_session(initial_session);
     let (projection_tx, projection_rx) = watch::channel(SessionProjection {
         authenticated: authorization.authenticated(),
@@ -203,8 +220,7 @@ async fn websocket_session(
     let mut writer = tokio::spawn(async move {
         let result = writer_loop(
             sink,
-            publications,
-            events,
+            feeds,
             projection_rx,
             writer_rx,
             initial,
@@ -763,13 +779,17 @@ fn current_unix_seconds() -> Option<UnixSeconds> {
 
 async fn writer_loop(
     mut sink: SplitSink<WebSocket, Message>,
-    mut publications: watch::Receiver<PlaybackPublication>,
-    mut events: broadcast::Receiver<DomainEvent>,
+    feeds: WriterFeeds,
     mut projection: watch::Receiver<SessionProjection>,
     mut commands: mpsc::Receiver<WriterCommand>,
     initial: PlaybackPublication,
     cancellation: CancellationToken,
 ) -> Result<(), ()> {
+    let WriterFeeds {
+        playback,
+        mut publications,
+        mut events,
+    } = feeds;
     let initial_projection = { projection.borrow().clone() };
     send_projected_state(&mut sink, &initial, &initial_projection, true).await?;
     loop {
@@ -794,7 +814,11 @@ async fn writer_loop(
             result = projection.changed() => {
                 if result.is_err() { break; }
                 let session = projection.borrow_and_update().clone();
-                let publication = { publications.borrow().clone() };
+                // The latest publication's positions were materialized when it
+                // was published, possibly a whole track ago. A reconnecting
+                // output treats this push as its catch-up position, so take a
+                // current snapshot instead of resending that stale clock.
+                let publication = playback.snapshot().await.map_err(|_| ())?;
                 send_projected_state(&mut sink, &publication, &session, false).await?;
             }
             event = events.recv() => {

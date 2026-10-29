@@ -286,9 +286,13 @@ channels, builds its own guest/legacy wire projection, and never gives the actor
 handle. Slow or failed sends disconnect only that socket without blocking publication or another
 output.
 
-Latest state may coalesce because clients reconcile complete snapshots. Transient SFX/cue events
-have bounded fan-out and are never replayed late; a receiver that falls behind records diagnostics
-and drops/disconnects according to the fixture-defined policy.
+Latest state may coalesce because clients reconcile complete snapshots, so every push must carry
+the current clock. Outputs use the first state that lists them after a reconnect as their catch-up
+position. A publication's positions are materialized when it is published, so a new socket marks
+the latest publication seen before taking its snapshot instead of resending it, and a push caused
+only by that socket's projection (registration or auth downgrade) takes a fresh actor snapshot.
+Transient SFX/cue events have bounded fan-out and are never replayed late; a receiver that falls
+behind records diagnostics and drops/disconnects according to the fixture-defined policy.
 
 Registration and disconnect are actor commands. Multiple sockets may share one stable client ID;
 disconnecting one socket removes live output membership only after the last sibling connection has

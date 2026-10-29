@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fs;
 use std::io;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Duration;
 
@@ -61,6 +62,18 @@ async fn seed_remembered_output(
         .map_err(|error| -> Box<dyn Error> { error })?;
     storage.close().await;
     Ok(())
+}
+
+async fn connect_with_cookie(
+    address: SocketAddr,
+    cookie: &str,
+) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn Error>> {
+    let mut request = format!("ws://{address}/api/ws").into_client_request()?;
+    request
+        .headers_mut()
+        .insert(COOKIE, HeaderValue::from_str(cookie)?);
+    let (socket, _) = connect_async(request).await?;
+    Ok(socket)
 }
 
 async fn next_protocol_message(
@@ -921,6 +934,120 @@ async fn soundboard_actions_validate_exact_items_and_catalog_updates_prune_loops
     assert!(saw_pruned_loop);
 
     socket.close(None).await?;
+    let _ = shutdown_tx.send(());
+    server.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn reconnecting_output_registration_pushes_the_current_position() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempdir()?;
+    fs::create_dir_all(directory.path().join("music/Album"))?;
+    fs::write(
+        directory.path().join("music/Album/01 - First.mp3"),
+        b"position fixture",
+    )?;
+    let token = "reconnect-position-test-session-token";
+    seed_session(directory.path(), token).await?;
+    let runtime = AppRuntime::start(runtime_config(directory.path())?).await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let status = runtime.library_status();
+            if status.status == ReconciliationStatus::Current {
+                break;
+            }
+            assert_ne!(status.status, ReconciliationStatus::Failed);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await?;
+    let cookie = format!("music_session={token}");
+    let search = runtime
+        .router()?
+        .oneshot(
+            Request::get("/api/library/search?q=&sort=path&order=asc")
+                .header(COOKIE, &cookie)
+                .body(Body::empty())?,
+        )
+        .await?;
+    assert_eq!(search.status(), StatusCode::OK);
+    let search: serde_json::Value =
+        serde_json::from_slice(&to_bytes(search.into_body(), 1024 * 1024).await?)?;
+    let track_id = search["tracks"][0]["id"]
+        .as_i64()
+        .ok_or("track id was missing")?;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let server = tokio::spawn(runtime.run(listener, async move {
+        let _ = shutdown_rx.await;
+        Ok(())
+    }));
+    let register = TungsteniteMessage::Text(
+        serde_json::json!({
+            "type":"register",
+            "name":"Phone",
+            "client_id":"phone",
+            "protocol_version":2
+        })
+        .to_string()
+        .into(),
+    );
+
+    let mut original = connect_with_cookie(address, &cookie).await?;
+    let _ = next_protocol_message(&mut original).await?;
+    original.send(register.clone()).await?;
+    let _ = wait_for_protocol_message(&mut original, "the registered phone", |message| {
+        matches!(message, ServerMessage::StateChanged { state }
+            if state.connected_devices.iter().any(|device| device.client_id == "phone"))
+    })
+    .await?;
+    original
+        .send(TungsteniteMessage::Text(
+            serde_json::json!({"type":"ambient_play_track","track_id":track_id})
+                .to_string()
+                .into(),
+        ))
+        .await?;
+    let _ = wait_for_protocol_message(&mut original, "the playing track", |message| {
+        matches!(message, ServerMessage::StateChanged { state }
+            if state.is_playing && state.ambient.current_track_id == Some(track_id))
+    })
+    .await?;
+
+    // Nothing publishes while the track plays, so the last publication's
+    // position falls behind the clock. A replacement socket for the same
+    // client (the old one not yet noticed as dead) changes no shared state
+    // when it registers. An output treats the first state that lists it after
+    // a reconnect as its catch-up position, so no push may carry that older
+    // clock: not one queued behind the snapshot, nor the registration push.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let mut replacement = connect_with_cookie(address, &cookie).await?;
+    let ServerMessage::StateSnapshot {
+        state: snapshot, ..
+    } = next_protocol_message(&mut replacement).await?
+    else {
+        return Err("the replacement socket did not start with a snapshot".into());
+    };
+    assert!(snapshot.ambient.position_ms >= 400);
+    replacement.send(register).await?;
+    let ServerMessage::StateChanged { state: pushed } =
+        next_protocol_message(&mut replacement).await?
+    else {
+        return Err("the replacement socket's next message was not a state change".into());
+    };
+    assert_eq!(pushed.revision, snapshot.revision);
+    assert!(
+        pushed.ambient.position_ms >= snapshot.ambient.position_ms,
+        "pushed position {} went behind the snapshot's {}",
+        pushed.ambient.position_ms,
+        snapshot.ambient.position_ms
+    );
+
+    original.close(None).await?;
+    replacement.close(None).await?;
     let _ = shutdown_tx.send(());
     server.await??;
     Ok(())
