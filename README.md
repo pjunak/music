@@ -17,8 +17,8 @@ origin. SQLite owns durable state, the filesystem owns media, and YAML owns camp
   a file or a whole album folder; native Rust metadata adapters read its tags, with a
   filename/parent-folder fallback. SQLite keeps a durable materialized index, and a visible,
   retryable reconciliation job refreshes it without blocking startup.
-- **Light streaming copies** — with `MUSIC_ORIGINALS_DIR` set, tracks above 256 kbps (in
-  practice lossless and high-bitrate files) can be converted to 192 kbps AAC in `.m4a`, which every browser, smart
+- **Light streaming copies** — with `MUSIC_ORIGINALS_DIR` set, tracks heavier than 192 kbps
+  (lossless and 224–320 kbps files) can be converted to 192 kbps AAC in `.m4a`, which every browser, smart
   TV, Android device and mpv plays. Uploads convert in the background; **Convert** in the Library
   toolbar or the track selection converts existing tracks. The replaced file is kept at the same
   relative path under `MUSIC_ORIGINALS_DIR`: moves, renames, tag edits and deletes apply to both

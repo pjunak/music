@@ -1534,6 +1534,9 @@ mod tests {
             env::var_os("MUSIC_TEST_FFMPEG").map_or_else(|| PathBuf::from("ffmpeg"), PathBuf::from);
         for (bitrate, expected) in [
             ("320k", StreamingAssessment::Worthwhile),
+            ("256k", StreamingAssessment::Worthwhile),
+            ("224k", StreamingAssessment::Worthwhile),
+            ("192k", StreamingAssessment::AlreadyLight),
             ("128k", StreamingAssessment::AlreadyLight),
         ] {
             // An ID3v2.4 date with slashes, as old FFmpeg-tagged rips carry.
@@ -1562,7 +1565,7 @@ mod tests {
             assert_eq!(read.title, "Slash Date");
             assert!(read.duration > std::time::Duration::from_secs(2));
             assert_eq!(encoder.assess(&mp3)?, expected, "{bitrate}");
-            if expected == StreamingAssessment::Worthwhile {
+            if bitrate == "320k" {
                 let copy = temp.path().join(".slash.partial");
                 encoder.encode(&mp3, &copy)?;
                 let published = temp.path().join("slash.m4a");

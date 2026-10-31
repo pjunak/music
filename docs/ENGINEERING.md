@@ -83,8 +83,9 @@ is selected using [the validation matrix](VALIDATION.md).
 - Library cleanup is propose -> review -> journal -> execute. Detection must
   remain pure and must never mutate files while merely scanning.
 - Conversion needs `MUSIC_ORIGINALS_DIR`, a separate root that neither contains nor
-  sits inside `MUSIC_DIR`. Only sources above 256 kbps (lossless files without a
-  known rate count as above) with natively writable tags convert, to 192 kbps AAC
+  sits inside `MUSIC_DIR`. Only sources above 208 kbps, the 192 kbps streaming rate
+  plus a margin for measured averages (lossless files without a known rate count
+  as above), with natively writable tags convert, to 192 kbps AAC
   in `.m4a` beside the track, and a copy that is not smaller is discarded. The
   `library_conversion` job encodes and verifies tags, cover and duration; the
   coordinator's journaled `convert_track` keeps the replaced file at the same

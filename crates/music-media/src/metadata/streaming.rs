@@ -19,9 +19,10 @@ use super::{
 
 /// Bitrate of every streaming copy; close to transparent for AAC.
 pub const STREAMING_BITRATE_KBPS: u32 = 192;
-/// Sources at or below this rate gain too little from re-encoding, including
-/// lossless files that compress unusually well.
-const CONVERSION_THRESHOLD_KBPS: u32 = 256;
+/// Everything heavier than a streaming copy converts, so the library settles
+/// on one format. The margin keeps a nominal 192 kbps source whose measured
+/// average drifts a little from being re-encoded at the same rate.
+const CONVERSION_THRESHOLD_KBPS: u32 = 208;
 /// Higher source rates only spend the fixed bitrate on inaudible bandwidth.
 const MAX_STREAMING_SAMPLE_RATE: u32 = 48_000;
 /// AAC framing may shift the reported length by a few frames, never more.
