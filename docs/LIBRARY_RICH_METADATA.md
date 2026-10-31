@@ -35,6 +35,11 @@ identifiers before commit; unknown tag frames and audio content retain the exist
 preservation guarantees. Regression fixtures cover all eight writable formats, partial/full
 dates, Unicode credits, unrelated edits and clears.
 
+Reads (scans, the inspector and streaming conversion) skip a malformed frame, such as an ID3
+date written as `2018/05/24`, rather than losing the whole file to the filename fallback; the
+skipped field reads as empty. Tag edits still refuse such files, so an edit never silently
+drops a frame that could not be parsed.
+
 ## Cleanup evidence and review
 
 A confirmed MusicBrainz release supplies the edition date. Its release group's explicit

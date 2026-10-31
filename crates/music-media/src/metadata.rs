@@ -6,7 +6,7 @@ use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use lofty::config::{GlobalOptions, ParseOptions, WriteOptions, apply_global_options};
+use lofty::config::{GlobalOptions, ParseOptions, ParsingMode, WriteOptions, apply_global_options};
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::flac::FlacFile;
 use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst, Mp4File};
@@ -447,7 +447,7 @@ pub fn read_audio_metadata(path: &Path) -> Result<AudioMetadata, MetadataError> 
     if has_extension(path, "m4a") {
         return read_mp4_metadata(path);
     }
-    let tagged_file = read_tagged_file(path)?;
+    let tagged_file = read_tagged_file_leniently(path)?;
     Ok(metadata_from_tagged_file(&tagged_file))
 }
 
@@ -683,7 +683,24 @@ fn copy_new_file(source: &Path, staged: &Path) -> Result<(), MetadataError> {
         })
 }
 
+/// Reads like [`read_tagged_file`], but one malformed frame (such as an ID3
+/// date written as `2018/05/24`) no longer hides the whole file: on a parse
+/// failure lofty retries in relaxed mode, which skips such frames. Only reads
+/// use it, so a tag edit never silently drops a frame it could not parse.
+fn read_tagged_file_leniently(path: &Path) -> Result<TaggedFile, MetadataError> {
+    match read_tagged_file(path) {
+        Err(MetadataError::Parse(_)) => {
+            read_tagged_file_with(path, parse_options().parsing_mode(ParsingMode::Relaxed))
+        }
+        result => result,
+    }
+}
+
 fn read_tagged_file(path: &Path) -> Result<TaggedFile, MetadataError> {
+    read_tagged_file_with(path, parse_options())
+}
+
+fn read_tagged_file_with(path: &Path, options: ParseOptions) -> Result<TaggedFile, MetadataError> {
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
@@ -698,7 +715,7 @@ fn read_tagged_file(path: &Path) -> Result<TaggedFile, MetadataError> {
     configure_lofty();
     Probe::open(path)
         .map_err(|error| MetadataError::Parse(error.to_string()))?
-        .options(parse_options())
+        .options(options)
         .guess_file_type()
         .map_err(|source| MetadataError::Io {
             action: "probe audio metadata format",
@@ -1502,6 +1519,57 @@ mod tests {
         assert_eq!(encoder.assess(&bare)?, StreamingAssessment::Worthwhile);
         let bare_copy = temp.path().join(".bare.partial");
         encoder.encode(&bare, &bare_copy)?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_malformed_frame_does_not_hide_an_mp3_from_reads_or_conversion()
+    -> Result<(), Box<dyn Error>> {
+        use super::{StreamingAssessment, StreamingEncoder};
+
+        let tools = test_ffmpeg_tools();
+        let encoder = StreamingEncoder::new(tools);
+        let temp = tempfile::tempdir()?;
+        let ffmpeg =
+            env::var_os("MUSIC_TEST_FFMPEG").map_or_else(|| PathBuf::from("ffmpeg"), PathBuf::from);
+        for (bitrate, expected) in [
+            ("320k", StreamingAssessment::Worthwhile),
+            ("128k", StreamingAssessment::AlreadyLight),
+        ] {
+            // An ID3v2.4 date with slashes, as old FFmpeg-tagged rips carry.
+            let mp3 = temp.path().join(format!("slash-{bitrate}.mp3"));
+            let generated = std::process::Command::new(&ffmpeg)
+                .args([
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                ])
+                .args(["-i", "anoisesrc=duration=3:amplitude=0.4", "-ac", "2"])
+                .args(["-c:a", "libmp3lame", "-b:a", bitrate, "-id3v2_version", "4"])
+                .args([
+                    "-metadata",
+                    "title=Slash Date",
+                    "-metadata",
+                    "date=2018/05/24",
+                ])
+                .arg(&mp3)
+                .status()?;
+            assert!(generated.success());
+            let read = read_audio_metadata(&mp3)?;
+            assert_eq!(read.title, "Slash Date");
+            assert!(read.duration > std::time::Duration::from_secs(2));
+            assert_eq!(encoder.assess(&mp3)?, expected, "{bitrate}");
+            if expected == StreamingAssessment::Worthwhile {
+                let copy = temp.path().join(".slash.partial");
+                encoder.encode(&mp3, &copy)?;
+                let published = temp.path().join("slash.m4a");
+                fs::copy(&copy, &published)?;
+                assert_eq!(read_audio_metadata(&published)?.title, "Slash Date");
+            }
+        }
         Ok(())
     }
 

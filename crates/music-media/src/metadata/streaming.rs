@@ -14,7 +14,7 @@ use super::ffmpeg::{AacEncoding, encode_aac};
 use super::{
     AudioMetadata, FfmpegTools, MetadataAdapter, MetadataError, MetadataWriteCapability, TagField,
     TagPatch, TagValue, apply_mp4_patch, configure_lofty, metadata_write_capability,
-    open_media_reader, parse_options, read_mp4_metadata, read_tagged_file, write_options,
+    open_media_reader, parse_options, read_mp4_metadata, read_tagged_file_leniently, write_options,
 };
 
 /// Bitrate of every streaming copy; close to transparent for AAC.
@@ -58,7 +58,7 @@ impl StreamingEncoder {
         if metadata_write_capability(source) != MetadataWriteCapability::Native {
             return Ok(StreamingAssessment::Unsupported);
         }
-        let file = read_tagged_file(source)?;
+        let file = read_tagged_file_leniently(source)?;
         let properties = file.properties();
         let lossless = matches!(
             file.file_type(),
@@ -91,7 +91,7 @@ impl StreamingEncoder {
 
     fn encode_new(&self, source: &Path, target: &Path) -> Result<(), MetadataError> {
         let expected = self.metadata.read(source)?;
-        let file = read_tagged_file(source)?;
+        let file = read_tagged_file_leniently(source)?;
         let properties = file.properties();
         encode_aac(
             source,
