@@ -250,6 +250,31 @@
   background: var(--ok-soft);
   border-color: var(--ok);
 }
+/* Authed Speakers pill: green + ring only while THIS device is a live output,
+ * so "is this tab playing?" reads at a glance (also on mobile, where the
+ * label is hidden). */
+.output-toggle-here {
+  box-shadow: 0 0 0 2px var(--ok-soft);
+}
+/* Audio plays on another device — neutral but brighter than OFF; the label
+ * names the target. */
+.output-toggle-elsewhere {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--muted-strong);
+}
+.output-toggle-elsewhere:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+/* "· here" / "· Living Room TV" — truncate long device names. */
+.output-toggle-target {
+  display: inline-block;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
 /* Armed state: a click while audio output is ON has primed the toggle.
  * Flip to danger-red so the operator knows the next click will silence
  * them. The 2-second auto-reset timer ticks down via a CSS animation so

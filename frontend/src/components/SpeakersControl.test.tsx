@@ -292,6 +292,46 @@ describe("SpeakersControl", () => {
     expect(screen.queryByText(/\(this\)/)).toBeNull();
   });
 
+  it("shows a green 'here' pill only while this device is an output", () => {
+    seedAuthed({ active: true });
+    renderControl();
+    const pill = screen.getByRole("button", { name: "Speakers · here" });
+    expect(pill).toHaveClass("output-toggle-here");
+  });
+
+  it("names the remote output and stays neutral when this device is silent", () => {
+    seedAuthed();
+    usePlayerStore.setState((current) => ({
+      state: current.state
+        ? {
+            ...current.state,
+            active_output_device_ids: ["tv-1"],
+            connected_devices: [
+              ...current.state.connected_devices,
+              {
+                device_id: "tv-1",
+                client_id: "tv-1",
+                name: "Living Room TV",
+                is_output: true,
+              },
+            ],
+          }
+        : null,
+    }));
+    renderControl();
+    const pill = screen.getByRole("button", { name: "Speakers · Living Room TV" });
+    expect(pill).toHaveClass("output-toggle-elsewhere");
+    expect(pill).not.toHaveClass("output-toggle-on");
+  });
+
+  it("frames this device's row when it is a live output", async () => {
+    seedAuthed({ active: true });
+    renderControl();
+    await userEvent.click(screen.getByRole("button", { name: /speakers/i }));
+    const row = screen.getByRole("radio", { name: "DM output" }).closest(".speaker-row");
+    expect(row).toHaveClass("is-this", "on");
+  });
+
   it("gives guests a local-only toggle, no popover", () => {
     useAuthStore.setState({ status: "anonymous", user: null });
     useUiStore.setState({ clientId: CID, forceLocalPlayback: false });

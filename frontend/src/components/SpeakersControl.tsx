@@ -24,8 +24,10 @@ const EMPTY_VOLUMES: Record<string, number> = {};
  *   - Connecting (no snapshot yet) → a muted pill.
  *   - Guest → a local-only on/off (the server rejects output changes from guest
  *     sockets) via `forceLocalPlayback`; no multi-device popover.
- *   - Authed → a pill showing how many speakers are on. With exactly one active
- *     output, its volume is exposed beside the pill. The popover lists every
+ *   - Authed → a pill that is green only while this device is a live output
+ *     ("Speakers · here"); when audio plays elsewhere it stays neutral and
+ *     names the target. With exactly one active output, its volume is exposed
+ *     beside the pill. The popover lists every
  *     connected device: a single choice (plus "No speaker") when the active
  *     mode plays through one output, or checkboxes when it allows several. A
  *     "default" badge marks devices saved as output-by-default (Settings →
@@ -116,6 +118,13 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
     singleOutputId === null
       ? null
       : devices.find((device) => device.device_id === singleOutputId) ?? null;
+  const playingHere = activeIds.includes(deviceId);
+  const otherActiveCount = activeIds.length - (playingHere ? 1 : 0);
+  const pill = speakersPill(
+    playingHere,
+    otherActiveCount,
+    singleOutput === null ? null : deviceDisplayName(singleOutput.name),
+  );
 
   function volumeFor(id: string): number {
     return deviceVolumes[id] ?? defaultDeviceVolume;
@@ -186,15 +195,21 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
       ) : null}
       <button
         type="button"
-        className={`output-toggle ${activeIds.length > 0 ? "output-toggle-on" : "output-toggle-off"}`}
+        className={`output-toggle ${pill.className}`}
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Choose which speakers play and balance their volumes"
+        title={`${pill.title} Choose which speakers play and balance their volumes.`}
       >
         <VolumeIcon className="output-toggle-icon" />
         <span className="output-toggle-label">
-          {activeIds.length === 0 ? "Speakers" : `Speakers · ${activeIds.length}`}
+          Speakers
+          {pill.detail === null ? null : (
+            <>
+              {" "}
+              <span className="output-toggle-target">· {pill.detail}</span>
+            </>
+          )}
         </span>
       </button>
       {open ? (
@@ -259,6 +274,39 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   );
 }
 
+/** Footer pill state. Green is kept for "audio comes out of this tab", so an
+ *  output on another device reads differently at a glance and names where the
+ *  sound is going instead. */
+function speakersPill(
+  playingHere: boolean,
+  otherActiveCount: number,
+  soleOutputName: string | null,
+): { className: string; detail: string | null; title: string } {
+  if (playingHere) {
+    return {
+      className: "output-toggle-on output-toggle-here",
+      detail: otherActiveCount === 0 ? "here" : `here +${otherActiveCount}`,
+      title:
+        otherActiveCount === 0
+          ? "This device is playing."
+          : `This device and ${otherActiveCount} other speaker(s) are playing.`,
+    };
+  }
+  if (otherActiveCount > 0) {
+    const where = soleOutputName ?? `${otherActiveCount} speakers`;
+    return {
+      className: "output-toggle-elsewhere",
+      detail: where,
+      title: `Playing on ${where}, not on this device.`,
+    };
+  }
+  return {
+    className: "output-toggle-off",
+    detail: null,
+    title: "No speaker is playing.",
+  };
+}
+
 function SpeakerRow({
   rawName,
   isThis = false,
@@ -272,7 +320,8 @@ function SpeakerRow({
 }: {
   /** Source device name — drives both the icon and the (trimmed) label. */
   rawName: string;
-  /** The operator's own device — gets a subtle frame instead of "(this)" text. */
+  /** The operator's own device — framed instead of "(this)" text; the frame
+   *  turns green while this device is a live output. */
   isThis?: boolean;
   /** Radio group shared by every row when the active mode plays through one
    *  output; `null` when several may play together (checkboxes). */

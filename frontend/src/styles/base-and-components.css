@@ -2078,11 +2078,19 @@ kbd,
 .speaker-row.on {
   background: var(--accent-soft);
 }
-/* "This device" marker — a subtle neutral frame + stronger icon/name instead
- *  of the old "(this)" text. Visible at a glance, not intrusive, and it
- *  doesn't borrow the reserved accent colours. */
+/* "This device" marker — a neutral frame + stronger icon/name instead of the
+ *  old "(this)" text. */
 .speaker-row.is-this {
   box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+/* This device is a live output — the same green as the footer pill, so the
+ *  row reads apart from other active (blue) speakers at a glance. */
+.speaker-row.is-this.on {
+  background: var(--ok-soft);
+  box-shadow: inset 0 0 0 2px var(--ok);
+}
+.speaker-row.is-this.on .speaker-row-icon {
+  color: var(--ok);
 }
 .speaker-row-icon {
   font-size: 1.6rem;
