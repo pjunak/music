@@ -256,16 +256,17 @@
 .output-toggle-here {
   box-shadow: 0 0 0 2px var(--ok-soft);
 }
-/* Audio plays on another device — neutral but brighter than OFF; the label
- * names the target. */
+/* Audio plays on another device — blue, the live-playback accent the popover
+ * also uses for active speakers; grey stays "no speaker". The label names the
+ * target. */
 .output-toggle-elsewhere {
-  background: var(--surface-2);
-  border-color: var(--border-strong);
-  color: var(--muted-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
 }
 .output-toggle-elsewhere:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--fg);
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
 }
 /* "· here" / "· Living Room TV" — truncate long device names. */
 .output-toggle-target {

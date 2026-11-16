@@ -25,8 +25,8 @@ const EMPTY_VOLUMES: Record<string, number> = {};
  *   - Guest → a local-only on/off (the server rejects output changes from guest
  *     sockets) via `forceLocalPlayback`; no multi-device popover.
  *   - Authed → a pill that is green only while this device is a live output
- *     ("Speakers · here"); when audio plays elsewhere it stays neutral and
- *     names the target. With exactly one active output, its volume is exposed
+ *     ("Speakers · here"); when audio plays elsewhere it turns blue and names
+ *     the target; grey means no speaker. With exactly one active output, its volume is exposed
  *     beside the pill. The popover lists every
  *     connected device: a single choice (plus "No speaker") when the active
  *     mode plays through one output, or checkboxes when it allows several. A
@@ -274,9 +274,8 @@ function AuthedSpeakers({ deviceId }: { deviceId: string }) {
   );
 }
 
-/** Footer pill state. Green is kept for "audio comes out of this tab", so an
- *  output on another device reads differently at a glance and names where the
- *  sound is going instead. */
+/** Footer pill state: green = audio comes out of this tab, blue = another
+ *  device plays (named in the label), grey = no speaker. */
 function speakersPill(
   playingHere: boolean,
   otherActiveCount: number,

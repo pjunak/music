@@ -299,7 +299,7 @@ describe("SpeakersControl", () => {
     expect(pill).toHaveClass("output-toggle-here");
   });
 
-  it("names the remote output and stays neutral when this device is silent", () => {
+  it("names the remote output in blue, not green, when this device is silent", () => {
     seedAuthed();
     usePlayerStore.setState((current) => ({
       state: current.state
