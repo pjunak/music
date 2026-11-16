@@ -60,6 +60,11 @@ and [interpretation limits](docs/LIBRARY_METADATA_PILOT.md#when-an-http-error-ha
   `frontend/src/core/playbackEngine.ts`. Preserve the low-latency `ended` → skip
   path and its `ADVANCE_DEBOUNCE_MS` guard.
 
+- **Drop the RUSTSEC-2026-0459 exception.** When a sqlx release allows
+  `libsqlite3-sys` >= 0.39 (sqlx `main` already does), update sqlx, run
+  `cargo update -p libsqlite3-sys` in the workspace and `fuzz/`, and remove the
+  exception from `deny.toml` and `.cargo/audit.toml`.
+
 - **Pin container bases and CI actions by digest** if supply-chain
   reproducibility becomes more important than automatic patch updates.
 - **Provider queue fairness.** If quick drafts wait unacceptably behind bulk work,

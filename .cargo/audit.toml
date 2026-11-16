@@ -1,8 +1,13 @@
 # Lofty 0.25.2 uses `paste` only while compiling its macro expansions. The
 # advisory records that the finished crate is archived; it reports no
 # vulnerability or unsoundness. Remove this exception when Lofty replaces it.
+#
+# RUSTSEC-2026-0459: bundled SQLite < 3.54 can return stale memory for a crafted
+# database/-wal pair. Music opens only its own app.db and operator-restored
+# backups. sqlx-sqlite 0.9.0 (newest release) caps libsqlite3-sys below 0.38;
+# remove this exception when a sqlx release allows the fixed >= 0.39.
 [advisories]
-ignore = ["RUSTSEC-2024-0436"]
+ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2026-0459"]
 
 [output]
 deny = ["warnings"]
